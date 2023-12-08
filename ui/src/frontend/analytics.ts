@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {getCurrentChannel} from '../common/channels';
-import {VERSION} from '../gen/perfetto_version';
+// import {getCurrentChannel} from '../common/channels';
+// import {VERSION} from '../gen/perfetto_version';
 
 import {globals} from './globals';
-import {Router} from './router';
+// import {Router} from './router';
 
 type TraceCategories = 'Trace Actions'|'Record Trace'|'User Actions';
-const ANALYTICS_ID = 'G-BD89KT2P3C';
+// const ANALYTICS_ID = 'G-BD89KT2P3C';
 const PAGE_TITLE = 'no-page-title';
 
 // Get the referrer from either:
 // - If present: the referrer argument if present
 // - document.referrer
+/*
 function getReferrer(): string {
   const route = Router.parseUrl(window.location.href);
   const referrer = route.args.referrer;
@@ -33,7 +34,7 @@ function getReferrer(): string {
   } else {
     return document.referrer.split('?')[0];
   }
-}
+} */
 
 export function initAnalytics() {
   // Only initialize logging on the official site and on localhost (to catch
@@ -74,9 +75,10 @@ export class NullAnalytics implements Analytics {
 }
 
 class AnalyticsImpl implements Analytics {
-  private initialized_ = false;
+  private initialized_ = true;
 
-  constructor() {
+  constructor() {}
+  /* _unused() {
     // The code below is taken from the official Google Analytics docs [1] and
     // adapted to TypeScript. We have it here rather than as an inline script
     // in index.html (as suggested by GA's docs) because inline scripts don't
@@ -93,13 +95,15 @@ class AnalyticsImpl implements Analytics {
     }
     gtagGlobals.gtag = gtagFunction;
     gtagGlobals.gtag('js', new Date());
-  }
+  } */
 
   // This is callled only after the script that sets isInternalUser loads.
   // It is fine to call updatePath() and log*() functions before initialize().
   // The gtag() function internally enqueues all requests into |dataLayer|.
   initialize() {
     if (this.initialized_) return;
+  }
+  /*
     this.initialized_ = true;
     const script = document.createElement('script');
     script.src = 'https://www.googletagmanager.com/gtag/js?id=' + ANALYTICS_ID;
@@ -124,18 +128,21 @@ class AnalyticsImpl implements Analytics {
       perfetto_channel: getCurrentChannel(),
     });
     this.updatePath(route);
-  }
+  } */
 
   updatePath(path: string) {
+    return;
     gtagGlobals.gtag(
         'event', 'page_view', {page_path: path, page_title: PAGE_TITLE});
   }
 
   logEvent(category: TraceCategories|null, event: string) {
+    return;
     gtagGlobals.gtag('event', event, {event_category: category});
   }
 
   logError(description: string, fatal = true) {
+    return;
     gtagGlobals.gtag('event', 'exception', {description, fatal});
   }
 
