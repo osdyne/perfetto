@@ -129,11 +129,11 @@ const SECTIONS: Section[] = [
     expanded: true,
     items: [
       {t: 'Open trace file', a: popupFileSelectionDialog, i: 'folder_open'},
-      {
-        t: 'Open with legacy UI',
-        a: popupFileSelectionDialogOldUI,
-        i: 'filter_none',
-      },
+      // {
+      //   t: 'Open with legacy UI',
+      //   a: popupFileSelectionDialogOldUI,
+      //   i: 'filter_none',
+      // },
       {t: 'Record new trace', a: navigateRecord, i: 'fiber_smart_record'},
       {
         t: 'Widgets',
@@ -190,13 +190,13 @@ const SECTIONS: Section[] = [
     expanded: true,
     hideIfNoTraceLoaded: true,
     items: [
-      {
-        t: 'Switch to legacy UI',
-        a: openCurrentTraceWithOldUI,
-        i: 'filter_none',
-        isPending: () => globals.getConversionJobStatus('open_in_legacy') ===
-            ConversionJobStatus.InProgress,
-      },
+      // {
+      //   t: 'Switch to legacy UI',
+      //   a: openCurrentTraceWithOldUI,
+      //   i: 'filter_none',
+      //   isPending: () => globals.getConversionJobStatus('open_in_legacy') ===
+      //       ConversionJobStatus.InProgress,
+      // },
       {
         t: 'Convert to .json',
         a: convertTraceToJson,
@@ -224,6 +224,11 @@ const SECTIONS: Section[] = [
     expanded: true,
     summary: 'Open an example trace',
     items: [
+      {
+        t: 'Open Pagani json example',
+        a: openTraceUrl(window.origin + '/traces/pa3.json'),
+        i: 'description',
+      },
       {
         t: 'Open Android example',
         a: openTraceUrl(EXAMPLE_ANDROID_TRACE_URL),
