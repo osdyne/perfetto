@@ -251,7 +251,7 @@ class Globals {
   private _frontendLocalState?: FrontendLocalState = undefined;
   private _serviceWorkerController?: ServiceWorkerController = undefined;
   private _logging?: Analytics = undefined;
-  private _isInternalUser: boolean|undefined = undefined;
+  private _isInternalUser: boolean|undefined = false;
 
   // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
   private _trackDataStore?: TrackDataStore = undefined;

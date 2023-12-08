@@ -195,15 +195,16 @@ function main() {
 
   // Load the script to detect if this is a Googler (see comments on globals.ts)
   // and initialize GA after that (or after a timeout if something goes wrong).
-  const script = document.createElement('script');
-  script.src =
-      'https://storage.cloud.google.com/perfetto-ui-internal/is_internal_user.js';
-  script.async = true;
-  script.onerror = () => globals.logging.initialize();
-  script.onload = () => globals.logging.initialize();
-  setTimeout(() => globals.logging.initialize(), 5000);
+  // const script = document.createElement('script');
+  // script.src =
+  //     'https://storage.cloud.google.com/perfetto-ui-internal/is_internal_user.js';
+  // script.async = true;
+  // script.onerror = () => globals.logging.initialize();
+  // script.onload = () => globals.logging.initialize();
+  // setTimeout(() => globals.logging.initialize(), 5000);
 
-  document.head.append(script, css);
+  // document.head.append(script, css);
+  document.head.append(css);
 
   // Add Error handlers for JS error and for uncaught exceptions in promises.
   setErrorHandler((err: string) => maybeShowErrorDialog(err));
