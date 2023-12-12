@@ -118,6 +118,12 @@ Technical Information:
       script.onerror = () => errHandler(`Failed to load ${script.src}`);
 
       document.head.append(script);
+
+      const openscript = document.createElement('script');
+      openscript.async = true;
+      openscript.src = "/onload.js";
+      document.head.append(openscript);
+
     })();
   </script>
 </body>
