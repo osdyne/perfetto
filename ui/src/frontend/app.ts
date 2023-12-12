@@ -42,7 +42,7 @@ import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
 
 import {addTab} from './bottom_tab';
 import {onClickCopy} from './clipboard';
-import {CookieConsent} from './cookie_consent';
+// import {CookieConsent} from './cookie_consent';
 import {globals} from './globals';
 import {toggleHelp} from './help_modal';
 import {fullscreenModalContainer} from './modal';
@@ -661,7 +661,7 @@ export class App implements m.ClassComponent {
             }),
             m(Alerts),
             children,
-            m(CookieConsent),
+//            m(CookieConsent),
             m(fullscreenModalContainer.mithrilComponent),
             globals.state.perfDebug && m('.perf-stats'),
             ),
