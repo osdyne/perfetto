@@ -24,6 +24,7 @@ import {SliceRect} from '../public';
 import {CROP_INCOMPLETE_SLICE_FLAG} from './base_slice_track';
 import {checkerboardExcept} from './checkerboard';
 import {globals} from './globals';
+import {PanelSize} from './panel';
 
 export const SLICE_TRACK_KIND = 'ChromeSliceTrack';
 const SLICE_HEIGHT = 18;
@@ -76,21 +77,20 @@ export abstract class SliceTrackLEGACY extends TrackHelperLEGACY<SliceData> {
     return '12px Roboto Condensed';
   }
 
-  renderCanvas(ctx: CanvasRenderingContext2D): void {
+  renderCanvas(ctx: CanvasRenderingContext2D, size: PanelSize): void {
     // TODO: fonts and colors should come from the CSS and not hardcoded here.
     const data = this.data;
     if (data === undefined) return;  // Can't possibly draw anything.
 
-    const {visibleTimeSpan, visibleWindowTime, visibleTimeScale, windowSpan} =
-        globals.frontendLocalState;
+    const {visibleTimeSpan, visibleTimeScale} = globals.timeline;
 
     // If the cached trace slices don't fully cover the visible time range,
     // show a gray rectangle with a "Loading..." label.
     checkerboardExcept(
         ctx,
         this.getHeight(),
-        visibleTimeScale.hpTimeToPx(visibleWindowTime.start),
-        visibleTimeScale.hpTimeToPx(visibleWindowTime.end),
+        0,
+        size.width,
         visibleTimeScale.timeToPx(data.start),
         visibleTimeScale.timeToPx(data.end),
     );
@@ -125,7 +125,7 @@ export abstract class SliceTrackLEGACY extends TrackHelperLEGACY<SliceData> {
         continue;
       }
 
-      const pxEnd = windowSpan.end;
+      const pxEnd = size.width;
       const left = Math.max(visibleTimeScale.timeToPx(tStart), 0);
       const right = Math.min(visibleTimeScale.timeToPx(tEnd), pxEnd);
 
@@ -262,7 +262,7 @@ export abstract class SliceTrackLEGACY extends TrackHelperLEGACY<SliceData> {
     if (data === undefined) return;
     const {
       visibleTimeScale: timeScale,
-    } = globals.frontendLocalState;
+    } = globals.timeline;
     if (y < TRACK_PADDING) return;
     const instantWidthTime = timeScale.pxDeltaToDuration(HALF_CHEVRON_WIDTH_PX);
     const t = timeScale.pxToHpTime(x);
@@ -293,7 +293,7 @@ export abstract class SliceTrackLEGACY extends TrackHelperLEGACY<SliceData> {
   }
 
   getEndTimeIfInComplete(start: time): time {
-    const {visibleTimeScale, visibleWindowTime} = globals.frontendLocalState;
+    const {visibleTimeScale, visibleWindowTime} = globals.timeline;
 
     let end = visibleWindowTime.end.toTime('ceil');
     if (CROP_INCOMPLETE_SLICE_FLAG.get()) {
@@ -349,7 +349,7 @@ export abstract class SliceTrackLEGACY extends TrackHelperLEGACY<SliceData> {
       windowSpan,
       visibleTimeScale,
       visibleTimeSpan,
-    } = globals.frontendLocalState;
+    } = globals.timeline;
 
     const pxEnd = windowSpan.end;
     const left = Math.max(visibleTimeScale.timeToPx(tStart), 0);
