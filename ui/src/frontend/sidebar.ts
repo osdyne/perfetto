@@ -225,11 +225,6 @@ const SECTIONS: Section[] = [
     summary: 'Open an example trace',
     items: [
       {
-        t: 'Open Pagani json example',
-        a: openTraceUrl(window.origin + '/traces/pa3.json'),
-        i: 'description',
-      },
-      {
         t: 'Open Android example',
         a: openTraceUrl(EXAMPLE_ANDROID_TRACE_URL),
         i: 'description',
