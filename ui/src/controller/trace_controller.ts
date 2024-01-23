@@ -51,7 +51,6 @@ import {
   QuantizedLoad,
   ThreadDesc,
 } from '../frontend/globals';
-import {showModal} from '../frontend/modal';
 import {
   clearOverviewData,
   publishFtraceCounters,
@@ -76,6 +75,7 @@ import {
   resetEngineWorker,
   WasmEngineProxy,
 } from '../trace_processor/wasm_engine_proxy';
+import {showModal} from '../widgets/modal';
 
 import {
   CounterAggregationController,
@@ -511,7 +511,8 @@ export class TraceController extends Controller<States> {
 
     await defineMaxLayoutDepthSqlFunction(engine);
 
-    pluginManager.onTraceLoad(engine);
+    this.updateStatus('Loading plugins');
+    await pluginManager.onTraceLoad(engine);
 
     {
       // When we reload from a permalink don't create extra tracks:
@@ -586,18 +587,28 @@ export class TraceController extends Controller<States> {
         }
       }
 
+      // The max() is so the query returns NULL if the tz info doesn't exist.
+      const queryTz = `select max(int_value) as tzOffMin from metadata
+          where name = 'timezone_off_mins'`;
+      const resTz = await assertExists(this.engine).query(queryTz);
+      const tzOffMin = resTz.firstRow({tzOffMin: NUM_NULL}).tzOffMin ?? 0;
+
       // This is the offset between the unix epoch and ts in the ts domain.
       // I.e. the value of ts at the time of the unix epoch - usually some large
       // negative value.
       const realtimeOffset = Time.sub(snapshot.ts, snapshot.clockValue);
 
       // Find the previous closest midnight from the trace start time.
-      const utcOffset = Time.quantWholeDaysUTC(
+      const utcOffset = Time.getLatestMidnight(
           globals.state.traceTime.start,
           realtimeOffset,
       );
 
-      publishRealtimeOffset(realtimeOffset, utcOffset);
+      const traceTzOffset = Time.getLatestMidnight(
+          globals.state.traceTime.start,
+          Time.sub(realtimeOffset, Time.fromSeconds(tzOffMin * 60)));
+
+      publishRealtimeOffset(realtimeOffset, utcOffset, traceTzOffset);
     }
 
     globals.dispatch(Actions.sortThreadTracks({}));

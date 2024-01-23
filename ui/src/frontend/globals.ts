@@ -282,6 +282,7 @@ class Globals {
   private _cmdManager?: CommandManager = undefined;
   private _realtimeOffset = Time.ZERO;
   private _utcOffset = Time.ZERO;
+  private _traceTzOffset = Time.ZERO;
   private _openQueryHandler?: OpenQueryHandler;
 
   scrollToTrackKey?: string|number;
@@ -323,7 +324,9 @@ class Globals {
 
     this._serviceWorkerController = new ServiceWorkerController();
     this._testing =
+        /* eslint-disable @typescript-eslint/strict-boolean-expressions */
         self.location && self.location.search.indexOf('testing=1') >= 0;
+    /* eslint-enable */
     this._logging = initAnalytics();
 
     // TODO(hjd): Unify trackDataStore, queryResults, overviewStore, threads.
@@ -736,12 +739,7 @@ class Globals {
   // How many pixels to use for one quanta of horizontal resolution
   get quantPx(): number {
     const quantPx = (self as {} as {quantPx: number | undefined}).quantPx;
-    if (quantPx) {
-      return quantPx;
-    } else {
-      // Default to 1px per quanta if not defined
-      return 1;
-    }
+    return quantPx ?? 1;
   }
 
   get commandManager(): CommandManager {
@@ -770,6 +768,16 @@ class Globals {
     this._utcOffset = offset;
   }
 
+  // Trace TZ is like UTC but keeps into account also the timezone_off_mins
+  // recorded into the trace, to show timestamps in the device local time.
+  get traceTzOffset(): time {
+    return this._traceTzOffset;
+  }
+
+  set traceTzOffset(offset: time) {
+    this._traceTzOffset = offset;
+  }
+
   // Offset between t=0 and the configured time domain.
   timestampOffset(): time {
     const fmt = timestampFormat();
@@ -782,6 +790,8 @@ class Globals {
         return Time.ZERO;
       case TimestampFormat.UTC:
         return this.utcOffset;
+      case TimestampFormat.TraceTz:
+        return this.traceTzOffset;
       default:
         const x: never = fmt;
         throw new Error(`Unsupported format ${x}`);
@@ -815,6 +825,7 @@ class Globals {
       }
     } else if (selection.kind === 'THREAD_STATE') {
       const threadState = this.threadStateDetails;
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (threadState.ts && threadState.dur) {
         start = threadState.ts;
         end = Time.add(start, threadState.dur);
@@ -824,6 +835,7 @@ class Globals {
       end = selection.rightTs;
     } else if (selection.kind === 'AREA') {
       const selectedArea = this.state.areas[selection.areaId];
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (selectedArea) {
         start = selectedArea.start;
         end = selectedArea.end;
@@ -832,6 +844,7 @@ class Globals {
       const selectedNote = this.state.notes[selection.id];
       // Notes can either be default or area notes. Area notes are handled
       // above in the AREA case.
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       if (selectedNote && selectedNote.noteType === 'DEFAULT') {
         start = selectedNote.timestamp;
         end = Time.add(selectedNote.timestamp, INSTANT_FOCUS_DURATION);

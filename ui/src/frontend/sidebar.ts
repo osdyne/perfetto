@@ -30,6 +30,7 @@ import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
 import {SCM_REVISION, VERSION} from '../gen/perfetto_version';
 import {Engine} from '../trace_processor/engine';
+import {showModal} from '../widgets/modal';
 
 import {Animation} from './animation';
 import {downloadData, downloadUrl} from './download_utils';
@@ -39,7 +40,6 @@ import {
   isLegacyTrace,
   openFileWithLegacyTraceViewer,
 } from './legacy_trace_viewer';
-import {showModal} from './modal';
 import {Router} from './router';
 import {createTraceLink, isDownloadable, shareTrace} from './trace_attrs';
 import {
@@ -342,7 +342,7 @@ function openCurrentTraceWithOldUI(e: Event) {
   e.preventDefault();
   assertTrue(isTraceLoaded());
   globals.logging.logEvent('Trace Actions', 'Open current trace in legacy UI');
-  if (!isTraceLoaded) return;
+  if (!isTraceLoaded()) return;
   getCurrentTrace()
       .then((file) => {
         openInOldUIWithSizeCheck(file);
@@ -356,7 +356,7 @@ function convertTraceToSystrace(e: Event) {
   e.preventDefault();
   assertTrue(isTraceLoaded());
   globals.logging.logEvent('Trace Actions', 'Convert to .systrace');
-  if (!isTraceLoaded) return;
+  if (!isTraceLoaded()) return;
   getCurrentTrace()
       .then((file) => {
         convertTraceToSystraceAndDownload(file);
@@ -370,7 +370,7 @@ function convertTraceToJson(e: Event) {
   e.preventDefault();
   assertTrue(isTraceLoaded());
   globals.logging.logEvent('Trace Actions', 'Convert to .json');
-  if (!isTraceLoaded) return;
+  if (!isTraceLoaded()) return;
   getCurrentTrace()
       .then((file) => {
         convertTraceToJsonAndDownload(file);

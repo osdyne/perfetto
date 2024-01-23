@@ -46,6 +46,7 @@
 #include "src/trace_processor/tables/slice_tables_py.h"
 #include "src/trace_processor/tables/trace_proto_tables_py.h"
 #include "src/trace_processor/tables/track_tables_py.h"
+#include "src/trace_processor/tables/v8_tables_py.h"
 #include "src/trace_processor/tables/winscope_tables_py.h"
 #include "src/trace_processor/types/variadic.h"
 #include "src/trace_processor/views/slice_views.h"
@@ -647,6 +648,18 @@ class TraceStorage {
   }
   tables::GpuTrackTable* mutable_gpu_track_table() { return &gpu_track_table_; }
 
+  const tables::UidTrackTable& uid_track_table() const {
+    return uid_track_table_;
+  }
+  tables::UidTrackTable* mutable_uid_track_table() { return &uid_track_table_; }
+
+  const tables::GpuWorkPeriodTrackTable& gpu_work_period_track_table() const {
+    return gpu_work_period_track_table_;
+  }
+  tables::GpuWorkPeriodTrackTable* mutable_gpu_work_period_track_table() {
+    return &gpu_work_period_track_table_;
+  }
+
   const tables::VulkanMemoryAllocationsTable& vulkan_memory_allocations_table()
       const {
     return vulkan_memory_allocations_table_;
@@ -711,6 +724,31 @@ class TraceStorage {
   tables::ActualFrameTimelineSliceTable*
   mutable_actual_frame_timeline_slice_table() {
     return &actual_frame_timeline_slice_table_;
+  }
+
+  const tables::V8IsolateTable& v8_isolate_table() const {
+    return v8_isolate_table_;
+  }
+  tables::V8IsolateTable* mutable_v8_isolate_table() {
+    return &v8_isolate_table_;
+  }
+  const tables::V8JsScriptTable& v8_js_script_table() const {
+    return v8_js_script_table_;
+  }
+  tables::V8JsScriptTable* mutable_v8_js_script_table() {
+    return &v8_js_script_table_;
+  }
+  const tables::V8WasmScriptTable& v8_wasm_script_table() const {
+    return v8_wasm_script_table_;
+  }
+  tables::V8WasmScriptTable* mutable_v8_wasm_script_table() {
+    return &v8_wasm_script_table_;
+  }
+  const tables::V8JsFunctionTable& v8_js_function_table() const {
+    return v8_js_function_table_;
+  }
+  tables::V8JsFunctionTable* mutable_v8_js_function_table() {
+    return &v8_js_function_table_;
   }
 
   const tables::SurfaceFlingerLayersSnapshotTable&
@@ -896,6 +934,9 @@ class TraceStorage {
   tables::ThreadStateTable thread_state_table_{&string_pool_};
   tables::CpuTrackTable cpu_track_table_{&string_pool_, &track_table_};
   tables::GpuTrackTable gpu_track_table_{&string_pool_, &track_table_};
+  tables::UidTrackTable uid_track_table_{&string_pool_, &track_table_};
+  tables::GpuWorkPeriodTrackTable gpu_work_period_track_table_{
+      &string_pool_, &uid_track_table_};
   tables::ProcessTrackTable process_track_table_{&string_pool_, &track_table_};
   tables::ThreadTrackTable thread_track_table_{&string_pool_, &track_table_};
 
@@ -1006,6 +1047,12 @@ class TraceStorage {
       &string_pool_, &slice_table_};
   tables::ActualFrameTimelineSliceTable actual_frame_timeline_slice_table_{
       &string_pool_, &slice_table_};
+
+  // V8 tables
+  tables::V8IsolateTable v8_isolate_table_{&string_pool_};
+  tables::V8JsScriptTable v8_js_script_table_{&string_pool_};
+  tables::V8WasmScriptTable v8_wasm_script_table_{&string_pool_};
+  tables::V8JsFunctionTable v8_js_function_table_{&string_pool_};
 
   // Winscope tables
   tables::SurfaceFlingerLayersSnapshotTable

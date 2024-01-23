@@ -39,13 +39,13 @@ import {raf} from '../core/raf_scheduler';
 import {Command} from '../public';
 import {HotkeyConfig, HotkeyContext} from '../widgets/hotkey_context';
 import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
+import {maybeRenderFullscreenModalDialog} from '../widgets/modal';
 
 import {addTab} from './bottom_tab';
 import {onClickCopy} from './clipboard';
 // import {CookieConsent} from './cookie_consent';
 import {globals} from './globals';
 import {toggleHelp} from './help_modal';
-import {fullscreenModalContainer} from './modal';
 import {Omnibox, OmniboxOption} from './omnibox';
 import {verticalScrollToTrack} from './scroll_helper';
 import {executeSearch} from './search_handler';
@@ -198,6 +198,10 @@ export class App implements m.ClassComponent {
             const options: PromptOption[] = [
               {key: TimestampFormat.Timecode, displayName: 'Timecode'},
               {key: TimestampFormat.UTC, displayName: 'Realtime (UTC)'},
+              {
+                key: TimestampFormat.TraceTz,
+                displayName: 'Realtime (Trace TZ)',
+              },
               {key: TimestampFormat.Seconds, displayName: 'Seconds'},
               {key: TimestampFormat.Raw, displayName: 'Raw'},
               {
@@ -314,12 +318,10 @@ export class App implements m.ClassComponent {
       callback:
           () => {
             const window = getTimeSpanOfSelectionOrVisibleWindow();
-            if (window) {
-              this.enterQueryMode();
-              this.queryText =
-                  `select  where ts >= ${window.start} and ts < ${window.end}`;
-              this.pendingCursorPlacement = 7;
-            }
+            this.enterQueryMode();
+            this.queryText =
+                `select  where ts >= ${window.start} and ts < ${window.end}`;
+            this.pendingCursorPlacement = 7;
           },
     },
     {
@@ -328,10 +330,8 @@ export class App implements m.ClassComponent {
       callback:
           () => {
             const window = getTimeSpanOfSelectionOrVisibleWindow();
-            if (window) {
-              const query = `ts >= ${window.start} and ts < ${window.end}`;
-              copyToClipboard(query);
-            }
+            const query = `ts >= ${window.start} and ts < ${window.end}`;
+            copyToClipboard(query);
           },
     },
     {
@@ -662,7 +662,7 @@ export class App implements m.ClassComponent {
             m(Alerts),
             children,
 //            m(CookieConsent),
-            m(fullscreenModalContainer.mithrilComponent),
+            maybeRenderFullscreenModalDialog(),
             globals.state.perfDebug && m('.perf-stats'),
             ),
     );

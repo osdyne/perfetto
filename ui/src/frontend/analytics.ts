@@ -23,15 +23,41 @@ type TraceCategories = 'Trace Actions'|'Record Trace'|'User Actions';
 // const ANALYTICS_ID = 'G-BD89KT2P3C';
 const PAGE_TITLE = 'no-page-title';
 
-// Get the referrer from either:
-// - If present: the referrer argument if present
-// - document.referrer
 /*
-function getReferrer(): string {
+function isValidUrl(s: string) {
+  let url;
+  try {
+    url = new URL(s);
+  } catch (_) {
+    return false;
+  }
+  return url.protocol === 'http:' || url.protocol === 'https:';
+}
+
+function getReferrerOverride(): string|undefined {
   const route = Router.parseUrl(window.location.href);
   const referrer = route.args.referrer;
   if (referrer) {
     return referrer;
+  } else {
+    return undefined;
+  }
+}
+
+// Get the referrer from either:
+// - If present: the referrer argument if present
+// - document.referrer
+function getReferrer(): string {
+  const referrer = getReferrerOverride();
+  if (referrer) {
+    if (isValidUrl(referrer)) {
+      return referrer;
+    } else {
+      // Unclear if GA discards non-URL referrers. Lets try faking
+      // a URL to test.
+      const name = referrer.replaceAll('_', '-');
+      return `https://${name}.example.com/converted_non_url_referrer`;
+    }
   } else {
     return document.referrer.split('?')[0];
   }
@@ -86,6 +112,7 @@ class AnalyticsImpl implements Analytics {
     // play nicely with the CSP policy, at least in Firefox (Firefox doesn't
     // support all CSP 3 features we use).
     // [1] https://developers.google.com/analytics/devguides/collection/gtagjs .
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     gtagGlobals.dataLayer = gtagGlobals.dataLayer || [];
 
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -121,12 +148,16 @@ class AnalyticsImpl implements Analytics {
       allow_google_signals: false,
       anonymize_ip: true,
       page_location: route,
+      // Referrer as a URL including query string override.
       page_referrer: getReferrer(),
       send_page_view: false,
       page_title: PAGE_TITLE,
       perfetto_is_internal_user: globals.isInternalUser ? '1' : '0',
       perfetto_version: VERSION,
+      // Release channel (canary, stable, autopush)
       perfetto_channel: getCurrentChannel(),
+      // Referrer *if overridden* via the query string else empty string.
+      perfetto_referrer_override: getReferrerOverride() ?? '',
     });
     this.updatePath(route);
   } */

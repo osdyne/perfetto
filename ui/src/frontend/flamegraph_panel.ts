@@ -28,11 +28,11 @@ import {profileType} from '../controller/flamegraph_controller';
 import {raf} from '../core/raf_scheduler';
 import {Button} from '../widgets/button';
 import {Icon} from '../widgets/icon';
+import {Modal, ModalAttrs} from '../widgets/modal';
 import {Popup} from '../widgets/popup';
 
 import {Flamegraph, NodeRendering} from './flamegraph';
 import {globals} from './globals';
-import {Modal, ModalDefinition} from './modal';
 import {debounce} from './rate_limiters';
 import {Router} from './router';
 import {getCurrentTrace} from './sidebar';
@@ -70,7 +70,7 @@ export class FlamegraphDetailsPanel implements m.ClassComponent {
 
   view() {
     const flamegraphDetails = globals.flamegraphDetails;
-    if (flamegraphDetails && flamegraphDetails.type !== undefined &&
+    if (flamegraphDetails.type !== undefined &&
         flamegraphDetails.start !== undefined &&
         flamegraphDetails.dur !== undefined &&
         flamegraphDetails.pids !== undefined &&
@@ -164,8 +164,8 @@ export class FlamegraphDetailsPanel implements m.ClassComponent {
     return m(Modal, {
       title: 'The flamegraph is incomplete',
       vAlign: 'TOP',
-      content: m('div',
-          'The current trace does not have a fully formed flamegraph'),
+      content:
+          m('div', 'The current trace does not have a fully formed flamegraph'),
       buttons: [
         {
           text: 'Show the errors',
@@ -180,7 +180,7 @@ export class FlamegraphDetailsPanel implements m.ClassComponent {
           },
         },
       ],
-    } as ModalDefinition);
+    } as ModalAttrs);
   }
 
   private getTitle(): string {

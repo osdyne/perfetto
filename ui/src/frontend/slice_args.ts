@@ -35,23 +35,21 @@ import {TreeNode} from '../widgets/tree';
 import {addTab} from './bottom_tab';
 import {globals} from './globals';
 import {Arg} from './sql/args';
-import {SliceDetails} from './sql/slice';
 import {SqlTableTab} from './sql_table/tab';
 import {SqlTables} from './sql_table/well_known_tables';
 
 // Renders slice arguments (key/value pairs) as a subtree.
-export function renderArguments(
-    engine: EngineProxy, slice: SliceDetails): m.Children {
-  if (slice.args && slice.args.length > 0) {
-    const tree = convertArgsToTree(slice.args);
+export function renderArguments(engine: EngineProxy, args: Arg[]): m.Children {
+  if (args.length > 0) {
+    const tree = convertArgsToTree(args);
     return renderArgTreeNodes(engine, tree);
   } else {
     return undefined;
   }
 }
 
-export function hasArgs(slice: SliceDetails): boolean {
-  return exists(slice.args) && slice.args.length > 0;
+export function hasArgs(args?: Arg[]): args is Arg[] {
+  return exists(args) && args.length > 0;
 }
 
 function renderArgTreeNodes(
@@ -94,7 +92,7 @@ function renderArgKey(
           icon: 'content_copy',
           onclick: () => navigator.clipboard.writeText(fullKey),
         }),
-        value && m(MenuItem, {
+        m(MenuItem, {
           label: 'Find slices with same arg value',
           icon: 'search',
           onclick: () => {
@@ -112,7 +110,7 @@ function renderArgKey(
             });
           },
         }),
-        value && m(MenuItem, {
+        m(MenuItem, {
           label: 'Visualise argument values',
           icon: 'query_stats',
           onclick: () => {

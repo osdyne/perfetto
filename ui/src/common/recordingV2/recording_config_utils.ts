@@ -15,6 +15,7 @@
 
 import {isString} from '../../base/object_utils';
 import {base64Encode} from '../../base/string_utils';
+import {exists} from '../../base/utils';
 import {RecordConfig} from '../../controller/record_config_types';
 import {
   AndroidLogConfig,
@@ -195,6 +196,10 @@ export function genTraceConfig(
       ds.config.name = 'android.gpu.memory';
       protoCfg.dataSources.push(ds);
     }
+  }
+
+  if (uiCfg.gpuWorkPeriod) {
+    ftraceEvents.add('power/gpu_work_period');
   }
 
   if (uiCfg.cpuSyscall) {
@@ -472,6 +477,42 @@ export function genTraceConfig(
     chromeCategories.add('browser');
   }
 
+  if (uiCfg.audio) {
+    function addCategoryAndDisabledByDefault(category: string) {
+      chromeCategories.add(category);
+      chromeCategories.add('disabled-by-default-' + category);
+    }
+
+    addCategoryAndDisabledByDefault('audio');
+    addCategoryAndDisabledByDefault('webaudio');
+    addCategoryAndDisabledByDefault('webaudio.audionode');
+    addCategoryAndDisabledByDefault('webrtc');
+    addCategoryAndDisabledByDefault('audio-worklet');
+    addCategoryAndDisabledByDefault('mediastream');
+    addCategoryAndDisabledByDefault('v8.gc');
+    addCategoryAndDisabledByDefault('toplevel');
+    addCategoryAndDisabledByDefault('toplevel.flow');
+    addCategoryAndDisabledByDefault('wakeup.flow');
+    addCategoryAndDisabledByDefault('cpu_profiler');
+    addCategoryAndDisabledByDefault('scheduler');
+    addCategoryAndDisabledByDefault('p2p');
+    addCategoryAndDisabledByDefault('net');
+  }
+
+  if (uiCfg.video) {
+    chromeCategories.add('base');
+    chromeCategories.add('gpu');
+    chromeCategories.add('gpu.capture');
+    chromeCategories.add('media');
+    chromeCategories.add('toplevel');
+    chromeCategories.add('toplevel.flow');
+    chromeCategories.add('scheduler');
+    chromeCategories.add('wakeup.flow');
+    chromeCategories.add('webrtc');
+    chromeCategories.add('disabled-by-default-video_and_image_capture');
+    chromeCategories.add('disabled-by-default-webrtc');
+  }
+
   // linux.perf stack sampling
   if (uiCfg.tracePerf) {
     const ds = new TraceConfig.DataSource();
@@ -654,7 +695,7 @@ export function genTraceConfig(
     }
 
     let ftraceEventsArray: string[] = [];
-    if (androidApiLevel && androidApiLevel === 28) {
+    if (exists(androidApiLevel) && androidApiLevel === 28) {
       for (const ftraceEvent of ftraceEvents) {
         // On P, we don't support groups so strip all group names from ftrace
         // events.

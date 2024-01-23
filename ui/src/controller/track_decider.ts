@@ -292,7 +292,7 @@ class TrackDecider {
 
       if (showV1()) {
         const track: AddTrackArgs = {
-          uri: `perfetto.AsyncSlices#${rawName}`,
+          uri: `perfetto.AsyncSlices#${rawName}.${it.parentId}`,
           trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
           trackGroup,
           name,
@@ -302,7 +302,7 @@ class TrackDecider {
 
       if (showV2()) {
         const track: AddTrackArgs = {
-          uri: `perfetto.AsyncSlices#${rawName}.v2`,
+          uri: `perfetto.AsyncSlices#${rawName}.${it.parentId}.v2`,
           trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
           trackGroup,
           name,
@@ -1056,6 +1056,94 @@ class TrackDecider {
     }
   }
 
+  async addUserAsyncSliceTracks(engine: EngineProxy): Promise<void> {
+    const result = await engine.query(`
+      with tracks_with_slices as materialized (
+        select distinct track_id
+        from slice
+      ),
+      global_tracks as (
+        select
+          uid_track.name,
+          uid_track.uid,
+          group_concat(uid_track.id) as trackIds,
+          count(uid_track.id) as trackCount
+        from uid_track
+        join tracks_with_slices
+        where tracks_with_slices.track_id == uid_track.id
+        group by uid_track.uid
+      )
+      select
+        t.name as name,
+        t.uid as uid,
+        package_list.package_name as package_name,
+        t.trackIds as trackIds,
+        max_layout_depth(t.trackCount, t.trackIds) as maxDepth
+      from global_tracks t
+      join package_list
+      where t.uid = package_list.uid
+      group by t.uid
+      `);
+
+    const it = result.iter({
+      name: STR_NULL,
+      uid: NUM_NULL,
+      package_name: STR_NULL,
+    });
+
+    let groupMap = new Map<string, [string, string]>(); //[name] -> [uuid, key]
+
+    for (; it.valid(); it.next()) {
+      if (it.name == null || it.uid == null)
+        continue;
+      const rawName = it.name;
+      const uid = it.uid === null ? undefined : it.uid;
+      let userName = it.package_name === null ? `UID: ${uid}` : it.package_name;
+
+      let groupUuid = `uid-track-group${rawName}`;
+      if (groupMap.get(rawName) === undefined) {
+        let summaryTrackKey = uuidv4();
+        this.tracksToAdd.push({
+          uri: NULL_TRACK_URI,
+          trackSortKey: PrimaryTrackSortKey.NULL_TRACK,
+          name: `UID Tracks`,
+          trackGroup: undefined,
+          key: summaryTrackKey,
+        });
+
+        groupMap.set(rawName, [groupUuid, summaryTrackKey]);
+      }
+
+      if (showV1()) {
+        this.tracksToAdd.push({
+          uri: `perfetto.AsyncSlices#${rawName}.${uid}`,
+          name: userName,
+          trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
+          trackGroup: groupUuid,
+        });
+      }
+
+      if (showV2()) {
+        this.tracksToAdd.push({
+          uri: `perfetto.AsyncSlices#${rawName}.${uid}.v2`,
+          name: userName,
+          trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
+          trackGroup: groupUuid,
+        });
+      }
+    }
+
+    for (let [name, [groupUuid, summaryTrackKey]] of groupMap) {
+      const addGroup = Actions.addTrackGroup({
+        name: name,
+        id: groupUuid,
+        collapsed: true,
+        summaryTrackKey,
+      });
+      this.addTrackGroupActions.push(addGroup);
+    }
+  }
+
   async addActualFramesTracks(engine: EngineProxy): Promise<void> {
     const result = await engine.query(`
       with process_async_tracks as materialized (
@@ -1225,6 +1313,7 @@ class TrackDecider {
       const trackId = it.trackId;
       const trackName = it.trackName;
       // Note that !!null === false.
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       const isDefaultTrackForScope = !!it.isDefaultTrackForScope;
       const tid = it.tid;
       const threadName = it.threadName;
@@ -1567,7 +1656,9 @@ class TrackDecider {
       const pid = it.pid;
       const threadName = it.threadName;
       const processName = it.processName;
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       const hasSched = !!it.hasSched;
+      // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
       const hasHeapProfiles = !!it.hasHeapProfiles;
 
       // Group by upid if present else by utid.
@@ -1702,6 +1793,12 @@ class TrackDecider {
     await this.groupTracksByRegex(CHROME_TRACK_REGEX, CHROME_TRACK_GROUP);
     await this.groupMiscNonAllowlistedTracks(MISC_GROUP);
 
+    // Add user slice tracks before listing the processes. These tracks will
+    // be listed with their user/package name only, and they will be grouped
+    // under on their original shared track names. E.g. "GPU Work Period"
+    await this.addUserAsyncSliceTracks(
+        this.engine.getProxy('TrackDecider::addUserAsyncSliceTracks'));
+
     // Pre-group all kernel "threads" (actually processes) if this is a linux
     // system trace. Below, addProcessTrackGroups will skip them due to an
     // existing group uuid, and addThreadStateTracks will fill in the
@@ -1727,7 +1824,7 @@ class TrackDecider {
     await this.addProcessCounterTracks(
         this.engine.getProxy('TrackDecider::addProcessCounterTracks'));
     await this.addProcessAsyncSliceTracks(
-        this.engine.getProxy('TrackDecider::addProcessAsyncSliceTrack'));
+        this.engine.getProxy('TrackDecider::addProcessAsyncSliceTracks'));
     await this.addActualFramesTracks(
         this.engine.getProxy('TrackDecider::addActualFramesTracks'));
     await this.addExpectedFramesTracks(
@@ -1778,6 +1875,7 @@ class TrackDecider {
     const it = result.iter({
       utid: NUM,
     });
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     for (; it; it.next()) {
       return {
         utid: it.utid,

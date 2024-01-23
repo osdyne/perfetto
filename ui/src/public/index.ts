@@ -18,10 +18,10 @@ import {Hotkey} from '../base/hotkeys';
 import {duration, time} from '../base/time';
 import {ColorScheme} from '../common/colorizer';
 import {PanelSize} from '../frontend/panel';
-import {Store} from '../frontend/store';
+import {Migrate, Store} from '../frontend/store';
 import {EngineProxy} from '../trace_processor/engine';
 
-export {createStore, Store} from '../frontend/store';
+export {createStore, Migrate, Store} from '../frontend/store';
 export {EngineProxy} from '../trace_processor/engine';
 export {
   LONG,
@@ -143,8 +143,6 @@ export interface PluginContext {
   };
 }
 
-export type Migrate<State> = (init: unknown) => State;
-
 export interface TrackContext {
   // This track's key, used for making selections et al.
   trackKey: string;
@@ -172,16 +170,39 @@ export interface SliceRect {
 }
 
 export interface Track {
-  onCreate(ctx: TrackContext): void;
+  /**
+   * Optional: Called when the track is first materialized on the timeline.
+   * If this function returns a Promise, this promise is awaited before onUpdate
+   * or onDestroy is called. Any calls made to these functions in the meantime
+   * will be queued up and the hook will be called later once onCreate returns.
+   * @param ctx Our track context object.
+   */
+  onCreate?(ctx: TrackContext): Promise<void>|void;
+
+  /**
+   * Optional: Called every render cycle while the track is visible, just before
+   * render().
+   * If this function returns a Promise, this promise is awaited before another
+   * onUpdate is called or onDestroy is called.
+   */
+  onUpdate?(): Promise<void>|void;
+
+  /**
+   * Optional: Called when the track is no longer visible. Should be used to
+   * clean up resources.
+   * This function can return nothing or a promise. The promise is currently
+   * ignored.
+   */
+  onDestroy?(): Promise<void>|void;
+
   render(ctx: CanvasRenderingContext2D, size: PanelSize): void;
-  onFullRedraw(): void;
-  getSliceRect(tStart: time, tEnd: time, depth: number): SliceRect|undefined;
+  onFullRedraw?(): void;
+  getSliceRect?(tStart: time, tEnd: time, depth: number): SliceRect|undefined;
   getHeight(): number;
-  getTrackShellButtons(): m.Children;
-  onMouseMove(position: {x: number, y: number}): void;
-  onMouseClick(position: {x: number, y: number}): boolean;
-  onMouseOut(): void;
-  onDestroy(): void;
+  getTrackShellButtons?(): m.Children;
+  onMouseMove?(position: {x: number, y: number}): void;
+  onMouseClick?(position: {x: number, y: number}): boolean;
+  onMouseOut?(): void;
 }
 
 // A definition of a track, including a renderer implementation and metadata.
@@ -215,6 +236,9 @@ export interface TrackDescriptor {
 
   // Optional: A list of tags used for sorting, grouping and "chips".
   tags?: TrackTags;
+
+  // Placeholder - presently unused.
+  displayName?: string;
 }
 
 // Tracks within track groups (usually corresponding to processes) are sorted.

@@ -31,9 +31,9 @@
 #include "perfetto/ext/tracing/core/shared_memory_arbiter.h"
 #include "perfetto/ext/tracing/core/trace_packet.h"
 #include "perfetto/ext/tracing/ipc/consumer_ipc_client.h"
-#include "perfetto/ext/tracing/ipc/default_socket.h"
 #include "perfetto/ext/tracing/ipc/service_ipc_host.h"
 #include "perfetto/tracing/core/trace_config.h"
+#include "perfetto/tracing/default_socket.h"
 #include "src/base/test/test_task_runner.h"
 #include "test/fake_producer.h"
 
@@ -468,6 +468,7 @@ class Exec {
       pass_env("TMPDIR", &subprocess_);
       pass_env("TMP", &subprocess_);
       pass_env("TEMP", &subprocess_);
+      pass_env("LD_LIBRARY_PATH", &subprocess_);
       cmd.push_back(base::GetCurExecutableDir() + "/" + argv0);
       cmd.insert(cmd.end(), args.begin(), args.end());
     }

@@ -898,8 +898,7 @@ base::Status TracingServiceImpl::EnableTracing(ConsumerEndpointImpl* consumer,
     tracing_session->bytes_written_into_file = 0;
   }
 
-  if (!cfg.compress_from_cli() &&
-      cfg.compression_type() == TraceConfig::COMPRESSION_TYPE_DEFLATE) {
+  if (cfg.compression_type() == TraceConfig::COMPRESSION_TYPE_DEFLATE) {
     if (init_opts_.compressor_fn) {
       tracing_session->compress_deflate = true;
     } else {
@@ -2289,11 +2288,15 @@ std::vector<TracePacket> TracingServiceImpl::ReadBuffers(
   }
 
   if (!tracing_session->config.builtin_data_sources().disable_trace_config()) {
-    MaybeEmitUuidAndTraceConfig(tracing_session, &packets);
+    MaybeEmitTraceConfig(tracing_session, &packets);
     MaybeEmitReceivedTriggers(tracing_session, &packets);
   }
-  if (!tracing_session->config.builtin_data_sources().disable_system_info())
-    MaybeEmitSystemInfo(tracing_session, &packets);
+  if (!tracing_session->did_emit_initial_packets) {
+    EmitUuid(tracing_session, &packets);
+    if (!tracing_session->config.builtin_data_sources().disable_system_info())
+      EmitSystemInfo(&packets);
+  }
+  tracing_session->did_emit_initial_packets = true;
 
   // Note that in the proto comment, we guarantee that the tracing_started
   // lifecycle event will be emitted before any data packets so make sure to
@@ -2328,6 +2331,7 @@ std::vector<TracePacket> TracingServiceImpl::ReadBuffers(
                                     &previous_packet_dropped)) {
         break;
       }
+      packet.set_buffer_index_for_stats(static_cast<uint32_t>(buf_idx));
       PERFETTO_DCHECK(sequence_properties.producer_id_trusted != 0);
       PERFETTO_DCHECK(sequence_properties.writer_id != 0);
       PERFETTO_DCHECK(sequence_properties.client_identity_trusted.has_uid());
@@ -2442,16 +2446,18 @@ void TracingServiceImpl::MaybeFilterPackets(TracingSession* tracing_session,
   auto start = base::GetWallTimeNs();
   for (TracePacket& packet : *packets) {
     const auto& packet_slices = packet.slices();
+    const size_t input_packet_size = packet.size();
     filter_input.clear();
     filter_input.resize(packet_slices.size());
     ++tracing_session->filter_input_packets;
-    tracing_session->filter_input_bytes += packet.size();
+    tracing_session->filter_input_bytes += input_packet_size;
     for (size_t i = 0; i < packet_slices.size(); ++i)
       filter_input[i] = {packet_slices[i].start, packet_slices[i].size};
     auto filtered_packet = trace_filter.FilterMessageFragments(
         &filter_input[0], filter_input.size());
 
     // Replace the packet in-place with the filtered one (unless failed).
+    std::optional<uint32_t> maybe_buffer_idx = packet.buffer_index_for_stats();
     packet = TracePacket();
     if (filtered_packet.error) {
       ++tracing_session->filter_errors;
@@ -2460,6 +2466,19 @@ void TracingServiceImpl::MaybeFilterPackets(TracingSession* tracing_session,
       continue;
     }
     tracing_session->filter_output_bytes += filtered_packet.size;
+    if (maybe_buffer_idx.has_value()) {
+      // Keep the per-buffer stats updated. Also propagate the
+      // buffer_index_for_stats in the output packet to allow accounting by
+      // other parts of the ReadBuffer pipeline.
+      uint32_t buffer_idx = maybe_buffer_idx.value();
+      packet.set_buffer_index_for_stats(buffer_idx);
+      auto& vec = tracing_session->filter_bytes_discarded_per_buffer;
+      if (static_cast<size_t>(buffer_idx) >= vec.size())
+        vec.resize(buffer_idx + 1);
+      PERFETTO_DCHECK(input_packet_size >= filtered_packet.size);
+      size_t bytes_filtered_out = input_packet_size - filtered_packet.size;
+      vec[buffer_idx] += bytes_filtered_out;
+    }
     AppendOwnedSlicesToPacket(std::move(filtered_packet.data),
                               filtered_packet.size, kMaxTracePacketSliceSize,
                               &packet);
@@ -3387,6 +3406,8 @@ TraceStats TracingServiceImpl::GetTraceStats(TracingSession* tracing_session) {
     filt_stats->set_output_bytes(tracing_session->filter_output_bytes);
     filt_stats->set_errors(tracing_session->filter_errors);
     filt_stats->set_time_taken_ns(tracing_session->filter_time_taken_ns);
+    for (uint64_t value : tracing_session->filter_bytes_discarded_per_buffer)
+      filt_stats->add_bytes_discarded_per_buffer(value);
   }
 
   for (BufferID buf_id : tracing_session->buffers_index) {
@@ -3402,84 +3423,70 @@ TraceStats TracingServiceImpl::GetTraceStats(TracingSession* tracing_session) {
            .disable_chunk_usage_histograms()) {
     // Emit chunk usage stats broken down by sequence ID (i.e. by trace-writer).
     // Writer stats are updated by each TraceBuffer object at ReadBuffers time,
-    // and there can be >1 buffer per session. However, we want to report only
-    // one histogram per writer. A trace writer never writes to more than one
-    // buffer (it's technically allowed but doesn't happen in the current impl
-    // of the tracing SDK). Per-buffer breakdowns would be completely useless.
-    TraceBuffer::WriterStatsMap merged_stats;
+    // and there can be >1 buffer per session. A trace writer never writes to
+    // more than one buffer (it's technically allowed but doesn't happen in the
+    // current impl of the tracing SDK).
 
-    // First merge all the per-buffer histograms into one-per-writer.
+    bool has_written_bucket_definition = false;
+    uint32_t buf_idx = static_cast<uint32_t>(-1);
     for (const BufferID buf_id : tracing_session->buffers_index) {
+      ++buf_idx;
       const TraceBuffer* buf = GetBufferByID(buf_id);
       if (!buf)
         continue;
       for (auto it = buf->writer_stats().GetIterator(); it; ++it) {
-        auto& hist = merged_stats.Insert(it.key(), {}).first->used_chunk_hist;
-        hist.Merge(it.value().used_chunk_hist);
-      }
-    }
-
-    // Serialize the merged per-writer histogram into the stats proto.
-    bool has_written_bucket_definition = false;
-    for (auto it = merged_stats.GetIterator(); it; ++it) {
-      const auto& hist = it.value().used_chunk_hist;
-      ProducerID p;
-      WriterID w;
-      GetProducerAndWriterID(it.key(), &p, &w);
-      if (!has_written_bucket_definition) {
-        // Serialize one-off the histogram bucket definition, which is the same
-        // for all entries in the map.
-        has_written_bucket_definition = true;
-        // The -1 in the for loop below is to skip the implicit overflow bucket.
-        for (size_t i = 0; i < hist.num_buckets() - 1; ++i) {
-          trace_stats.add_chunk_payload_histogram_def(hist.GetBucketThres(i));
+        const auto& hist = it.value().used_chunk_hist;
+        ProducerID p;
+        WriterID w;
+        GetProducerAndWriterID(it.key(), &p, &w);
+        if (!has_written_bucket_definition) {
+          // Serialize one-off the histogram bucket definition, which is the
+          // same for all entries in the map.
+          has_written_bucket_definition = true;
+          // The -1 in the loop below is to skip the implicit overflow bucket.
+          for (size_t i = 0; i < hist.num_buckets() - 1; ++i) {
+            trace_stats.add_chunk_payload_histogram_def(hist.GetBucketThres(i));
+          }
+        }  // if(!has_written_bucket_definition)
+        auto* wri_stats = trace_stats.add_writer_stats();
+        wri_stats->set_sequence_id(
+            tracing_session->GetPacketSequenceID(kDefaultMachineID, p, w));
+        wri_stats->set_buffer(buf_idx);
+        for (size_t i = 0; i < hist.num_buckets(); ++i) {
+          wri_stats->add_chunk_payload_histogram_counts(hist.GetBucketCount(i));
+          wri_stats->add_chunk_payload_histogram_sum(hist.GetBucketSum(i));
         }
-      }
-      auto* wri_stats = trace_stats.add_writer_stats();
-      wri_stats->set_sequence_id(
-          tracing_session->GetPacketSequenceID(kDefaultMachineID, p, w));
-      for (size_t i = 0; i < hist.num_buckets(); ++i) {
-        wri_stats->add_chunk_payload_histogram_counts(hist.GetBucketCount(i));
-        wri_stats->add_chunk_payload_histogram_sum(hist.GetBucketSum(i));
-      }
-    }  // for (writer in merged_stats.GetIterator())
-  }    // if (!disable_chunk_usage_histograms)
+      }  // for each sequence (writer).
+    }    // for each buffer.
+  }      // if (!disable_chunk_usage_histograms)
 
   return trace_stats;
 }
 
-void TracingServiceImpl::MaybeEmitUuidAndTraceConfig(
-    TracingSession* tracing_session,
-    std::vector<TracePacket>* packets) {
-  if (tracing_session->did_emit_config)
-    return;
-  tracing_session->did_emit_config = true;
-
-  {
-    protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
-    packet->set_trusted_uid(static_cast<int32_t>(uid_));
-    packet->set_trusted_packet_sequence_id(kServicePacketSequenceID);
-    auto* uuid = packet->set_trace_uuid();
-    uuid->set_lsb(tracing_session->trace_uuid.lsb());
-    uuid->set_msb(tracing_session->trace_uuid.msb());
-    SerializeAndAppendPacket(packets, packet.SerializeAsArray());
-  }
-
-  {
-    protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
-    packet->set_trusted_uid(static_cast<int32_t>(uid_));
-    packet->set_trusted_packet_sequence_id(kServicePacketSequenceID);
-    tracing_session->config.Serialize(packet->set_trace_config());
-    SerializeAndAppendPacket(packets, packet.SerializeAsArray());
-  }
+void TracingServiceImpl::EmitUuid(TracingSession* tracing_session,
+                                  std::vector<TracePacket>* packets) {
+  protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
+  packet->set_trusted_uid(static_cast<int32_t>(uid_));
+  packet->set_trusted_packet_sequence_id(kServicePacketSequenceID);
+  auto* uuid = packet->set_trace_uuid();
+  uuid->set_lsb(tracing_session->trace_uuid.lsb());
+  uuid->set_msb(tracing_session->trace_uuid.msb());
+  SerializeAndAppendPacket(packets, packet.SerializeAsArray());
 }
 
-void TracingServiceImpl::MaybeEmitSystemInfo(
+void TracingServiceImpl::MaybeEmitTraceConfig(
     TracingSession* tracing_session,
     std::vector<TracePacket>* packets) {
-  if (tracing_session->did_emit_system_info)
+  if (tracing_session->did_emit_initial_packets)
     return;
-  tracing_session->did_emit_system_info = true;
+  protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
+  packet->set_trusted_uid(static_cast<int32_t>(uid_));
+  packet->set_trusted_packet_sequence_id(kServicePacketSequenceID);
+  tracing_session->config.Serialize(packet->set_trace_config());
+  SerializeAndAppendPacket(packets, packet.SerializeAsArray());
+}
+
+void TracingServiceImpl::EmitSystemInfo(std::vector<TracePacket>* packets) {
   protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
   auto* info = packet->set_system_info();
   info->set_tracing_service_version(base::GetVersionString());
@@ -3620,8 +3627,10 @@ void TracingServiceImpl::FlushAndCloneSession(ConsumerEndpointImpl* consumer,
                                               TracingSessionID tsid) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   auto clone_target = FlushFlags::CloneTarget::kUnknown;
+  bool for_bugreport = false;
 
   if (tsid == kBugreportSessionId) {
+    PERFETTO_LOG("Looking for sessions for bugreport");
     TracingSession* session = FindTracingSessionWithMaxBugreportScore();
     if (!session) {
       consumer->consumer_->OnSessionCloned(
@@ -3630,6 +3639,7 @@ void TracingServiceImpl::FlushAndCloneSession(ConsumerEndpointImpl* consumer,
     }
     tsid = session->id;
     clone_target = FlushFlags::CloneTarget::kBugreport;
+    for_bugreport = true;
   }
 
   TracingSession* session = GetTracingSession(tsid);
@@ -3678,14 +3688,15 @@ void TracingServiceImpl::FlushAndCloneSession(ConsumerEndpointImpl* consumer,
   auto weak_consumer = consumer->GetWeakPtr();
   Flush(
       tsid, 0,
-      [weak_this, tsid, weak_consumer](bool final_flush_outcome) {
+      [weak_this, tsid, for_bugreport,
+       weak_consumer](bool final_flush_outcome) {
         PERFETTO_LOG("FlushAndCloneSession(%" PRIu64 ") started, success=%d",
                      tsid, final_flush_outcome);
         if (!weak_this || !weak_consumer)
           return;
         base::Uuid uuid;
         base::Status result = weak_this->DoCloneSession(
-            &*weak_consumer, tsid, final_flush_outcome, &uuid);
+            &*weak_consumer, tsid, for_bugreport, final_flush_outcome, &uuid);
         weak_consumer->consumer_->OnSessionCloned(
             {result.ok(), result.message(), uuid});
       },
@@ -3695,6 +3706,7 @@ void TracingServiceImpl::FlushAndCloneSession(ConsumerEndpointImpl* consumer,
 
 base::Status TracingServiceImpl::DoCloneSession(ConsumerEndpointImpl* consumer,
                                                 TracingSessionID src_tsid,
+                                                bool for_bugreport,
                                                 bool final_flush_outcome,
                                                 base::Uuid* new_uuid) {
   PERFETTO_DLOG("CloneSession(%" PRIu64 ") started, consumer uid: %d", src_tsid,
@@ -3812,8 +3824,8 @@ base::Status TracingServiceImpl::DoCloneSession(ConsumerEndpointImpl* consumer,
   cloned_session->flushes_succeeded = src->flushes_succeeded;
   cloned_session->flushes_failed = src->flushes_failed;
   cloned_session->compress_deflate = src->compress_deflate;
-  if (src->trace_filter) {
-    // Copy the trace filter.
+  if (src->trace_filter && !for_bugreport) {
+    // Copy the trace filter, unless it's a clone-for-bugreport (b/317065412).
     cloned_session->trace_filter.reset(
         new protozero::MessageFilter(src->trace_filter->config()));
   }
