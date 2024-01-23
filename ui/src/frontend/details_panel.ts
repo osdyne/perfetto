@@ -333,7 +333,7 @@ export class DetailsPanel implements m.ClassComponent {
     if (hasLogs()) {
       detailsPanels.push({
         key: 'android_logs',
-        name: 'Android Logs',
+        name: 'System Logs',
         vnode: m(LogPanel, {key: 'logs_panel'}),
       });
     }

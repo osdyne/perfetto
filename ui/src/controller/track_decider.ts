@@ -687,7 +687,7 @@ class TrackDecider {
     if (count > 0) {
       this.tracksToAdd.push({
         uri: 'perfetto.AndroidLog',
-        name: 'Android logs',
+        name: 'System logs',
         trackSortKey: PrimaryTrackSortKey.ORDINARY_TRACK,
         trackGroup: SCROLLING_TRACK_GROUP,
       });

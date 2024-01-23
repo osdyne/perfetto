@@ -163,7 +163,7 @@ export class LogPanel implements m.ClassComponent {
     return m(
         DetailsShell,
         {
-          title: 'Android Logs',
+          title: 'System Logs',
           description: `[${offset}, ${offset + count}] / ${total}`,
           buttons: m(LogsFilters),
         },
