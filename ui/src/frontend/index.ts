@@ -167,22 +167,21 @@ function setupContentSecurityPolicy() {
       'https://*.google.com',
       'https://*.googleusercontent.com',
       'https://www.googletagmanager.com',
-      'https://*.google-analytics.com',
     ],
     'object-src': ['none'],
     'connect-src': [
       `'self'`,
       'ws://127.0.0.1:8037',    // For the adb websocket server.
-      'https://*.google-analytics.com',
       'https://*.googleapis.com',  // For Google Cloud Storage fetches.
+      'https://*.vscode-cdn.net', // For vscode served files
       'blob:',
       'data:',
+      ``
     ].concat(rpcPolicy),
     'img-src': [
       `'self'`,
       'data:',
       'blob:',
-      'https://*.google-analytics.com',
       'https://www.googletagmanager.com',
       'https://*.googleapis.com',
     ],
