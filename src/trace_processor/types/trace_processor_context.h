@@ -47,13 +47,13 @@ class ChunkedTraceReader;
 class ClockTracker;
 class ClockConverter;
 class DeobfuscationMappingTable;
+class EtwModule;
 class EventTracker;
 class ForwardingTraceParser;
 class FtraceModule;
 class GlobalArgsTracker;
-class GlobalStackProfileTracker;
+class StackProfileTracker;
 class HeapGraphTracker;
-class HeapProfileTracker;
 class PerfSampleTracker;
 class MetadataTracker;
 class PacketAnalyzer;
@@ -100,9 +100,8 @@ class TraceProcessorContext {
   std::unique_ptr<EventTracker> event_tracker;
   std::unique_ptr<ClockTracker> clock_tracker;
   std::unique_ptr<ClockConverter> clock_converter;
-  std::unique_ptr<HeapProfileTracker> heap_profile_tracker;
   std::unique_ptr<PerfSampleTracker> perf_sample_tracker;
-  std::unique_ptr<GlobalStackProfileTracker> global_stack_profile_tracker;
+  std::unique_ptr<StackProfileTracker> stack_profile_tracker;
   std::unique_ptr<MetadataTracker> metadata_tracker;
 
   // These fields are stored as pointers to Destructible objects rather than
@@ -157,6 +156,7 @@ class TraceProcessorContext {
   // all fields.
   std::vector<ProtoImporterModule*> modules_for_all_fields;
   FtraceModule* ftrace_module = nullptr;
+  EtwModule* etw_module = nullptr;
   TrackEventModule* track_module = nullptr;
 
   // Marks whether the uuid was read from the trace.

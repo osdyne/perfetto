@@ -33,6 +33,7 @@ import {TimelineFetcher} from '../../common/track_helper';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
 import {PanelSize} from '../../frontend/panel';
+import {SliceDetailsPanel} from '../../frontend/slice_details_panel';
 import {
   EngineProxy,
   Plugin,
@@ -60,7 +61,7 @@ const RECT_HEIGHT = 24;
 const TRACK_HEIGHT = MARGIN_TOP * 2 + RECT_HEIGHT;
 
 class CpuSliceTrack implements Track {
-  private mousePos?: {x: number, y: number};
+  private mousePos?: { x: number, y: number };
   private utidHoveredInThisTrack = -1;
   private fetcher = new TimelineFetcher<Data>(this.onBoundsChange.bind(this));
 
@@ -139,15 +140,15 @@ class CpuSliceTrack implements Track {
   }
 
   async onBoundsChange(start: time, end: time, resolution: duration):
-      Promise<Data> {
+    Promise<Data> {
     assertTrue(BIMath.popcount(resolution) === 1, `${resolution} not pow of 2`);
 
     const isCached = this.cachedBucketSize <= resolution;
     const queryTsq = isCached ?
-        `cached_tsq / ${resolution} * ${resolution}` :
-        `(ts + ${resolution / 2n}) / ${resolution} * ${resolution}`;
+      `cached_tsq / ${resolution} * ${resolution}` :
+      `(ts + ${resolution / 2n}) / ${resolution} * ${resolution}`;
     const queryTable =
-        isCached ? this.tableName('sched_cached') : this.tableName('sched');
+      isCached ? this.tableName('sched_cached') : this.tableName('sched');
     const constraintColumn = isCached ? 'cached_tsq' : 'ts';
 
     const queryRes = await this.engine.query(`
@@ -225,7 +226,7 @@ class CpuSliceTrack implements Track {
   async onDestroy() {
     if (this.engine.isAlive) {
       await this.engine.query(
-          `drop table if exists ${this.tableName('sched_cached')}`);
+        `drop table if exists ${this.tableName('sched_cached')}`);
     }
     this.fetcher.dispose();
   }
@@ -244,12 +245,12 @@ class CpuSliceTrack implements Track {
     // If the cached trace slices don't fully cover the visible time range,
     // show a gray rectangle with a "Loading..." label.
     checkerboardExcept(
-        ctx,
-        this.getHeight(),
-        0,
-        size.width,
-        visibleTimeScale.timeToPx(data.start),
-        visibleTimeScale.timeToPx(data.end));
+      ctx,
+      this.getHeight(),
+      0,
+      size.width,
+      visibleTimeScale.timeToPx(data.start),
+      visibleTimeScale.timeToPx(data.end));
 
     this.renderSlices(ctx, data);
   }
@@ -381,11 +382,11 @@ class CpuSliceTrack implements Track {
           const wakeupPos = visibleTimeScale.timeToPx(details.wakeupTs);
           const latencyWidth = rectStart - wakeupPos;
           drawDoubleHeadedArrow(
-              ctx,
-              wakeupPos,
-              MARGIN_TOP + RECT_HEIGHT,
-              latencyWidth,
-              latencyWidth >= 20);
+            ctx,
+            wakeupPos,
+            MARGIN_TOP + RECT_HEIGHT,
+            latencyWidth,
+            latencyWidth >= 20);
           // Latency time with a white semi-transparent background.
           const latency = tStart - details.wakeupTs;
           const displayText = Duration.humanise(latency);
@@ -393,16 +394,16 @@ class CpuSliceTrack implements Track {
           if (latencyWidth >= measured.width + 2) {
             ctx.fillStyle = 'rgba(255,255,255,0.7)';
             ctx.fillRect(
-                wakeupPos + latencyWidth / 2 - measured.width / 2 - 1,
-                MARGIN_TOP + RECT_HEIGHT - 12,
-                measured.width + 2,
-                11);
+              wakeupPos + latencyWidth / 2 - measured.width / 2 - 1,
+              MARGIN_TOP + RECT_HEIGHT - 12,
+              measured.width + 2,
+              11);
             ctx.textBaseline = 'bottom';
             ctx.fillStyle = 'black';
             ctx.fillText(
-                displayText,
-                wakeupPos + (latencyWidth) / 2,
-                MARGIN_TOP + RECT_HEIGHT - 1);
+              displayText,
+              wakeupPos + (latencyWidth) / 2,
+              MARGIN_TOP + RECT_HEIGHT - 1);
           }
         }
       }
@@ -410,7 +411,7 @@ class CpuSliceTrack implements Track {
       // Draw diamond if the track being drawn is the cpu of the waker.
       if (this.cpu === details.wakerCpu && details.wakeupTs) {
         const wakeupPos =
-            Math.floor(visibleTimeScale.timeToPx(details.wakeupTs));
+          Math.floor(visibleTimeScale.timeToPx(details.wakeupTs));
         ctx.beginPath();
         ctx.moveTo(wakeupPos, MARGIN_TOP + RECT_HEIGHT / 2 + 8);
         ctx.fillStyle = 'black';
@@ -438,7 +439,7 @@ class CpuSliceTrack implements Track {
     }
   }
 
-  onMouseMove(pos: {x: number, y: number}) {
+  onMouseMove(pos: { x: number, y: number }) {
     const data = this.fetcher.data;
     this.mousePos = pos;
     if (data === undefined) return;
@@ -465,7 +466,7 @@ class CpuSliceTrack implements Track {
     // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
     const hoveredPid = threadInfo ? (threadInfo.pid ? threadInfo.pid : -1) : -1;
     globals.dispatch(
-        Actions.setHoveredUtidAndPid({utid: hoveredUtid, pid: hoveredPid}));
+      Actions.setHoveredUtidAndPid({utid: hoveredUtid, pid: hoveredPid}));
   }
 
   onMouseOut() {
@@ -474,7 +475,7 @@ class CpuSliceTrack implements Track {
     this.mousePos = undefined;
   }
 
-  onMouseClick({x}: {x: number}) {
+  onMouseClick({x}: { x: number }) {
     const data = this.fetcher.data;
     if (data === undefined) return false;
     const {visibleTimeScale} = globals.timeline;
@@ -506,18 +507,29 @@ class CpuSlices implements Plugin {
         displayName: name,
         kind: CPU_SLICE_TRACK_KIND,
         cpu,
-        track: ({trackKey}) => new CpuSliceTrack(ctx.engine, trackKey, cpu),
+        trackFactory: ({trackKey}) => {
+          return new CpuSliceTrack(ctx.engine, trackKey, cpu);
+        },
       });
     }
+
+    ctx.registerDetailsPanel({
+      render: (sel) => {
+        if (sel.kind === 'SLICE') {
+          return m(SliceDetailsPanel);
+        }
+      },
+    });
   }
 
   async guessCpuSizes(engine: EngineProxy): Promise<Map<number, string>> {
     const cpuToSize = new Map<number, string>();
     await engine.query(`
-      INCLUDE PERFETTO MODULE common.cpus;
+      INCLUDE PERFETTO MODULE cpu.size;
     `);
     const result = await engine.query(`
-      SELECT cpu, GUESS_CPU_SIZE(cpu) as size FROM cpu_counter_track;
+      SELECT cpu, cpu_guess_core_type(cpu) as size
+      FROM cpu_counter_track;
     `);
 
     const it = result.iter({

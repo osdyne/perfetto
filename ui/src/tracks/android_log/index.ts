@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import m from 'mithril';
+
 import {duration, Time, time} from '../../base/time';
 import {LIMIT, TrackData} from '../../common/track_data';
 import {TimelineFetcher} from '../../common/track_helper';
 import {checkerboardExcept} from '../../frontend/checkerboard';
 import {globals} from '../../frontend/globals';
+import {LogPanel} from '../../frontend/logs_panel';
 import {PanelSize} from '../../frontend/panel';
 import {
   EngineProxy,
@@ -122,7 +125,7 @@ class AndroidLogTrack implements Track {
     const dataEndPx = visibleTimeScale.timeToPx(data.end);
 
     checkerboardExcept(
-        ctx, this.getHeight(), 0, size.width, dataStartPx, dataEndPx);
+      ctx, this.getHeight(), 0, size.width, dataStartPx, dataEndPx);
 
     const quantWidth =
         Math.max(EVT_PX, visibleTimeScale.durationToPx(data.resolution));
@@ -149,15 +152,39 @@ class AndroidLog implements Plugin {
   async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
     const result =
         await ctx.engine.query(`select count(1) as cnt from android_logs`);
-    const count = result.firstRow({cnt: NUM}).cnt;
-    if (count > 0) {
+    const logCount = result.firstRow({cnt: NUM}).cnt;
+    if (logCount > 0) {
       ctx.registerTrack({
         uri: 'perfetto.AndroidLog',
         displayName: 'System logs',
         kind: ANDROID_LOGS_TRACK_KIND,
-        track: () => new AndroidLogTrack(ctx.engine),
+        trackFactory: () => new AndroidLogTrack(ctx.engine),
       });
     }
+
+    const androidLogsTabUri = 'perfetto.AndroidLog#tab';
+
+    // Eternal tabs should always be available even if there is nothing to show
+    ctx.registerTab({
+      isEphemeral: false,
+      uri: androidLogsTabUri,
+      content: {
+        render: () => m(LogPanel),
+        getTitle: () => 'Android Logs',
+      },
+    });
+
+    if (logCount > 0) {
+      ctx.addDefaultTab(androidLogsTabUri);
+    }
+
+    ctx.registerCommand({
+      id: 'perfetto.AndroidLog#ShowLogsTab',
+      name: 'Show Android Logs Tab',
+      callback: () => {
+        ctx.tabs.showTab(androidLogsTabUri);
+      },
+    });
   }
 }
 

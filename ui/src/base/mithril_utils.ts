@@ -35,18 +35,17 @@ export interface GateAttrs {
 
 // The gate component is a wrapper which can either be open or closed.
 // - When open, children are rendered inside a div where display = contents.
-// - When closed, children are rendered inside a div where display = none, and
-//   the children's view() function(s) will not be called.
+// - When closed, children are rendered inside a div where display = none
 // Use this component when we want to conditionally render certain children,
 // but we want to maintain their state.
 export const Gate = {
   view({attrs, children}: m.VnodeDOM<GateAttrs>) {
     return m(
-        '',
-        {
-          style: {display: attrs.open ? 'contents' : 'none'},
-        },
-        m(Passthrough, {onbeforeupdate: () => attrs.open}, children),
+      '',
+      {
+        style: {display: attrs.open ? 'contents' : 'none'},
+      },
+      children,
     );
   },
 };

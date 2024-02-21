@@ -21,14 +21,14 @@ import {
   AddTrackArgs,
   DeferredAction,
 } from '../common/actions';
-import {pluginManager} from '../common/plugins';
 import {
   InThreadTrackSortKey,
   SCROLLING_TRACK_GROUP,
   TrackSortKey,
   UtidToTrackSortKey,
 } from '../common/state';
-import {featureFlags, PERF_SAMPLE_FLAG} from '../core/feature_flags';
+import {globals} from '../frontend/globals';
+import {PERF_SAMPLE_FLAG} from '../core/feature_flags';
 import {PrimaryTrackSortKey} from '../public';
 import {getTrackName} from '../public/utils';
 import {Engine, EngineProxy} from '../trace_processor/engine';
@@ -38,7 +38,7 @@ import {
   STR,
   STR_NULL,
 } from '../trace_processor/query_result';
-import {ASYNC_SLICE_TRACK_KIND} from '../tracks/async_slices/async_slice_track';
+import {ASYNC_SLICE_TRACK_KIND} from '../tracks/async_slices';
 import {
   ENABLE_SCROLL_JANK_PLUGIN_V2,
   getScrollJankTracks,
@@ -58,29 +58,6 @@ import {
 } from '../tracks/screenshots';
 import {THREAD_STATE_TRACK_KIND} from '../tracks/thread_state';
 
-const TRACKS_V2_FLAG = featureFlags.register({
-  id: 'tracksV2.1',
-  name: 'Tracks V2',
-  description: 'Show tracks built on top of the Track V2 API.',
-  defaultValue: true,
-});
-
-const TRACKS_V2_COMPARE_FLAG = featureFlags.register({
-  id: 'tracksV2Compare',
-  name: 'Tracks V2: Also show V1 tracks',
-  description:
-      'Show V1 tracks side by side with V2 tracks. Does nothing if TracksV2 is not enabled.',
-  defaultValue: false,
-});
-
-function showV2(): boolean {
-  return TRACKS_V2_FLAG.get();
-}
-
-function showV1(): boolean {
-  return !showV2() || (showV2() && TRACKS_V2_COMPARE_FLAG.get());
-}
-
 const MEM_DMA_COUNTER_NAME = 'mem.dma_heap';
 const MEM_DMA = 'mem.dma_buffer';
 const MEM_ION = 'mem.ion';
@@ -90,9 +67,9 @@ const F2FS_IOSTAT_LAT_TAG = 'f2fs_iostat_latency.';
 const F2FS_IOSTAT_LAT_GROUP_NAME = 'f2fs_iostat_latency';
 const DISK_IOSTAT_TAG = 'diskstat.';
 const DISK_IOSTAT_GROUP_NAME = 'diskstat';
-const UFS_CMD_TAG = 'io.ufs.command.tag';
-const UFS_CMD_TAG_GROUP_NAME = 'io.ufs.command.tags';
 const BUDDY_INFO_TAG = 'mem.buddyinfo';
+const UFS_CMD_TAG_REGEX = new RegExp('^io.ufs.command.tag.*$');
+const UFS_CMD_TAG_GROUP = 'io.ufs.command.tags';
 // NB: Userspace wakelocks start with "WakeLock" not "Wakelock".
 const KERNEL_WAKELOCK_REGEX = new RegExp('^Wakelock.*$');
 const KERNEL_WAKELOCK_GROUP = 'Kernel wakelocks';
@@ -131,10 +108,10 @@ class TrackDecider {
   async guessCpuSizes(): Promise<Map<number, string>> {
     const cpuToSize = new Map<number, string>();
     await this.engine.query(`
-      INCLUDE PERFETTO MODULE common.cpus;
+      INCLUDE PERFETTO MODULE cpu.size;
     `);
     const result = await this.engine.query(`
-      SELECT cpu, GUESS_CPU_SIZE(cpu) as size FROM cpu_counter_track;
+      SELECT cpu, cpu_guess_core_type(cpu) as size FROM cpu_counter_track;
     `);
 
     const it = result.iter({
@@ -290,25 +267,14 @@ class TrackDecider {
         }
       }
 
-      if (showV1()) {
-        const track: AddTrackArgs = {
-          uri: `perfetto.AsyncSlices#${rawName}.${it.parentId}`,
-          trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
-          trackGroup,
-          name,
-        };
-        this.tracksToAdd.push(track);
-      }
+      const track: AddTrackArgs = {
+        uri: `perfetto.AsyncSlices#${rawName}.${it.parentId}`,
+        trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
+        trackGroup,
+        name,
+      };
 
-      if (showV2()) {
-        const track: AddTrackArgs = {
-          uri: `perfetto.AsyncSlices#${rawName}.${it.parentId}.v2`,
-          trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
-          trackGroup,
-          name,
-        };
-        this.tracksToAdd.push(track);
-      }
+      this.tracksToAdd.push(track);
     }
   }
 
@@ -405,7 +371,7 @@ class TrackDecider {
 
     for (const track of ionTracks) {
       if (!foundSummary &&
-          [MEM_DMA_COUNTER_NAME, MEM_ION].includes(track.name)) {
+        [MEM_DMA_COUNTER_NAME, MEM_ION].includes(track.name)) {
         foundSummary = true;
         track.key = summaryTrackKey;
         track.trackGroup = undefined;
@@ -469,35 +435,6 @@ class TrackDecider {
     }
   }
 
-  async groupGlobalUfsCmdTagTracks(tag: string, group: string): Promise<void> {
-    const ufsCmdTagTracks: AddTrackArgs[] = [];
-
-    for (const track of this.tracksToAdd) {
-      if (track.name.startsWith(tag)) {
-        ufsCmdTagTracks.push(track);
-      }
-    }
-
-    if (ufsCmdTagTracks.length === 0) {
-      return;
-    }
-
-    const id = uuidv4();
-    const summaryTrackKey = uuidv4();
-    ufsCmdTagTracks[0].key = summaryTrackKey;
-    for (const track of ufsCmdTagTracks) {
-      track.trackGroup = id;
-    }
-
-    const addGroup = Actions.addTrackGroup({
-      summaryTrackKey,
-      name: group,
-      id,
-      collapsed: true,
-    });
-    this.addTrackGroupActions.push(addGroup);
-  }
-
   async groupGlobalBuddyInfoTracks(): Promise<void> {
     const buddyInfoTracks: AddTrackArgs[] = [];
     const devMap = new Map<string, string>();
@@ -554,9 +491,9 @@ class TrackDecider {
       // Group all the frequency tracks together (except the CPU and GPU
       // frequency ones).
       if (track.name.endsWith('Frequency') && !track.name.startsWith('Cpu') &&
-          !track.name.startsWith('Gpu')) {
+        !track.name.startsWith('Gpu')) {
         if (track.trackGroup !== undefined &&
-            track.trackGroup !== SCROLLING_TRACK_GROUP) {
+          track.trackGroup !== SCROLLING_TRACK_GROUP) {
           continue;
         }
         if (track.uri === NULL_TRACK_URI) {
@@ -596,12 +533,13 @@ class TrackDecider {
       new RegExp('^Gpu .*$', 'i'),
       new RegExp('^Trace Triggers$'),
       new RegExp('^Android App Startups$'),
+      new RegExp('^Device State.*$'),
     ];
 
     let groupUuid = undefined;
     for (const track of this.tracksToAdd) {
       if (track.trackGroup !== undefined &&
-          track.trackGroup !== SCROLLING_TRACK_GROUP) {
+        track.trackGroup !== SCROLLING_TRACK_GROUP) {
         continue;
       }
       if (track.uri === NULL_TRACK_URI) {
@@ -646,7 +584,7 @@ class TrackDecider {
     for (const track of this.tracksToAdd) {
       if (regex.test(track.name)) {
         if (track.trackGroup !== undefined &&
-            track.trackGroup !== SCROLLING_TRACK_GROUP) {
+          track.trackGroup !== SCROLLING_TRACK_GROUP) {
           continue;
         }
         if (track.uri === NULL_TRACK_URI) {
@@ -681,7 +619,7 @@ class TrackDecider {
 
   async addLogsTrack(engine: EngineProxy): Promise<void> {
     const result =
-        await engine.query(`select count(1) as cnt from android_logs`);
+      await engine.query(`select count(1) as cnt from android_logs`);
     const count = result.firstRow({cnt: NUM}).cnt;
 
     if (count > 0) {
@@ -764,7 +702,7 @@ class TrackDecider {
 
       let summaryTrackKey = undefined;
       let trackGroupId =
-          upid === 0 ? SCROLLING_TRACK_GROUP : this.upidToUuid.get(upid);
+        upid === 0 ? SCROLLING_TRACK_GROUP : this.upidToUuid.get(upid);
 
       if (groupName) {
         // If this is the first track encountered for a certain group,
@@ -821,7 +759,7 @@ class TrackDecider {
         name,
         trackSortKey: PrimaryTrackSortKey.COUNTER_TRACK,
         trackGroup: upid === 0 ? SCROLLING_TRACK_GROUP :
-                                 this.upidToUuid.get(upid),
+          this.upidToUuid.get(upid),
       });
     }
   }
@@ -863,31 +801,17 @@ class TrackDecider {
 
       const priority = InThreadTrackSortKey.THREAD_SCHEDULING_STATE_TRACK;
       const name =
-          getTrackName({utid, tid, threadName, kind: THREAD_STATE_TRACK_KIND});
+        getTrackName({utid, tid, threadName, kind: THREAD_STATE_TRACK_KIND});
 
-      if (showV1()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.ThreadState#${upid}.${utid}`,
-          name,
-          trackGroup: uuid,
-          trackSortKey: {
-            utid,
-            priority,
-          },
-        });
-      }
-
-      if (showV2()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.ThreadState#${utid}.v2`,
-          name,
-          trackGroup: uuid,
-          trackSortKey: {
-            utid,
-            priority,
-          },
-        });
-      }
+      this.tracksToAdd.push({
+        uri: `perfetto.ThreadState#${utid}`,
+        name,
+        trackGroup: uuid,
+        trackSortKey: {
+          utid,
+          priority,
+        },
+      });
     }
   }
 
@@ -1036,23 +960,12 @@ class TrackDecider {
         kind: ASYNC_SLICE_TRACK_KIND,
       });
 
-      if (showV1()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.AsyncSlices#process.${pid}${rawTrackIds}`,
-          name,
-          trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
-          trackGroup: uuid,
-        });
-      }
-
-      if (showV2()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.AsyncSlices#process.${pid}${rawTrackIds}.v2`,
-          name,
-          trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
-          trackGroup: uuid,
-        });
-      }
+      this.tracksToAdd.push({
+        uri: `perfetto.AsyncSlices#process.${pid}${rawTrackIds}`,
+        name,
+        trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
+        trackGroup: uuid,
+      });
     }
   }
 
@@ -1091,18 +1004,21 @@ class TrackDecider {
       package_name: STR_NULL,
     });
 
-    let groupMap = new Map<string, [string, string]>(); //[name] -> [uuid, key]
+    // Map From [name] -> [uuid, key]
+    const groupMap = new Map<string, [string, string]>();
 
     for (; it.valid(); it.next()) {
-      if (it.name == null || it.uid == null)
+      if (it.name == null || it.uid == null) {
         continue;
+      }
       const rawName = it.name;
       const uid = it.uid === null ? undefined : it.uid;
-      let userName = it.package_name === null ? `UID: ${uid}` : it.package_name;
+      const userName =
+        it.package_name === null ? `UID: ${uid}` : it.package_name;
 
-      let groupUuid = `uid-track-group${rawName}`;
+      const groupUuid = `uid-track-group${rawName}`;
       if (groupMap.get(rawName) === undefined) {
-        let summaryTrackKey = uuidv4();
+        const summaryTrackKey = uuidv4();
         this.tracksToAdd.push({
           uri: NULL_TRACK_URI,
           trackSortKey: PrimaryTrackSortKey.NULL_TRACK,
@@ -1114,26 +1030,15 @@ class TrackDecider {
         groupMap.set(rawName, [groupUuid, summaryTrackKey]);
       }
 
-      if (showV1()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.AsyncSlices#${rawName}.${uid}`,
-          name: userName,
-          trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
-          trackGroup: groupUuid,
-        });
-      }
-
-      if (showV2()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.AsyncSlices#${rawName}.${uid}.v2`,
-          name: userName,
-          trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
-          trackGroup: groupUuid,
-        });
-      }
+      this.tracksToAdd.push({
+        uri: `perfetto.AsyncSlices#${rawName}.${uid}`,
+        name: userName,
+        trackSortKey: PrimaryTrackSortKey.ASYNC_SLICE_TRACK,
+        trackGroup: groupUuid,
+      });
     }
 
-    for (let [name, [groupUuid, summaryTrackKey]] of groupMap) {
+    for (const [name, [groupUuid, summaryTrackKey]] of groupMap) {
       const addGroup = Actions.addTrackGroup({
         name: name,
         id: groupUuid,
@@ -1190,25 +1095,14 @@ class TrackDecider {
 
       const kind = ACTUAL_FRAMES_SLICE_TRACK_KIND;
       const name =
-          getTrackName({name: trackName, upid, pid, processName, kind});
+        getTrackName({name: trackName, upid, pid, processName, kind});
 
-      if (showV1()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.ActualFrames#${upid}`,
-          name,
-          trackSortKey: PrimaryTrackSortKey.ACTUAL_FRAMES_SLICE_TRACK,
-          trackGroup: uuid,
-        });
-      }
-
-      if (showV2()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.ActualFrames#${upid}.v2`,
-          name,
-          trackSortKey: PrimaryTrackSortKey.ACTUAL_FRAMES_SLICE_TRACK,
-          trackGroup: uuid,
-        });
-      }
+      this.tracksToAdd.push({
+        uri: `perfetto.ActualFrames#${upid}`,
+        name,
+        trackSortKey: PrimaryTrackSortKey.ACTUAL_FRAMES_SLICE_TRACK,
+        trackGroup: uuid,
+      });
     }
   }
 
@@ -1259,25 +1153,14 @@ class TrackDecider {
 
       const kind = EXPECTED_FRAMES_SLICE_TRACK_KIND;
       const name =
-          getTrackName({name: trackName, upid, pid, processName, kind});
+        getTrackName({name: trackName, upid, pid, processName, kind});
 
-      if (showV1()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.ExpectedFrames#${upid}`,
-          name,
-          trackSortKey: PrimaryTrackSortKey.EXPECTED_FRAMES_SLICE_TRACK,
-          trackGroup: uuid,
-        });
-      }
-
-      if (showV2()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.ExpectedFrames#${upid}.v2`,
-          name,
-          trackSortKey: PrimaryTrackSortKey.EXPECTED_FRAMES_SLICE_TRACK,
-          trackGroup: uuid,
-        });
-      }
+      this.tracksToAdd.push({
+        uri: `perfetto.ExpectedFrames#${upid}`,
+        name,
+        trackSortKey: PrimaryTrackSortKey.EXPECTED_FRAMES_SLICE_TRACK,
+        trackGroup: uuid,
+      });
     }
   }
 
@@ -1323,33 +1206,18 @@ class TrackDecider {
 
       const kind = SLICE_TRACK_KIND;
       const name = getTrackName({name: trackName, utid, tid, threadName, kind});
-      if (showV1()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.ChromeSlices#${trackId}`,
-          name,
-          trackGroup: uuid,
-          trackSortKey: {
-            utid,
-            priority: isDefaultTrackForScope ?
-                InThreadTrackSortKey.DEFAULT_TRACK :
-                InThreadTrackSortKey.ORDINARY,
-          },
-        });
-      }
 
-      if (showV2()) {
-        this.tracksToAdd.push({
-          uri: `perfetto.ChromeSlices#${trackId}.v2`,
-          name,
-          trackGroup: uuid,
-          trackSortKey: {
-            utid,
-            priority: isDefaultTrackForScope ?
-                InThreadTrackSortKey.DEFAULT_TRACK :
-                InThreadTrackSortKey.ORDINARY,
-          },
-        });
-      }
+      this.tracksToAdd.push({
+        uri: `perfetto.ChromeSlices#${trackId}`,
+        name,
+        trackGroup: uuid,
+        trackSortKey: {
+          utid,
+          priority: isDefaultTrackForScope ?
+            InThreadTrackSortKey.DEFAULT_TRACK :
+            InThreadTrackSortKey.ORDINARY,
+        },
+      });
     }
   }
 
@@ -1379,12 +1247,12 @@ class TrackDecider {
       const processName = it.processName;
       const uuid = this.getUuid(0, upid);
       const name = getTrackName(
-          {name: trackName, upid, pid, kind: COUNTER_TRACK_KIND, processName});
+        {name: trackName, upid, pid, kind: COUNTER_TRACK_KIND, processName});
       this.tracksToAdd.push({
         uri: `perfetto.Counter#process${trackId}`,
         name,
         trackSortKey: await this.resolveTrackSortKeyForProcessCounterTrack(
-            upid, trackName || undefined),
+          upid, trackName || undefined),
         trackGroup: uuid,
       });
     }
@@ -1427,16 +1295,16 @@ class TrackDecider {
     }
   }
 
-  getUuidUnchecked(utid: number, upid: number|null) {
+  getUuidUnchecked(utid: number, upid: number | null) {
     return upid === null ? this.utidToUuid.get(utid) :
-                           this.upidToUuid.get(upid);
+      this.upidToUuid.get(upid);
   }
 
-  getUuid(utid: number, upid: number|null) {
+  getUuid(utid: number, upid: number | null) {
     return assertExists(this.getUuidUnchecked(utid, upid));
   }
 
-  getOrCreateUuid(utid: number, upid: number|null) {
+  getOrCreateUuid(utid: number, upid: number | null) {
     let uuid = this.getUuidUnchecked(utid, upid);
     if (uuid === undefined) {
       uuid = uuidv4();
@@ -1663,7 +1531,7 @@ class TrackDecider {
 
       // Group by upid if present else by utid.
       let pUuid =
-          upid === null ? this.utidToUuid.get(utid) : this.upidToUuid.get(upid);
+        upid === null ? this.utidToUuid.get(utid) : this.upidToUuid.get(upid);
       // These should only happen once for each track group.
       if (pUuid === undefined) {
         pUuid = this.getOrCreateUuid(utid, upid);
@@ -1675,14 +1543,14 @@ class TrackDecider {
           uri,
           key: summaryTrackKey,
           trackSortKey: hasSched ?
-              PrimaryTrackSortKey.PROCESS_SCHEDULING_TRACK :
-              PrimaryTrackSortKey.PROCESS_SUMMARY_TRACK,
+            PrimaryTrackSortKey.PROCESS_SCHEDULING_TRACK :
+            PrimaryTrackSortKey.PROCESS_SUMMARY_TRACK,
           name: `${upid === null ? tid : pid} summary`,
           labels: it.chromeProcessLabels.split(','),
         });
 
         const name =
-            getTrackName({utid, processName, pid, threadName, tid, upid});
+          getTrackName({utid, processName, pid, threadName, tid, upid});
         const addTrackGroup = Actions.addTrackGroup({
           summaryTrackKey,
           name,
@@ -1726,15 +1594,54 @@ class TrackDecider {
   }
 
   addPluginTracks(): void {
-    const tracks = pluginManager.findPotentialTracks();
+    const groupNameToUuid = new Map<string, string>();
+    const tracks = globals.trackManager.findPotentialTracks();
+
     for (const info of tracks) {
+      const groupName = info.groupName;
+
+      let groupUuid = SCROLLING_TRACK_GROUP;
+      if (groupName) {
+        const uuid = groupNameToUuid.get(groupName);
+        if (uuid) {
+          groupUuid = uuid;
+        } else {
+          console.log(`Creating group "${groupName}"`);
+
+          // Add the summary track
+          const summaryTrackKey = uuidv4();
+          this.tracksToAdd.push({
+            uri: NULL_TRACK_URI,
+            trackSortKey: PrimaryTrackSortKey.NULL_TRACK,
+            name: groupName,
+            trackGroup: undefined,
+            key: summaryTrackKey,
+          });
+
+          // Add the group
+          groupUuid = uuidv4();
+          const addGroup = Actions.addTrackGroup({
+            name: groupName,
+            id: groupUuid,
+            collapsed: true,
+            summaryTrackKey,
+            fixedOrdering: true,
+          });
+          this.addTrackGroupActions.push(addGroup);
+
+          // Add group to the map
+          groupNameToUuid.set(groupName, groupUuid);
+        }
+      }
+
       this.tracksToAdd.push({
         uri: info.uri,
         name: info.displayName,
         // TODO(hjd): Fix how sorting works. Plugins should expose
         // 'sort keys' which the user can use to choose a sort order.
         trackSortKey: info.sortKey ?? PrimaryTrackSortKey.ORDINARY_TRACK,
-        trackGroup: SCROLLING_TRACK_GROUP,
+        trackGroup: groupUuid,
+        params: info.params,
       });
     }
   }
@@ -1760,31 +1667,31 @@ class TrackDecider {
     await this.addScrollJankPluginTracks();
     await this.addCpuSchedulingTracks();
     await this.addFtraceTrack(
-        this.engine.getProxy('TrackDecider::addFtraceTrack'));
+      this.engine.getProxy('TrackDecider::addFtraceTrack'));
     await this.addCpuFreqTracks(
-        this.engine.getProxy('TrackDecider::addCpuFreqTracks'));
+      this.engine.getProxy('TrackDecider::addCpuFreqTracks'));
     await this.addGlobalAsyncTracks(
-        this.engine.getProxy('TrackDecider::addGlobalAsyncTracks'));
+      this.engine.getProxy('TrackDecider::addGlobalAsyncTracks'));
     await this.addGpuFreqTracks(
-        this.engine.getProxy('TrackDecider::addGpuFreqTracks'));
+      this.engine.getProxy('TrackDecider::addGpuFreqTracks'));
     await this.addCpuFreqLimitCounterTracks(
-          this.engine.getProxy('TrackDecider::addCpuFreqLimitCounterTracks'));
+      this.engine.getProxy('TrackDecider::addCpuFreqLimitCounterTracks'));
     await this.addCpuPerfCounterTracks(
-        this.engine.getProxy('TrackDecider::addCpuPerfCounterTracks'));
+      this.engine.getProxy('TrackDecider::addCpuPerfCounterTracks'));
     this.addPluginTracks();
     await this.addAnnotationTracks(
-        this.engine.getProxy('TrackDecider::addAnnotationTracks'));
+      this.engine.getProxy('TrackDecider::addAnnotationTracks'));
     await this.groupGlobalIonTracks();
     await this.groupGlobalIostatTracks(F2FS_IOSTAT_TAG, F2FS_IOSTAT_GROUP_NAME);
     await this.groupGlobalIostatTracks(
-        F2FS_IOSTAT_LAT_TAG, F2FS_IOSTAT_LAT_GROUP_NAME);
+      F2FS_IOSTAT_LAT_TAG, F2FS_IOSTAT_LAT_GROUP_NAME);
     await this.groupGlobalIostatTracks(DISK_IOSTAT_TAG, DISK_IOSTAT_GROUP_NAME);
-    await this.groupGlobalUfsCmdTagTracks(UFS_CMD_TAG, UFS_CMD_TAG_GROUP_NAME);
+    await this.groupTracksByRegex(UFS_CMD_TAG_REGEX, UFS_CMD_TAG_GROUP);
     await this.groupGlobalBuddyInfoTracks();
     await this.groupTracksByRegex(KERNEL_WAKELOCK_REGEX, KERNEL_WAKELOCK_GROUP);
     await this.groupTracksByRegex(NETWORK_TRACK_REGEX, NETWORK_TRACK_GROUP);
     await this.groupTracksByRegex(
-        ENTITY_RESIDENCY_REGEX, ENTITY_RESIDENCY_GROUP);
+      ENTITY_RESIDENCY_REGEX, ENTITY_RESIDENCY_GROUP);
     await this.groupTracksByRegex(UCLAMP_REGEX, UCLAMP_GROUP);
     await this.groupFrequencyTracks(FREQUENCY_GROUP);
     await this.groupTracksByRegex(POWER_RAILS_REGEX, POWER_RAILS_GROUP);
@@ -1797,7 +1704,7 @@ class TrackDecider {
     // be listed with their user/package name only, and they will be grouped
     // under on their original shared track names. E.g. "GPU Work Period"
     await this.addUserAsyncSliceTracks(
-        this.engine.getProxy('TrackDecider::addUserAsyncSliceTracks'));
+      this.engine.getProxy('TrackDecider::addUserAsyncSliceTracks'));
 
     // Pre-group all kernel "threads" (actually processes) if this is a linux
     // system trace. Below, addProcessTrackGroups will skip them due to an
@@ -1806,37 +1713,37 @@ class TrackDecider {
     // TrackKindPriority.MAIN_THREAD, any process-level tracks will end up
     // pushed to the bottom of the group in the UI.
     await this.addKernelThreadGrouping(
-        this.engine.getProxy('TrackDecider::addKernelThreadGrouping'));
+      this.engine.getProxy('TrackDecider::addKernelThreadGrouping'));
 
     // Create the per-process track groups. Note that this won't necessarily
     // create a track per process. If a process has been completely idle and has
     // no sched events, no track group will be emitted.
     // Will populate this.addTrackGroupActions
     await this.addProcessTrackGroups(
-        this.engine.getProxy('TrackDecider::addProcessTrackGroups'));
+      this.engine.getProxy('TrackDecider::addProcessTrackGroups'));
 
     await this.addProcessHeapProfileTracks(
-        this.engine.getProxy('TrackDecider::addProcessHeapProfileTracks'));
+      this.engine.getProxy('TrackDecider::addProcessHeapProfileTracks'));
     if (PERF_SAMPLE_FLAG.get()) {
       await this.addProcessPerfSamplesTracks(
-          this.engine.getProxy('TrackDecider::addProcessPerfSamplesTracks'));
+        this.engine.getProxy('TrackDecider::addProcessPerfSamplesTracks'));
     }
     await this.addProcessCounterTracks(
-        this.engine.getProxy('TrackDecider::addProcessCounterTracks'));
+      this.engine.getProxy('TrackDecider::addProcessCounterTracks'));
     await this.addProcessAsyncSliceTracks(
-        this.engine.getProxy('TrackDecider::addProcessAsyncSliceTracks'));
+      this.engine.getProxy('TrackDecider::addProcessAsyncSliceTracks'));
     await this.addActualFramesTracks(
-        this.engine.getProxy('TrackDecider::addActualFramesTracks'));
+      this.engine.getProxy('TrackDecider::addActualFramesTracks'));
     await this.addExpectedFramesTracks(
-        this.engine.getProxy('TrackDecider::addExpectedFramesTracks'));
+      this.engine.getProxy('TrackDecider::addExpectedFramesTracks'));
     await this.addThreadCounterTracks(
-        this.engine.getProxy('TrackDecider::addThreadCounterTracks'));
+      this.engine.getProxy('TrackDecider::addThreadCounterTracks'));
     await this.addThreadStateTracks(
-        this.engine.getProxy('TrackDecider::addThreadStateTracks'));
+      this.engine.getProxy('TrackDecider::addThreadStateTracks'));
     await this.addThreadSliceTracks(
-        this.engine.getProxy('TrackDecider::addThreadSliceTracks'));
+      this.engine.getProxy('TrackDecider::addThreadSliceTracks'));
     await this.addThreadCpuSampleTracks(
-        this.engine.getProxy('TrackDecider::addThreadCpuSampleTracks'));
+      this.engine.getProxy('TrackDecider::addThreadCpuSampleTracks'));
     await this.addLogsTrack(this.engine.getProxy('TrackDecider::addLogsTrack'));
 
     // TODO(hjd): Move into plugin API.
@@ -1851,11 +1758,11 @@ class TrackDecider {
     }
 
     this.addTrackGroupActions.push(
-        Actions.addTracks({tracks: this.tracksToAdd}));
+      Actions.addTracks({tracks: this.tracksToAdd}));
 
     const threadOrderingMetadata = await this.computeThreadOrderingMetadata();
     this.addTrackGroupActions.push(
-        Actions.setUtidToTrackSortKey({threadOrderingMetadata}));
+      Actions.setUtidToTrackSortKey({threadOrderingMetadata}));
 
     return this.addTrackGroupActions;
   }
@@ -1863,7 +1770,7 @@ class TrackDecider {
   // Some process counter tracks are tied to specific threads based on their
   // name.
   private async resolveTrackSortKeyForProcessCounterTrack(
-      upid: number, threadName?: string): Promise<TrackSortKey> {
+    upid: number, threadName?: string): Promise<TrackSortKey> {
     if (threadName !== 'GPU completion') {
       return PrimaryTrackSortKey.COUNTER_TRACK;
     }
@@ -1886,8 +1793,8 @@ class TrackDecider {
   }
 
   private static getThreadSortKey(
-      threadName?: string|null, tid?: number|null,
-      pid?: number|null): PrimaryTrackSortKey {
+    threadName?: string | null, tid?: number | null,
+    pid?: number | null): PrimaryTrackSortKey {
     if (pid !== undefined && pid !== null && pid === tid) {
       return PrimaryTrackSortKey.MAIN_THREAD;
     }
@@ -1897,13 +1804,13 @@ class TrackDecider {
 
     // Chrome main threads should always come first within their process.
     if (threadName === 'CrBrowserMain' || threadName === 'CrRendererMain' ||
-        threadName === 'CrGpuMain') {
+      threadName === 'CrGpuMain') {
       return PrimaryTrackSortKey.MAIN_THREAD;
     }
 
     // Chrome IO threads should always come immediately after the main thread.
     if (threadName === 'Chrome_ChildIOThread' ||
-        threadName === 'Chrome_IOThread') {
+      threadName === 'Chrome_IOThread') {
       return PrimaryTrackSortKey.CHROME_IO_THREAD;
     }
 
@@ -1914,12 +1821,12 @@ class TrackDecider {
     }
 
     switch (true) {
-      case /.*RenderThread.*/.test(threadName):
-        return PrimaryTrackSortKey.RENDER_THREAD;
-      case /.*GPU completion.*/.test(threadName):
-        return PrimaryTrackSortKey.GPU_COMPLETION_THREAD;
-      default:
-        return PrimaryTrackSortKey.ORDINARY_THREAD;
+    case /.*RenderThread.*/.test(threadName):
+      return PrimaryTrackSortKey.RENDER_THREAD;
+    case /.*GPU completion.*/.test(threadName):
+      return PrimaryTrackSortKey.GPU_COMPLETION_THREAD;
+    default:
+      return PrimaryTrackSortKey.ORDINARY_THREAD;
     }
   }
 }

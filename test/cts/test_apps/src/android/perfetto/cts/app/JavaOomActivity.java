@@ -18,14 +18,23 @@ package android.perfetto.cts.app;
 
 import android.app.Activity;
 import android.os.Bundle;
+import android.util.Log;
 
 public class JavaOomActivity extends Activity {
+    public static final String TAG = "JavaOomActivity";
+
     @Override
     public void onCreate(Bundle state) {
         super.onCreate(state);
         new Thread(() -> {
             try {
+                Log.i(TAG, "Before the allocation");
+                // Try to allocate a big array: it should cause ART to run out of memory.
                 byte[] alloc = new byte[Integer.MAX_VALUE];
+                // Use the array, otherwise R8 might optimize the allocation away. (b/322478366,
+                // b/325467497).
+                alloc[5] = 42;
+                Log.i(TAG, "After the allocation " + alloc[5]);
             } catch (OutOfMemoryError e) {
             }
         }).start();
