@@ -170,7 +170,7 @@ class AndroidLog implements Plugin {
       uri: androidLogsTabUri,
       content: {
         render: () => m(LogPanel),
-        getTitle: () => 'Android Logs',
+        getTitle: () => 'System Logs',
       },
     });
 
@@ -180,7 +180,7 @@ class AndroidLog implements Plugin {
 
     ctx.registerCommand({
       id: 'perfetto.AndroidLog#ShowLogsTab',
-      name: 'Show Android Logs Tab',
+      name: 'Show System Logs Tab',
       callback: () => {
         ctx.tabs.showTab(androidLogsTabUri);
       },
