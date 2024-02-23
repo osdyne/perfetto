@@ -190,6 +190,9 @@ export function postMessageHandler(messageEvent: MessageEvent) {
     // downloading and sharing a trace.
     postedTrace.localOnly = true;
     globals.dispatch(Actions.openTraceFromBuffer(postedTrace));
+
+    // Also hide sidebar in this case
+    globals.dispatch(Actions.setSidebar({visible: false}));
   };
 
   const trustAndOpenTrace = () => {
