@@ -19,7 +19,7 @@ import {ErrorDetails} from '../base/logging';
 import {globals} from './globals';
 // import {Router} from './router';
 
-type TraceCategories = 'Trace Actions'|'Record Trace'|'User Actions';
+type TraceCategories = 'Trace Actions' | 'Record Trace' | 'User Actions';
 // const ANALYTICS_ID = 'G-BD89KT2P3C';
 const PAGE_TITLE = 'no-page-title';
 
@@ -34,7 +34,7 @@ function isValidUrl(s: string) {
   return url.protocol === 'http:' || url.protocol === 'https:';
 }
 
-function getReferrerOverride(): string|undefined {
+function getReferrerOverride(): string | undefined {
   const route = Router.parseUrl(window.location.href);
   const referrer = route.args.referrer;
   if (referrer) {
@@ -69,9 +69,12 @@ export function initAnalytics() {
   // Skip analytics is the fragment has "testing=1", this is used by UI tests.
   // Skip analytics in embeddedMode since iFrames do not have the same access to
   // local storage.
-  if ((window.location.origin.startsWith('http://localhost:') ||
-       window.location.origin.endsWith('.perfetto.dev')) &&
-      !globals.testing && !globals.embeddedMode) {
+  if (
+    (window.location.origin.startsWith('http://localhost:') ||
+      window.location.origin.endsWith('.perfetto.dev')) &&
+    !globals.testing &&
+    !globals.embeddedMode
+  ) {
     return new AnalyticsImpl();
   }
   return new NullAnalytics();
@@ -80,13 +83,13 @@ export function initAnalytics() {
 const gtagGlobals = window as {} as {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   dataLayer: any[];
-  gtag: (command: string, event: string|Date, args?: {}) => void;
+  gtag: (command: string, event: string | Date, args?: {}) => void;
 };
 
 export interface Analytics {
   initialize(): void;
   updatePath(_: string): void;
-  logEvent(category: TraceCategories|null, event: string): void;
+  logEvent(category: TraceCategories | null, event: string): void;
   logError(err: ErrorDetails): void;
   isEnabled(): boolean;
 }
@@ -94,7 +97,7 @@ export interface Analytics {
 export class NullAnalytics implements Analytics {
   initialize() {}
   updatePath(_: string) {}
-  logEvent(_category: TraceCategories|null, _event: string) {}
+  logEvent(_category: TraceCategories | null, _event: string) {}
   logError(_err: ErrorDetails) {}
   isEnabled(): boolean {
     return false;
@@ -140,7 +143,8 @@ class AnalyticsImpl implements Analytics {
     const route = window.location.href;
     console.log(
       `GA initialized. route=${route}`,
-      `isInternalUser=${globals.isInternalUser}`);
+      `isInternalUser=${globals.isInternalUser}`,
+    );
     // GA's recommendation for SPAs is to disable automatic page views and
     // manually send page_view events. See:
     // https://developers.google.com/analytics/devguides/collection/gtagjs/pages#manual_pageviews
@@ -164,11 +168,13 @@ class AnalyticsImpl implements Analytics {
 
   updatePath(path: string) {
     return;
-    gtagGlobals.gtag(
-      'event', 'page_view', {page_path: path, page_title: PAGE_TITLE});
+    gtagGlobals.gtag('event', 'page_view', {
+      page_path: path,
+      page_title: PAGE_TITLE,
+    });
   }
 
-  logEvent(category: TraceCategories|null, event: string) {
+  logEvent(category: TraceCategories | null, event: string) {
     return;
     gtagGlobals.gtag('event', event, {event_category: category});
   }

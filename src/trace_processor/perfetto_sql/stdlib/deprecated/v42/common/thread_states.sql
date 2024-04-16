@@ -14,6 +14,7 @@
 -- limitations under the License.
 
 INCLUDE PERFETTO MODULE deprecated.v42.common.timestamps;
+INCLUDE PERFETTO MODULE sched.time_in_state;
 INCLUDE PERFETTO MODULE sched.states;
 INCLUDE PERFETTO MODULE cpu.size;
 
@@ -28,20 +29,9 @@ CREATE PERFETTO FUNCTION human_readable_thread_state_name(
   id INT)
 -- Human-readable name for the thread state.
 RETURNS STRING AS
-WITH data AS (
-  SELECT
-    _translate_thread_state_name(state) AS state,
-    (CASE io_wait
-      WHEN 1 THEN ' (IO)'
-      WHEN 0 THEN ' (non-IO)'
-      ELSE ''
-    END) AS io_wait
-  FROM thread_state
-  WHERE id = $id
-)
-SELECT
-  printf('%s%s', state, io_wait)
-FROM data;
+SELECT sched_state_io_to_human_readable_string(state, io_wait)
+FROM thread_state
+WHERE id = $id;
 
 -- Returns an aggregation of thread states (by state and cpu) for a given
 -- interval of time for a given thread.
@@ -66,35 +56,11 @@ RETURNS TABLE(
   -- The total duration.
   dur INT
 ) AS
-WITH
-states_starting_inside AS (
-  SELECT id
-  FROM thread_state
-  WHERE $ts <= ts
-    AND ts <= $ts + $dur
-    AND utid = $utid
-),
-first_state_starting_before AS (
-  SELECT id
-  FROM thread_state
-  WHERE ts < $ts AND utid = $utid
-  ORDER BY ts DESC
-  LIMIT 1
-),
-relevant_states AS (
-  SELECT * FROM states_starting_inside
-  UNION ALL
-  SELECT * FROM first_state_starting_before
-)
 SELECT
-  full_name.sched_state_full_name as state,
-  state as raw_state,
+  sched_state_io_to_human_readable_string(state, io_wait) as state,
+  state AS raw_state,
   cpu_guess_core_type(cpu) as cpu_type,
   cpu,
   blocked_function,
-  sum(spans_overlapping_dur($ts, $dur, ts, dur)) as dur
-FROM thread_state
-JOIN sched_state_full_name!(thread_state, state, io_wait) full_name USING (id)
-JOIN relevant_states USING (id)
-GROUP BY state, raw_state, cpu_type, cpu, blocked_function
-ORDER BY dur desc;
+  dur
+FROM sched_time_in_state_and_cpu_for_thread_in_interval($ts, $dur, $utid);
