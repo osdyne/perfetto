@@ -1,0 +1,9 @@
+{
+  "name": "@osdyne/otv",
+  "version": "0.0.0",
+  "repository": "git@github.com:osdyne/perfetto.git",
+  "scripts": {
+    "postinstall": "tools/install-build-deps --ui",
+    "build": "ui/build"
+  }
+}

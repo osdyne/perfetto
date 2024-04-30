@@ -1,0 +1,24 @@
+on:
+  push:
+    tags:
+      - 'v*'
+    branch: [otv]
+
+jobs:
+  release:
+    runs-on: [self-hosted]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v3
+        with:
+          node-version: "20"
+      - run: npm ci
+      - run: npm run build
+      - id: version
+        uses: release-kit/semver@v2
+      - run: npm version ${{ steps.version.outputs.full }}
+      - uses: JS-DevTools/npm-publish@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          registry: "https://npm.pkg.github.com"
+
