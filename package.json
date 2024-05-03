@@ -1,0 +1,14 @@
+{
+  "name": "@osdyne/otv",
+  "version": "0.0.0",
+  "repository": "git@github.com:osdyne/perfetto.git",
+  "files": ["dist"],
+  "scripts": {
+    "postinstall": "tools/install-build-deps --ui",
+    "build": "ui/build",
+    "clean": "rm -rf dist/* && mkdir -p dist",
+    "bundle:ui": "cp -R ./out/ui/ui/dist ./dist/ui && rm -rf ./dist/ui/dist ./dist/ui/out",
+    "bundle:wasm": "cp -R ./out/ui/wasm ./dist/wasm && rm -rf ./dist/wasm/gen ./dist/wasm/obj ./dist/wasm/toolchain.ninja",
+    "bundle": "npm run clean && npm run bundle:ui && npm run bundle:wasm"
+  }
+}
