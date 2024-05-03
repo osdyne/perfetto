@@ -17,7 +17,7 @@ jobs:
       - run: npm run bundle
       - id: version
         uses: release-kit/semver@v2
-      - run: npm version ${{ steps.version.outputs.full }}
+      - run: npm pkg set version=${{ steps.version.outputs.full }}
       - uses: JS-DevTools/npm-publish@v3
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
