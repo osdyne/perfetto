@@ -183,7 +183,7 @@ export class LogPanel implements m.ClassComponent<LogPanelAttrs> {
       return m(
         DetailsShell,
         {
-          title: 'Android Logs',
+          title: 'System Logs',
           description: `[${this.viewportBounds.top}, ${this.viewportBounds.bottom}] / ${totalEvents}`,
           buttons: m(LogsFilters, {store: attrs.filterStore}),
         },
