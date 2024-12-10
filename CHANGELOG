@@ -1,10 +1,206 @@
 Unreleased:
   Tracing service and probes:
     *
+  SQL Standard library:
+    *
   Trace Processor:
     *
   UI:
     *
+  SDK:
+    *
+
+
+v48.1 - 2024-10-14:
+  SDK:
+    * Fix build with MSVC.
+
+
+v48.0 - 2024-10-11:
+  Tracing service and probes:
+    * Improved accuracy of ftrace event cropping when there are multiple
+      concurrent tracing sessions. See `previous_bundle_end_timestamp` in
+      ftrace_event_bundle.proto.
+    * Increased watchdog timeout to 180s from 30s to make watchdog crashes
+      much less likely when system is under heavy load.
+  SQL Standard library:
+    * Improved CPU cycles calculation in `linux.cpu.utilization` modules:
+     `process`, `system` and `thread` by fixing a bug responsible for too high
+      CPU cycles values.
+    * Introduces functions responsible for calculating CPU cycles with
+      breakdown by CPU, thread, process and slice for a given interval.
+    * Added `linux.perf.samples` module for easy querying of perf samples
+      in traces.
+    * Added `stacks.cpu_profiling` module for easy querying of all CPU
+      profiling data in traces.
+  Trace Processor:
+    * Added (partial) support for the Gecko (Firefox) JSON profiler format.
+      Parsing is optimized for CPU profiling collected with `perf` and converted
+      to the Gecko format. Only parsing of samples is supported; parsing of
+      markers and any other features (e.g. colours) is *not* supported.
+    * Added (partial) suppoort for the perf script text format from both perf
+      and simpleperf. Only parsing files with the default formating or with pids
+      included (i.e. `-F +pid`) is supported. Any other formatting options are
+      *not* supported.
+    * Added support for parsing non-streaming ART method tracing format.
+    * Added support for parsing GZIP files with multiple gzip streams.
+    * Added support for parsing V8 CPU profling samples from proto traces.
+u    * Renamed Trace Processor's C++ method `RegisterSqlModule()` to
+     `RegisterSqlPackage()`, which better represents the module/package
+      relationship. Package is the top level grouping of modules, which are
+      objects being included with `INCLUDE PERFETTO MODULE`.
+      `RegisterSqlModule()` is still available and runs `RegisterSqlPackage()`.
+      `RegisterSqlModule()` will be deprecated in v50.0.
+  UI:
+    * Scheduling wakeup information now reflects whether the wakeup came
+      from an interrupt context. The per-cpu scheduling tracks now show only
+      non-interrupt wakeups, while the per-thread thread state tracks either
+      link to an exact waker slice or state that the wakeup is from an
+      interrupt. Older traces that are recorded without interrupt context
+      information treat all wakeups as non-interrupt.
+    * Nest global/user async tracks according to their parent/child relationship
+      in the trace.
+    * Introduced new workspace API which allows nested tracks & multiple
+      workspace support.
+    * Introduced middle ellipsis in track titles when title text is longer than
+      the available space, while preserving the start and end of title text &
+      add popup of full title text on hover.
+    * Fixed spurious judder issue in popups with tall content.
+    * Fixed bug where marker durations were not rendered on selected markers.
+    * Removed ChromeScrollJank V1 track (V2 should be used from now on).
+    * Major internal changes (affecting pugin developers and core contributors):
+      * Removed legacy selection types, use track event selection types going
+        forward for all single event selections.
+      * Details panels are now attached to the track rather than registered
+        separately.
+      * Introduced `registerSqlSelectionResolver`, which allow plugins to add
+        handlers allowing other parts of the codebase to make selection on
+        tracks from other plugins based on a sql table name and id.
+      * Changed lifetime of track instances; they are now created on trace load
+        by plugins and survive the lifetime of the trace, rather than getting
+        created and destroyed as they appear/disappear on the timeline.
+      * Fix circular dependencies and turn future instances into errors.
+  SDK:
+    *
+
+
+v47.0 - 2024-08-07:
+  SQL Standard library:
+    * Removed `cpu.cpus` and `cpu.size` modules. The functions inside
+      for guessing core type were inaccurate and often misleading.
+      There is no replacement for these as there is no accurate data
+      source available.
+    * Moved `cpu.utilization` package to `linux.cpu.utilization`. The
+      functionality inside this package only works properly on Linux
+      and Linux derived OSes (e.g. Android).
+    * Moved `cpu.freq` module to `linux.cpu.frequency` and renamed
+      `cpu_freq_counters` to `cpu_frequency_counters` for the same
+      reason as above.
+    * Moved `gpu.frequency` to `android.gpu.frequency` for the same reason as
+      above.
+    * Moved `cpu.idle` module to `linux.cpu.idle` or `linux.cpu.idle_stats` for
+      the same reason as above.
+    * Moved content of `linux.cpu_idle` into `linux.cpu.idle` and
+      `linux.cpu.idle_stats` to make it consistent with above changes.
+    * Moved `memory.android.gpu` to `android.memory.gpu`  to make it consistent
+      with above changes.`
+    * Moved contents of `memory.linux.process` to `linux.memory.process` and
+      `android.memory.process` to make it consistent with above changes.
+    * Moved `memory.linux.high_watermark` to `linux.memory.high_watermark` to
+      make it consistent with above changes.
+    * Moved `memory.heap_graph_dominator_tree` to
+      `android.memory.heap_graph.dominator_tree`. This is to allow for the
+      addition of more modules related to heap graphs.
+    * Added `linux_kernel_threads` table to `linux.threads` module.
+  Trace Processor:
+    * Change `NotifyEndOfFile` method to return a Status object. For backwards
+      compatibility, this value can be ignored but in the future a [[nodiscard]]
+      annotation will be added.
+    * Added `CREATE PERFETTO INDEX` to add sqlite-like indexes to Perfetto
+      tables. Has the same API as `CREATE INDEX`.
+  UI:
+    * Updated to Typescript 5.5.2, lib es2022, & upreved various packages.
+    * Made `Disposable`, `DisposableStack`, and their async variants available
+      to use in the UI.
+    * Vastly improved flamegraph.
+    * Added track filter which can be used to search for tracks by name.
+    * Added Wattson cpu power estimation plugin.
+    * Added option to show thread slice ancestor/descendant slices in thread
+      slice details panel context menu.
+    * Added feature where plugin can ask tracks to be automatically pinned when
+      adding tracks on trace load.
+    * Fixed inconsistent y-range for all CPU SS tracks.
+    * Switched to using explicit de/serialization when creating/loading
+      permalinks.
+    * Improved sched slice details query efficiency.
+    * Added `TagInput` widget.
+    * Added `ui/format-sources` script to run eslint and prettier in one go.
+    * Reduced number of circular imports.
+    * Added `SharedAsyncDisposable` for management of shared async resources.
+    * Fixed rendering of negative counter tracks.
+    * Improved data loss notification using a popup
+    * Tidied up `TrackDescriptor`.
+    * Added Android trace probes for ChromeOS
+    * Added feature to try reconnect when websocket connection is lost.
+    * Fixed bug in 1ns event rendering.
+    * Tidied up details panel font sizes and weights.
+    * Added segmented buttons widget.
+    * Added 'main thread' chip to main thread tracks.
+    * Added plugin API to add menu items to the sidebar.
+    * Added `onTraceReady` plugin hook.
+    * Various clean-ups and bugfixes.
+
+
+v46.0 - 2024-06-13:
+  SQL Standard library:
+    * Added megacycles support to CPU package. Added tables:
+      `cpu_cycles_per_process`, `cpu_cycles_per_thread` and
+      `cpu_cycles_per_cpu`.
+    * Improved `memory` package. Added `memory.linux.process`,
+      `memory.linux.high_watermark` and `memory.android.gpu` modules.
+    * Created `gpu` package with `gpu.frequency` module.
+    * Migrated `sched.utilization` package to `cpu.utilization`.
+  Trace Processor:
+    * Added "time to initial display" and "time to full display" metrics to
+      the Android startup metric.
+  UI:
+    * Added plugin for synchronizing two instances of the UI - search for
+      'Enable timeline sync with other Perfetto UI tabs' in the command palette.
+    * Add builtin prompt functionality to the plugin API:
+      I.e. `await PluginContextTrace.prompt('...')`
+    * Fixed various bits of tech debt.
+  SDK:
+    * The TRACE_COUNTER macro and CounterTrack constructor no longer accept
+      `const char *` track names. In case your code fails to compile,
+      https://perfetto.dev/docs/instrumentation/track-events#dynamic-event-names
+      explains how to fix the problem.
+
+
+v45.0 - 2024-05-09:
+  Trace Processor:
+    * Optimised single column `DISTINCT` queries.
+    * Optimised `LIMIT` and `OFFSET` queries.
+  SQL Standard library:
+    * Improved support for querying startups on Android 9 (API level 28) and
+      below. Available in `android.startup.startups` module.
+    * Added tables for querying "Time To Initial Display" and "Time To Full
+      Display" metrics for app startups. Available in new module
+      `android.startup.time_to_display`.
+    * Added table for querying hardware power rail counters in new
+      `android.power_rails` module.
+  UI:
+    * Add tracks to the list of searchable items.
+    * Use mipmaps to improve track query performance on large traces.
+    * Fix slow scrolling bug in ftrace explorer tab on low DPI machines.
+    * Overhaul track decider queries to improve trace load times.
+    * Add track
+    * Tidy up command names & remove some example ones.
+    * Remove arg auto-completion in pivot table.
+    * Show dominator tree views by default.
+    * Fix counter event selection off-by-one error.
+    * Add viewport control to the plugin API.
+    * Sticky track titles to improve track button accessibility in tall tracks.
+    * A handful of small bugfixes.
   SDK:
     * The TRACE_EVENT macro used to reject `const char *` event names: either
       `StaticString` or `DynamicString` needed to be specified. In the last year
@@ -449,7 +645,7 @@ v27.0 - 2022-07-01:
     * Changed sorting of process groups to take slice count and presence of
       perf profiles into account.
   SDK:
-    * 
+    *
 
 
 v26.1 - 2022-06-13:
@@ -495,7 +691,7 @@ v26.0 - 2022-06-13:
       endoint or even newer /websocket.
   UI:
     * Changed detail panel to separate slice args from generic slice properties.
-    * Automatically enabled sched_compact when generating trace configs for 
+    * Automatically enabled sched_compact when generating trace configs for
       Android S+ targets.
   SDK:
     * Added option for recording thread CPU times at the beginning and end of

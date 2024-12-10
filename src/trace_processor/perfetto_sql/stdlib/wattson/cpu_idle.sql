@@ -13,148 +13,82 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-INCLUDE PERFETTO MODULE android.device;
-INCLUDE PERFETTO MODULE cpu.idle;
-
--- Device specific info for deep idle time offsets
-CREATE PERFETTO TABLE _device_cpu_deep_idle_offsets
-AS
-WITH data(device, cpu, offset_ns) AS (
-  VALUES
-  ("oriole", 6, 200000),
-  ("oriole", 7, 200000),
-  ("raven", 6, 200000),
-  ("raven", 7, 200000),
-  ("eos", 0, 450000),
-  ("eos", 1, 450000),
-  ("eos", 2, 450000),
-  ("eos", 3, 450000)
-)
-select * from data;
+INCLUDE PERFETTO MODULE counters.intervals;
+INCLUDE PERFETTO MODULE wattson.device_infos;
 
 -- Get the corresponding deep idle time offset based on device and CPU.
-CREATE PERFETTO FUNCTION _get_deep_idle_offset(cpu INT)
-RETURNS INT
-AS
-SELECT offset_ns
-FROM _device_cpu_deep_idle_offsets as offsets, android_device_name as device
-WHERE
-  offsets.device = device.name AND cpu = $cpu;
+CREATE PERFETTO VIEW _filtered_deep_idle_offsets AS
+SELECT cpu, offset_ns
+FROM _device_cpu_deep_idle_offsets as offsets
+JOIN _wattson_device as device
+ON offsets.device = device.name;
 
 -- Adjust duration of active portion to be slightly longer to account for
 -- overhead cost of transitioning out of deep idle. This is done because the
 -- device is active and consumes power for longer than the logs actually report.
-CREATE PERFETTO FUNCTION _adjust_deep_idle(cpu_match INT)
-RETURNS TABLE(ts LONG, dur INT, idle INT) AS
+CREATE PERFETTO TABLE _adjusted_deep_idle AS
 WITH
   idle_prev AS (
     SELECT
       ts,
-      dur,
-      idle,
-      lag(idle) OVER (PARTITION BY track_id ORDER BY ts) AS idle_prev,
-      cpu
-    FROM cpu_idle_counters
+      LAG(ts, 1, trace_start()) OVER (PARTITION BY cpu ORDER by ts) as prev_ts,
+      value AS idle,
+      cli.value - cli.delta_value AS idle_prev,
+      cct.cpu
+    -- Same as cpu_idle_counters, but extracts some additional info that isn't
+    -- nominally present in cpu_idle_counters, such that the already calculated
+    -- lag values are reused instead of recomputed
+    FROM counter_leading_intervals!((
+      SELECT c.*
+      FROM counter c
+      JOIN cpu_counter_track cct ON cct.id = c.track_id AND cct.name = 'cpuidle'
+    )) AS cli
+    JOIN cpu_counter_track AS cct ON cli.track_id = cct.id
   ),
-  offset_ns AS (
-    SELECT IFNULL(_get_deep_idle_offset($cpu_match), 0) as offset_ns
-  ),
-  -- Adjusted ts if applicable, which makes the current deep idle state
-  -- slightly shorter.
+  -- Adjusted ts if applicable, which makes the current active state longer if
+  -- it is coming from an idle exit.
   idle_mod AS (
     SELECT
       IIF(
-        idle_prev = -1 AND idle = 1,
-        IIF(dur > offset_ns, ts + offset_ns, ts + dur),
+        idle_prev = 1 AND idle = 4294967295,
+        -- extend ts backwards by offset_ns at most up to prev_ts
+        MAX(ts - offset_ns, prev_ts),
         ts
       ) as ts,
-      -- ts_next is the starting timestamp of the next slice (e.g. end ts of
-      -- current slice)
-      ts + dur as ts_next,
+      cpu,
       idle
-    FROM idle_prev, offset_ns
-    WHERE cpu = $cpu_match
+    FROM idle_prev
+    JOIN _filtered_deep_idle_offsets USING (cpu)
+  ),
+  _cpu_idle AS (
+    SELECT
+      ts,
+      LEAD(ts, 1, trace_end()) OVER (PARTITION BY cpu ORDER by ts) - ts as dur,
+      cpu,
+      cast_int!(IIF(idle = 4294967295, -1, idle)) AS idle
+    FROM idle_mod
+  ),
+  -- Get first idle transition per CPU
+  first_cpu_idle_slices AS (
+    SELECT ts, cpu FROM _cpu_idle
+    GROUP BY cpu
+    ORDER by ts ASC
   )
+-- Prepend NULL slices up to first idle events on a per CPU basis
+SELECT
+  -- Construct slices from first cpu ts up to first freq event for each cpu
+  trace_start() as ts,
+  first_slices.ts - trace_start() as dur,
+  first_slices.cpu,
+  NULL as idle
+FROM first_cpu_idle_slices as first_slices
+WHERE dur > 0
+UNION ALL
 SELECT
   ts,
-  lead(ts, 1, trace_end()) OVER (ORDER by ts) - ts as dur,
+  dur,
+  cpu,
   idle
-FROM idle_mod
-WHERE ts != ts_next;
-
--- idle_slices_cpux has CPUx specific idle state slices.
-CREATE PERFETTO TABLE _idle_slices_cpu0
-AS
-SELECT idle as idle_0, ts, dur
-FROM _adjust_deep_idle(0);
-
-CREATE PERFETTO TABLE _idle_slices_cpu1
-AS
-SELECT idle as idle_1, ts, dur
-FROM _adjust_deep_idle(1);
-
-CREATE PERFETTO TABLE _idle_slices_cpu2
-AS
-SELECT idle as idle_2, ts, dur
-FROM _adjust_deep_idle(2);
-
-CREATE PERFETTO TABLE _idle_slices_cpu3
-AS
-SELECT idle as idle_3, ts, dur
-FROM _adjust_deep_idle(3);
-
-CREATE PERFETTO TABLE _idle_slices_cpu4
-AS
-SELECT idle as idle_4, ts, dur
-FROM _adjust_deep_idle(4);
-
-CREATE PERFETTO TABLE _idle_slices_cpu5
-AS
-SELECT idle as idle_5, ts, dur
-FROM _adjust_deep_idle(5);
-
-CREATE PERFETTO TABLE _idle_slices_cpu6
-AS
-SELECT idle as idle_6, ts, dur
-FROM _adjust_deep_idle(6);
-
-CREATE PERFETTO TABLE _idle_slices_cpu7
-AS
-SELECT idle as idle_7, ts, dur
-FROM _adjust_deep_idle(7);
-
--- SPAN_OUTER_JOIN of all CPUs' idle state tables.
-CREATE VIRTUAL TABLE _idle_slices_cpu01
-USING
-  SPAN_OUTER_JOIN(_idle_slices_cpu0, _idle_slices_cpu1);
-
-CREATE VIRTUAL TABLE _idle_slices_cpu012
-USING
-  SPAN_OUTER_JOIN(_idle_slices_cpu01, _idle_slices_cpu2);
-
-CREATE VIRTUAL TABLE _idle_slices_cpu0123
-USING
-  SPAN_OUTER_JOIN(_idle_slices_cpu012, _idle_slices_cpu3);
-
-CREATE VIRTUAL TABLE _idle_slices_cpu01234
-USING
-  SPAN_OUTER_JOIN(_idle_slices_cpu0123, _idle_slices_cpu4);
-
-CREATE VIRTUAL TABLE _idle_slices_cpu012345
-USING
-  SPAN_OUTER_JOIN(_idle_slices_cpu01234, _idle_slices_cpu5);
-
-CREATE VIRTUAL TABLE _idle_slices_cpu0123456
-USING
-  SPAN_OUTER_JOIN(_idle_slices_cpu012345, _idle_slices_cpu6);
-
-CREATE VIRTUAL TABLE _idle_slices_cpu01234567
-USING
-  SPAN_OUTER_JOIN(_idle_slices_cpu0123456, _idle_slices_cpu7);
-
--- Table that holds time slices of the entire trace with the idle state
--- transition information of every CPU in the system.
-CREATE PERFETTO TABLE _cpu_idle_all
-AS
-SELECT * FROM _idle_slices_cpu01234567;
-
+FROM _cpu_idle
+-- Some durations are 0 post-adjustment and won't work with interval intersect
+WHERE dur > 0;

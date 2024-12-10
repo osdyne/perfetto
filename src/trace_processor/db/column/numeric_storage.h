@@ -16,24 +16,28 @@
 #ifndef SRC_TRACE_PROCESSOR_DB_COLUMN_NUMERIC_STORAGE_H_
 #define SRC_TRACE_PROCESSOR_DB_COLUMN_NUMERIC_STORAGE_H_
 
+#include <algorithm>
 #include <cstdint>
-#include <limits>
 #include <memory>
+#include <optional>
 #include <string>
+#include <type_traits>
+#include <unordered_set>
 #include <variant>
 #include <vector>
 
-#include "perfetto/base/compiler.h"
+#include "perfetto/public/compiler.h"
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/storage_layer.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column/utils.h"
 
 namespace perfetto::trace_processor::column {
 
 // Storage for all numeric type data (i.e. doubles, int32, int64, uint32).
-class NumericStorageBase : public DataLayer {
+class NumericStorageBase : public StorageLayer {
  protected:
   class ChainImpl : public DataLayerChain {
    public:
@@ -44,13 +48,11 @@ class NumericStorageBase : public DataLayer {
 
     void IndexSearchValidated(FilterOp, SqlValue, Indices&) const override;
 
-    Range OrderedIndexSearchValidated(FilterOp,
-                                      SqlValue,
-                                      const OrderedIndices&) const override;
-
-    void Serialize(StorageProto*) const override;
-
     std::string DebugString() const override { return "NumericStorage"; }
+
+    bool is_sorted() const { return is_sorted_; }
+
+    ColumnType column_type() const { return storage_type_; }
 
    protected:
     ChainImpl(const void* vector_ptr, ColumnType type, bool is_sorted);
@@ -85,6 +87,8 @@ class NumericStorage final : public NumericStorageBase {
                                     ColumnType type,
                                     bool is_sorted);
 
+  StoragePtr GetStoragePtr() override { return vector_->data(); }
+
   // The implementation of this function is given by
   // make_chain.cc/make_chain_minimal.cc depending on whether this is a minimal
   // or full build of trace processor.
@@ -100,39 +104,60 @@ class NumericStorage final : public NumericStorageBase {
     SingleSearchResult SingleSearch(FilterOp op,
                                     SqlValue sql_val,
                                     uint32_t i) const override {
-      if constexpr (std::is_same_v<T, double>) {
-        if (sql_val.type != SqlValue::kDouble) {
-          return SingleSearchResult::kNeedsFullSearch;
-        }
-        return utils::SingleSearchNumeric(op, (*vector_)[i],
-                                          sql_val.double_value);
-      } else {
-        if (sql_val.type != SqlValue::kLong ||
-            sql_val.long_value > std::numeric_limits<T>::max() ||
-            sql_val.long_value < std::numeric_limits<T>::min()) {
-          return SingleSearchResult::kNeedsFullSearch;
-        }
-        return utils::SingleSearchNumeric(op, (*vector_)[i],
-                                          static_cast<T>(sql_val.long_value));
-      }
+      return utils::SingleSearchNumeric(op, (*vector_)[i], sql_val);
     }
 
-    void StableSort(SortToken* start,
-                    SortToken* end,
+    void Distinct(Indices& indices) const override {
+      std::unordered_set<T> s;
+      indices.tokens.erase(
+          std::remove_if(indices.tokens.begin(), indices.tokens.end(),
+                         [&s, this](const Token& idx) {
+                           return !s.insert((*vector_)[idx.index]).second;
+                         }),
+          indices.tokens.end());
+    }
+
+    std::optional<Token> MaxElement(Indices& indices) const override {
+      auto tok =
+          std::max_element(indices.tokens.begin(), indices.tokens.end(),
+                           [this](const Token& t1, const Token& t2) {
+                             return (*vector_)[t1.index] < (*vector_)[t2.index];
+                           });
+      return tok == indices.tokens.end() ? std::nullopt
+                                         : std::make_optional(*tok);
+    }
+
+    std::optional<Token> MinElement(Indices& indices) const override {
+      auto tok =
+          std::min_element(indices.tokens.begin(), indices.tokens.end(),
+                           [this](const Token& t1, const Token& t2) {
+                             return (*vector_)[t1.index] < (*vector_)[t2.index];
+                           });
+      return tok == indices.tokens.end() ? std::nullopt
+                                         : std::make_optional(*tok);
+    }
+
+    SqlValue Get_AvoidUsingBecauseSlow(uint32_t index) const override {
+      if constexpr (std::is_same_v<T, double>) {
+        return SqlValue::Double((*vector_)[index]);
+      }
+      return SqlValue::Long((*vector_)[index]);
+    }
+
+    void StableSort(Token* start,
+                    Token* end,
                     SortDirection direction) const override {
       const T* base = vector_->data();
       switch (direction) {
         case SortDirection::kAscending:
-          std::stable_sort(start, end,
-                           [base](const SortToken& a, const SortToken& b) {
-                             return base[a.index] < base[b.index];
-                           });
+          std::stable_sort(start, end, [base](const Token& a, const Token& b) {
+            return base[a.index] < base[b.index];
+          });
           break;
         case SortDirection::kDescending:
-          std::stable_sort(start, end,
-                           [base](const SortToken& a, const SortToken& b) {
-                             return base[a.index] > base[b.index];
-                           });
+          std::stable_sort(start, end, [base](const Token& a, const Token& b) {
+            return base[a.index] > base[b.index];
+          });
           break;
       }
     }

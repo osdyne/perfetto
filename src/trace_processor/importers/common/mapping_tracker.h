@@ -68,6 +68,10 @@ class MappingTracker {
   UserMemoryMapping& CreateUserMemoryMapping(UniquePid upid,
                                              CreateMappingParams params);
 
+  // Sometimes we just need a mapping and we are lacking trace data to create a
+  // proper one. Use this mapping in those cases.
+  DummyMemoryMapping& CreateDummyMapping(std::string name);
+
   // Create an "other" mapping. Returned reference will be valid for the
   // duration of this instance.
   VirtualMemoryMapping& InternMemoryMapping(CreateMappingParams params);

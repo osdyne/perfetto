@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {classNames} from '../base/classnames';
 import {FuzzySegment} from '../base/fuzzy';
 import {isString} from '../base/object_utils';
@@ -123,6 +122,9 @@ export interface OmniboxAttrs {
   // Called when the user expresses the intent to "execute" the thing.
   onSubmit?: (value: string, mod: boolean, shift: boolean) => void;
 
+  // Called when the user hits backspace when the field is empty.
+  onGoBack?: () => void;
+
   // When true, disable and grey-out the omnibox's input.
   readonly?: boolean;
 
@@ -160,6 +162,7 @@ export class Omnibox implements m.ClassComponent<OmniboxAttrs> {
       extraClasses,
       onInput = () => {},
       onSubmit = () => {},
+      onGoBack = () => {},
       inputRef = 'omnibox',
       options,
       closeOnSubmit = false,
@@ -190,7 +193,7 @@ export class Omnibox implements m.ClassComponent<OmniboxAttrs> {
             },
             onkeydown: (e: KeyboardEvent) => {
               if (e.key === 'Backspace' && value === '') {
-                this.close(attrs);
+                onGoBack();
               } else if (e.key === 'Escape') {
                 e.preventDefault();
                 this.close(attrs);

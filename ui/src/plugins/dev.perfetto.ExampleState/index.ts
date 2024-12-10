@@ -12,13 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {
-  createStore,
-  Plugin,
-  PluginContextTrace,
-  PluginDescriptor,
-  Store,
-} from '../../public';
+import {createStore, Store} from '../../base/store';
+import {exists} from '../../base/utils';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {addQueryResultsTab} from '../../public/lib/query_table/query_result_tab';
 
 interface State {
   counter: number;
@@ -26,12 +24,12 @@ interface State {
 
 // This example plugin shows using state that is persisted in the
 // permalink.
-class ExampleState implements Plugin {
+class ExampleState implements PerfettoPlugin {
   private store: Store<State> = createStore({counter: 0});
 
   private migrate(initialState: unknown): State {
     if (
-      initialState &&
+      exists(initialState) &&
       typeof initialState === 'object' &&
       'counter' in initialState &&
       typeof initialState.counter === 'number'
@@ -42,18 +40,18 @@ class ExampleState implements Plugin {
     }
   }
 
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     this.store = ctx.mountStore((init: unknown) => this.migrate(init));
 
-    ctx.registerCommand({
+    ctx.commands.registerCommand({
       id: 'dev.perfetto.ExampleState#ShowCounter',
       name: 'Show ExampleState counter',
       callback: () => {
         const counter = this.store.state.counter;
-        ctx.tabs.openQuery(
-          `SELECT ${counter} as counter;`,
-          `Show counter ${counter}`,
-        );
+        addQueryResultsTab(ctx, {
+          query: `SELECT ${counter} as counter;`,
+          title: `Show counter ${counter}`,
+        });
         this.store.edit((draft) => {
           ++draft.counter;
         });
@@ -61,8 +59,8 @@ class ExampleState implements Plugin {
     });
   }
 
-  async onTraceUnload(_: PluginContextTrace): Promise<void> {
-    this.store.dispose();
+  async onTraceUnload(_: Trace): Promise<void> {
+    this.store[Symbol.dispose]();
   }
 }
 

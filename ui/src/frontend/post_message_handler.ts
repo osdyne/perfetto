@@ -13,15 +13,13 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Time} from '../base/time';
-import {Actions, PostedScrollToRange, PostedTrace} from '../common/actions';
+import {PostedTrace} from '../public/trace_source';
 import {showModal} from '../widgets/modal';
-
 import {initCssConstants} from './css_constants';
-import {globals} from './globals';
 import {toggleHelp} from './help_modal';
-import {focusHorizontalRange} from './scroll_helper';
+import {scrollTo} from '../public/scroll_helper';
+import {AppImpl} from '../core/app_impl';
 
 const TRUSTED_ORIGINS_KEY = 'trustedOrigins';
 
@@ -33,21 +31,35 @@ interface PostedScrollToRangeWrapped {
   perfetto: PostedScrollToRange;
 }
 
+interface PostedScrollToRange {
+  timeStart: number;
+  timeEnd: number;
+  viewPercentage?: number;
+}
+
 // Returns whether incoming traces should be opened automatically or should
 // instead require a user interaction.
-function isTrustedOrigin(origin: string): boolean {
+export function isTrustedOrigin(origin: string): boolean {
   const TRUSTED_ORIGINS = [
     'https://chrometto.googleplex.com',
     'https://uma.googleplex.com',
     'https://android-build.googleplex.com',
   ];
   if (origin === window.origin) return true;
+  if (origin === 'null') return false;
   if (TRUSTED_ORIGINS.includes(origin)) return true;
   if (isUserTrustedOrigin(origin)) return true;
 
   const hostname = new URL(origin).hostname;
-  if (hostname.endsWith('corp.google.com')) return true;
-  if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+  if (hostname.endsWith('.corp.google.com')) return true;
+  if (hostname.endsWith('.c.googlers.com')) return true;
+  if (
+    hostname === 'localhost' ||
+    hostname === '127.0.0.1' ||
+    hostname === '[::1]'
+  ) {
+    return true;
+  }
   return false;
 }
 
@@ -69,7 +81,7 @@ function saveUserTrustedOrigin(hostname: string) {
   const s = window.localStorage.getItem(TRUSTED_ORIGINS_KEY);
   let origins: string[];
   try {
-    origins = JSON.parse(s || '[]');
+    origins = JSON.parse(s ?? '[]');
     if (origins.includes(hostname)) return;
     origins.push(hostname);
     window.localStorage.setItem(TRUSTED_ORIGINS_KEY, JSON.stringify(origins));
@@ -135,7 +147,12 @@ export function postMessageHandler(messageEvent: MessageEvent) {
     // it still needs to be of the correct type to be able to invoke the
     // correct version of postMessage(...).
     const windowSource = messageEvent.source as Window;
-    windowSource.postMessage('PONG', messageEvent.origin);
+
+    // Use '*' for the reply because in cases of cross-domain isolation, we
+    // see the messageEvent.origin as 'null'. PONG doen't disclose any
+    // interesting information, so there is no harm sending that to the wrong
+    // origin in the worst case.
+    windowSource.postMessage('PONG', '*');
     return;
   }
 
@@ -193,10 +210,7 @@ export function postMessageHandler(messageEvent: MessageEvent) {
     // For external traces, we need to disable other features such as
     // downloading and sharing a trace.
     postedTrace.localOnly = true;
-    globals.dispatch(Actions.openTraceFromBuffer(postedTrace));
-
-    // Also hide sidebar in this case
-    globals.dispatch(Actions.setSidebar({visible: false}));
+    AppImpl.instance.openTraceFromBuffer(postedTrace);
   };
 
   const trustAndOpenTrace = () => {
@@ -211,18 +225,27 @@ export function postMessageHandler(messageEvent: MessageEvent) {
   }
 
   // If not ask the user if they expect this and trust the origin.
+  let originTxt = messageEvent.origin;
+  let originUnknown = false;
+  if (originTxt === 'null') {
+    originTxt = 'An unknown origin';
+    originUnknown = true;
+  }
   showModal({
     title: 'Open trace?',
     content: m(
       'div',
-      m('div', `${messageEvent.origin} is trying to open a trace file.`),
+      m('div', `${originTxt} is trying to open a trace file.`),
       m('div', 'Do you trust the origin and want to proceed?'),
     ),
     buttons: [
       {text: 'No', primary: true},
       {text: 'Yes', primary: false, action: openTrace},
-      {text: 'Always trust', primary: false, action: trustAndOpenTrace},
-    ],
+    ].concat(
+      originUnknown
+        ? []
+        : {text: 'Always trust', primary: false, action: trustAndOpenTrace},
+    ),
   });
 }
 
@@ -235,6 +258,7 @@ function sanitizePostedTrace(postedTrace: PostedTrace): PostedTrace {
   if (postedTrace.url !== undefined) {
     result.url = sanitizeString(postedTrace.url);
   }
+  result.pluginArgs = postedTrace.pluginArgs;
   return result;
 }
 
@@ -242,16 +266,12 @@ function sanitizeString(str: string): string {
   return str.replace(/[^A-Za-z0-9.\-_#:/?=&;%+$ ]/g, ' ');
 }
 
-function isTraceViewerReady(): boolean {
-  return !!globals.getCurrentEngine()?.ready;
-}
-
 const _maxScrollToRangeAttempts = 20;
 async function scrollToTimeRange(
   postedScrollToRange: PostedScrollToRange,
   maxAttempts?: number,
 ) {
-  const ready = isTraceViewerReady();
+  const ready = AppImpl.instance.trace && !AppImpl.instance.isLoadingTrace;
   if (!ready) {
     if (maxAttempts === undefined) {
       maxAttempts = 0;
@@ -264,7 +284,9 @@ async function scrollToTimeRange(
   } else {
     const start = Time.fromSeconds(postedScrollToRange.timeStart);
     const end = Time.fromSeconds(postedScrollToRange.timeEnd);
-    focusHorizontalRange(start, end, postedScrollToRange.viewPercentage);
+    scrollTo({
+      time: {start, end, viewPercentage: postedScrollToRange.viewPercentage},
+    });
   }
 }
 

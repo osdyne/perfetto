@@ -42,7 +42,7 @@
     overflow: auto;
   }
 
-  .header {
+  .pf-timeline-header {
     display: flex;
     flex-direction: row;
     box-shadow: 1px 3px 15px rgba(23, 32, 44, 0.3);
@@ -82,11 +82,24 @@
   .notes-panel {
     height: 20px;
     .pf-toolbar {
-      font-size: 24px;
+      width: var(--track-shell-width);
+      padding-inline: 3px;
+
+      > .pf-text-input {
+        flex: auto;
+      }
     }
   }
 
   .time-selection-panel {
     height: 10px;
   }
+}
+
+.pf-track-crash-popup {
+  font-family: $pf-font;
+  max-width: 300px;
+  display: flex;
+  flex-direction: column;
+  row-gap: 6px;
 }

@@ -12,36 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+import m from 'mithril';
 import {assertExists} from '../base/logging';
-import {Actions} from '../common/actions';
-import {TraceArrayBufferSource} from '../common/state';
+import {TraceUrlSource} from '../public/trace_source';
+import {createPermalink} from './permalink';
 import {showModal} from '../widgets/modal';
-
 import {onClickCopy} from './clipboard';
 import {globals} from './globals';
-import {isTraceLoaded} from './sidebar';
+import {AppImpl} from '../core/app_impl';
 
 export function isShareable() {
   return globals.isInternalUser && isDownloadable();
 }
 
 export function isDownloadable() {
-  const engine = globals.getCurrentEngine();
-  if (!engine) {
+  const traceSource = AppImpl.instance.trace?.traceInfo.source;
+  if (traceSource === undefined) {
     return false;
   }
-  if (engine.source.type === 'ARRAY_BUFFER' && engine.source.localOnly) {
+  if (traceSource.type === 'ARRAY_BUFFER' && traceSource.localOnly) {
     return false;
   }
-  if (engine.source.type === 'HTTP_RPC') {
+  if (traceSource.type === 'HTTP_RPC') {
     return false;
   }
   return true;
 }
 
 export function shareTrace() {
-  const engine = assertExists(globals.getCurrentEngine());
-  const traceUrl = (engine.source as TraceArrayBufferSource).url || '';
+  const traceSource = assertExists(AppImpl.instance.trace?.traceInfo.source);
+  const traceUrl = (traceSource as TraceUrlSource).url ?? '';
 
   // If the trace is not shareable (has been pushed via postMessage()) but has
   // a url, create a pseudo-permalink by echoing back the URL.
@@ -74,7 +74,7 @@ export function shareTrace() {
   );
   if (result) {
     globals.logging.logEvent('Trace Actions', 'Create permalink');
-    globals.dispatch(Actions.createPermalink({isRecordingConfig: false}));
+    createPermalink({mode: 'APP_STATE'});
   }
 }
 
@@ -89,4 +89,16 @@ export function createTraceLink(title: string, url: string) {
     onclick: onClickCopy(url),
   };
   return m('a.trace-file-name', linkProps, title);
+}
+
+export function isTraceLoaded(): boolean {
+  return AppImpl.instance.trace !== undefined;
+}
+
+export function getCurrentTraceUrl(): undefined | string {
+  const source = AppImpl.instance.trace?.traceInfo.source;
+  if (source && source.type === 'URL') {
+    return source.url;
+  }
+  return undefined;
 }

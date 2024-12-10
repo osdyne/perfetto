@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {_TextDecoder} from 'custom_utils';
-
 import {defer} from '../../base/deferred';
 import {ArrayBufferBuilder} from '../../base/array_buffer_builder';
-
 import {AdbFileHandler} from './adb_file_handler';
 import {
   AdbConnection,
@@ -24,8 +21,7 @@ import {
   OnDisconnectCallback,
   OnMessageCallback,
 } from './recording_interfaces_v2';
-
-const textDecoder = new _TextDecoder();
+import {utf8Decode} from '../../base/string_utils';
 
 export abstract class AdbConnectionImpl implements AdbConnection {
   // onStatus and onDisconnect are set to callbacks passed from the caller.
@@ -59,9 +55,7 @@ export abstract class AdbConnectionImpl implements AdbConnection {
       commandOutput.append(data);
     });
     adbStream.addOnStreamCloseCallback(() => {
-      onStreamingEnded.resolve(
-        textDecoder.decode(commandOutput.toArrayBuffer()),
-      );
+      onStreamingEnded.resolve(utf8Decode(commandOutput.toArrayBuffer()));
     });
     return onStreamingEnded;
   }

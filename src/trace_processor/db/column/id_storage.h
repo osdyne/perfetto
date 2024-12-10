@@ -19,11 +19,14 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/storage_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
@@ -34,12 +37,13 @@ namespace perfetto::trace_processor::column {
 // uint32_t space (any such integer is a valid id). Overlays (e.g.
 // RangeOverlay/SelectorOverlay) can be used to limit which ids are
 // included in the column.
-class IdStorage final : public DataLayer {
+class IdStorage final : public StorageLayer {
  public:
   IdStorage();
   ~IdStorage() override;
 
   std::unique_ptr<DataLayerChain> MakeChain();
+  StoragePtr GetStoragePtr() override;
 
  private:
   class ChainImpl : public DataLayerChain {
@@ -55,15 +59,15 @@ class IdStorage final : public DataLayer {
 
     void IndexSearchValidated(FilterOp, SqlValue, Indices&) const override;
 
-    Range OrderedIndexSearchValidated(FilterOp,
-                                      SqlValue,
-                                      const OrderedIndices&) const override;
+    void StableSort(Token* start, Token* end, SortDirection) const override;
 
-    void StableSort(SortToken* start,
-                    SortToken* end,
-                    SortDirection) const override;
+    void Distinct(Indices&) const override;
 
-    void Serialize(StorageProto*) const override;
+    std::optional<Token> MaxElement(Indices&) const override;
+
+    std::optional<Token> MinElement(Indices&) const override;
+
+    SqlValue Get_AvoidUsingBecauseSlow(uint32_t index) const override;
 
     uint32_t size() const override {
       return std::numeric_limits<uint32_t>::max();

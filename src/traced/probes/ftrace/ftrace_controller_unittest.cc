@@ -206,6 +206,7 @@ class MockAtraceWrapper : public AtraceWrapper {
  public:
   MOCK_METHOD(bool, RunAtrace, (const std::vector<std::string>&, std::string*));
   MOCK_METHOD(bool, SupportsUserspaceOnly, ());
+  MOCK_METHOD(bool, SupportsPreferSdk, ());
 };
 
 }  // namespace
@@ -298,7 +299,7 @@ std::unique_ptr<TestFtraceController> CreateTestController(
         new MockFtraceProcfs("/root/", cpu_count));
   }
 
-  std::unique_ptr<AtraceWrapper> atrace_wrapper;
+  auto atrace_wrapper = std::make_unique<NiceMock<MockAtraceWrapper>>();
 
   auto table = FakeTable(ftrace_procfs.get());
 
@@ -497,27 +498,6 @@ TEST(FtraceControllerTest, BufferSize) {
         *controller->procfs(),
         WriteToFile("/root/buffer_size_kb", testing::AnyOf("2048", "8192")));
     FtraceConfig config = CreateFtraceConfig({"group/foo"});
-    auto data_source = controller->AddFakeDataSource(config);
-    ASSERT_TRUE(controller->StartDataSource(data_source.get()));
-  }
-
-  {
-    // Way too big buffer size -> max size.
-    EXPECT_CALL(*controller->procfs(),
-                WriteToFile("/root/buffer_size_kb", "65536"));
-    FtraceConfig config = CreateFtraceConfig({"group/foo"});
-    config.set_buffer_size_kb(10 * 1024 * 1024);
-    auto data_source = controller->AddFakeDataSource(config);
-    ASSERT_TRUE(controller->StartDataSource(data_source.get()));
-  }
-
-  {
-    // The limit is 64mb, 65mb is too much.
-    EXPECT_CALL(*controller->procfs(),
-                WriteToFile("/root/buffer_size_kb", "65536"));
-    FtraceConfig config = CreateFtraceConfig({"group/foo"});
-    ON_CALL(*controller->procfs(), NumberOfCpus()).WillByDefault(Return(2));
-    config.set_buffer_size_kb(65 * 1024);
     auto data_source = controller->AddFakeDataSource(config);
     ASSERT_TRUE(controller->StartDataSource(data_source.get()));
   }
@@ -842,27 +822,24 @@ TEST(FtraceControllerTest, PollSupportedOnKernelVersion) {
   auto test = [](auto s) {
     return FtraceController::PollSupportedOnKernelVersion(s);
   };
-  // Linux 6.1 or above are ok
-  EXPECT_TRUE(test("6.5.13-1-amd64"));
-  EXPECT_TRUE(test("6.1.0-1-amd64"));
-  EXPECT_TRUE(test("6.1.25-android14-11-g"));
-  // before 6.1
+  // Linux 6.9 or above are ok
+  EXPECT_TRUE(test("6.9.13-1-amd64"));
+  EXPECT_TRUE(test("6.9.0-1-amd64"));
+  EXPECT_TRUE(test("6.9.25-android14-11-g"));
+  // before 6.9
   EXPECT_FALSE(test("5.15.200-1-amd"));
 
   // Android: check allowlisted GKI versions
 
   // sublevel matters:
-  EXPECT_TRUE(test("5.10.198-android13-4-0"));
-  EXPECT_FALSE(test("5.10.189-android13-4-0"));
+  EXPECT_TRUE(test("6.1.87-android14-4-0"));
+  EXPECT_FALSE(test("6.1.80-android14-4-0"));
   // sublevel matters:
-  EXPECT_TRUE(test("5.15.137-android14-8-suffix"));
-  EXPECT_FALSE(test("5.15.130-android14-8-suffix"));
-  // sublevel matters:
-  EXPECT_TRUE(test("5.15.137-android13-8-0"));
-  EXPECT_FALSE(test("5.15.129-android13-8-0"));
-  // android12 instead of android13 (clarification: this is part of the kernel
+  EXPECT_TRUE(test("6.6.27-android15-8-suffix"));
+  EXPECT_FALSE(test("6.6.26-android15-8-suffix"));
+  // android13 instead of android14 (clarification: this is part of the kernel
   // version, and is unrelated to the system image version).
-  EXPECT_FALSE(test("5.10.198-android12-4-0"));
+  EXPECT_FALSE(test("6.1.87-android13-4-0"));
 }
 
 }  // namespace perfetto

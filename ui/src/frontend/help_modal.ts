@@ -13,11 +13,9 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {raf} from '../core/raf_scheduler';
 import {showModal} from '../widgets/modal';
 import {Spinner} from '../widgets/spinner';
-
 import {globals} from './globals';
 import {
   KeyboardLayoutMap,
@@ -25,6 +23,8 @@ import {
   NotSupportedError,
 } from './keyboard_layout_map';
 import {KeyMapping} from './pan_and_zoom_handler';
+import {HotkeyGlyphs} from '../widgets/hotkey_glyphs';
+import {assertExists} from '../base/logging';
 
 export function toggleHelp() {
   globals.logging.logEvent('User Actions', 'Show help');
@@ -56,7 +56,7 @@ class KeyMappingsHelp implements m.ClassComponent {
       .catch((e) => {
         if (
           e instanceof NotSupportedError ||
-          e.toString().includes('SecurityError')
+          String(e).includes('SecurityError')
         ) {
           // Keyboard layout is unavailable. Since showing the keyboard
           // mappings correct for the user's keyboard layout is a nice-to-
@@ -76,9 +76,6 @@ class KeyMappingsHelp implements m.ClassComponent {
   }
 
   view(_: m.Vnode): m.Children {
-    const ctrlOrCmd =
-      window.navigator.platform.indexOf('Mac') !== -1 ? 'Cmd' : 'Ctrl';
-
     const queryPageInstructions = globals.hideSidebar
       ? []
       : [
@@ -101,16 +98,6 @@ class KeyMappingsHelp implements m.ClassComponent {
               ),
               m('td', 'Execute selection'),
             ),
-          ),
-        ];
-
-    const sidebarInstructions = globals.hideSidebar
-      ? []
-      : [
-          m(
-            'tr',
-            m('td', keycap(ctrlOrCmd), ' + ', keycap('b')),
-            m('td', 'Toggle display of sidebar'),
           ),
         ];
 
@@ -177,84 +164,19 @@ class KeyMappingsHelp implements m.ClassComponent {
         ),
       ),
       ...queryPageInstructions,
-      m('h2', 'Other'),
+      m('h2', 'Command Hotkeys'),
       m(
         'table',
-        m(
-          'tr',
-          m('td', keycap('f'), ' (with event selected)'),
-          m('td', 'Scroll + zoom to current selection'),
-        ),
-        m(
-          'tr',
-          m('td', keycap('['), '/', keycap(']'), ' (with event selected)'),
-          m(
-            'td',
-            'Select next/previous slice that is connected by a flow.',
-            m('br'),
-            'If there are multiple flows,' +
-              'the one that is in focus (bold) is selected',
-          ),
-        ),
-        m(
-          'tr',
-          m(
-            'td',
-            keycap(ctrlOrCmd),
-            ' + ',
-            keycap('['),
-            '/',
-            keycap(']'),
-            ' (with event selected)',
-          ),
-          m('td', 'Switch focus to another flow'),
-        ),
-        m(
-          'tr',
-          m('td', keycap('m'), ' (with event or area selected)'),
-          m('td', 'Mark the area (temporarily)'),
-        ),
-        m(
-          'tr',
-          m(
-            'td',
-            keycap('Shift'),
-            ' + ',
-            keycap('m'),
-            ' (with event or area selected)',
-          ),
-          m('td', 'Mark the area (persistently)'),
-        ),
-        m(
-          'tr',
-          m('td', keycap(ctrlOrCmd), ' + ', keycap('a')),
-          m('td', 'Select all'),
-        ),
-        m(
-          'tr',
-          m(
-            'td',
-            keycap(ctrlOrCmd),
-            ' + ',
-            keycap('Shift'),
-            ' + ',
-            keycap('p'),
-          ),
-          m('td', 'Open command palette'),
-        ),
-        m(
-          'tr',
-          m('td', keycap(ctrlOrCmd), ' + ', keycap('o')),
-          m('td', 'Run query'),
-        ),
-        m(
-          'tr',
-          m('td', keycap(ctrlOrCmd), ' + ', keycap('s')),
-          m('td', 'Search'),
-        ),
-        m('tr', m('td', keycap('q')), m('td', 'Toggle tab drawer')),
-        ...sidebarInstructions,
-        m('tr', m('td', keycap('?')), m('td', 'Show help')),
+        globals.commandManager.commands
+          .filter(({defaultHotkey}) => defaultHotkey)
+          .sort((a, b) => a.name.localeCompare(b.name))
+          .map(({defaultHotkey, name}) => {
+            return m(
+              'tr',
+              m('td', m(HotkeyGlyphs, {hotkey: assertExists(defaultHotkey)})),
+              m('td', name),
+            );
+          }),
       ),
     );
   }

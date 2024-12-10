@@ -13,10 +13,8 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {classNames} from '../base/classnames';
 import {hasChildren} from '../base/mithril_utils';
-
 import {scheduleFullRedraw} from './raf';
 
 // Heirachical tree layout with left and right values.
@@ -82,24 +80,27 @@ export class TreeNode implements m.ClassComponent<TreeNodeAttrs> {
       attrs,
       attrs: {left, onCollapseChanged = () => {}},
     } = vnode;
-    return m(
-      '.pf-tree-node',
-      {
-        class: classNames(this.getClassNameForNode(vnode)),
-      },
-      m('span.pf-tree-gutter', {
-        onclick: () => {
-          this.collapsed = !this.isCollapsed(vnode);
-          onCollapseChanged(this.collapsed, attrs);
-          scheduleFullRedraw();
+    return [
+      m(
+        '.pf-tree-node',
+        {
+          class: classNames(this.getClassNameForNode(vnode)),
         },
-      }),
-      m('.pf-tree-content', m('.pf-tree-left', left), this.renderRight(vnode)),
-      hasChildren(vnode) && [
-        m('span.pf-tree-indent-gutter'),
-        m('.pf-tree-children', children),
-      ],
-    );
+        m(
+          '.pf-tree-left',
+          m('span.pf-tree-gutter', {
+            onclick: () => {
+              this.collapsed = !this.isCollapsed(vnode);
+              onCollapseChanged(this.collapsed, attrs);
+              scheduleFullRedraw();
+            },
+          }),
+          left,
+        ),
+        this.renderRight(vnode),
+      ),
+      hasChildren(vnode) && m('.pf-tree-children', children),
+    ];
   }
 
   private getClassNameForNode(vnode: m.CVnode<TreeNodeAttrs>) {

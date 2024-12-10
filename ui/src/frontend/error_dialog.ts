@@ -13,16 +13,16 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {ErrorDetails} from '../base/logging';
 import {EXTENSION_URL} from '../common/recordingV2/recording_utils';
-import {TraceGcsUploader} from '../common/upload_utils';
+import {GcsUploader} from '../common/gcs_uploader';
 import {RECORDING_V2_FLAG} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
 import {VERSION} from '../gen/perfetto_version';
 import {getCurrentModalKey, showModal} from '../widgets/modal';
-
 import {globals} from './globals';
+import {AppImpl} from '../core/app_impl';
+import {Router} from '../core/router';
 
 const MODAL_KEY = 'crash_modal';
 
@@ -36,6 +36,9 @@ export function maybeShowErrorDialog(err: ErrorDetails) {
   // Here we rely on the exception message from onCannotGrowMemory function
   if (
     err.message.includes('Cannot enlarge memory') ||
+    err.stack.some((entry) => entry.name.includes('OutOfMemoryHandler')) ||
+    err.stack.some((entry) => entry.name.includes('_emscripten_resize_heap')) ||
+    err.stack.some((entry) => entry.name.includes('sbrk')) ||
     /^out of memory$/m.exec(err.message)
   ) {
     showOutOfMemoryDialog();
@@ -72,6 +75,18 @@ export function maybeShowErrorDialog(err: ErrorDetails) {
     return;
   }
 
+  if (err.message.includes('(ERR:ws)')) {
+    showWebsocketConnectionIssue(err.message);
+    return;
+  }
+
+  // This is only for older version of the UI and for ease of tracking across
+  // cherry-picks. Newer versions don't have this exception anymore.
+  if (err.message.includes('State hash does not match')) {
+    showNewerStateError();
+    return;
+  }
+
   if (timeLastReport > 0 && now - timeLastReport <= MIN_REPORT_PERIOD_MS) {
     console.log('Suppressing crash dialog, last error notified too soon.');
     return;
@@ -104,17 +119,17 @@ class ErrorDialogComponent implements m.ClassComponent<ErrorDetails> {
   private uploadStatus = '';
   private userDescription = '';
   private errorMessage = '';
-  private uploader?: TraceGcsUploader;
+  private uploader?: GcsUploader;
 
   constructor() {
     this.traceState = 'NOT_AVAILABLE';
-    const engine = globals.getCurrentEngine();
-    if (engine === undefined) return;
-    this.traceType = engine.source.type;
+    const traceSource = AppImpl.instance.trace?.traceInfo.source;
+    if (traceSource === undefined) return;
+    this.traceType = traceSource.type;
     // If the trace is either already uploaded, or comes from a postmessage+url
     // we don't need any re-upload.
-    if ('url' in engine.source && engine.source.url !== undefined) {
-      this.traceUrl = engine.source.url;
+    if ('url' in traceSource && traceSource.url !== undefined) {
+      this.traceUrl = traceSource.url;
       this.traceState = 'UPLOADED';
       // The trace is already uploaded, so assume the user is fine attaching to
       // the bugreport (this make the checkbox ticked by default).
@@ -125,12 +140,12 @@ class ErrorDialogComponent implements m.ClassComponent<ErrorDetails> {
     // If the user is not a googler, don't even offer the option to upload it.
     if (!globals.isInternalUser) return;
 
-    if (engine.source.type === 'FILE') {
+    if (traceSource.type === 'FILE') {
       this.traceState = 'NOT_UPLOADED';
-      this.traceData = engine.source.file;
+      this.traceData = traceSource.file;
       // this.traceSize = this.traceData.size;
-    } else if (engine.source.type === 'ARRAY_BUFFER') {
-      this.traceData = engine.source.buffer;
+    } else if (traceSource.type === 'ARRAY_BUFFER') {
+      this.traceData = traceSource.buffer;
       // this.traceSize = this.traceData.byteLength;
     } else {
       return; // Can't upload HTTP+RPC.
@@ -229,16 +244,18 @@ class ErrorDialogComponent implements m.ClassComponent<ErrorDetails> {
     ) {
       this.traceState = 'UPLOADING';
       this.uploadStatus = '';
-      const uploader = new TraceGcsUploader(this.traceData, () => {
-        raf.scheduleFullRedraw();
-        this.uploadStatus = uploader.getEtaString();
-        if (uploader.state === 'UPLOADED') {
-          this.traceState = 'UPLOADED';
-          this.traceUrl = uploader.uploadedUrl;
-        } else if (uploader.state === 'ERROR') {
-          this.traceState = 'NOT_UPLOADED';
-          this.uploadStatus = uploader.error;
-        }
+      const uploader = new GcsUploader(this.traceData, {
+        onProgress: () => {
+          raf.scheduleFullRedraw();
+          this.uploadStatus = uploader.getEtaString();
+          if (uploader.state === 'UPLOADED') {
+            this.traceState = 'UPLOADED';
+            this.traceUrl = uploader.uploadedUrl;
+          } else if (uploader.state === 'ERROR') {
+            this.traceState = 'NOT_UPLOADED';
+            this.uploadStatus = uploader.error;
+          }
+        },
       });
       this.uploader = uploader;
     } else if (!checked && this.uploader) {
@@ -431,7 +448,11 @@ export function showExtensionNotInstalled(): void {
 export function showWebsocketConnectionIssue(message: string): void {
   showModal({
     title: 'Unable to connect to the device via websocket',
-    content: m('div', m('span', message), m('br')),
+    content: m(
+      'div',
+      m('div', 'trace_processor_shell --httpd is unreachable or crashed.'),
+      m('pre', message),
+    ),
   });
 }
 
@@ -482,5 +503,34 @@ restarting the trace processor while still in use by UI.`,
 at most one tab at a time.`,
       ),
     ),
+  });
+}
+
+function showNewerStateError() {
+  showModal({
+    title: 'Cannot deserialize the permalink',
+    content: m(
+      'div',
+      m('p', "The state hash doesn't match."),
+      m(
+        'p',
+        'This usually happens when the permalink is generated by a version ' +
+          'the UI that is newer than the current version, e.g., when a ' +
+          'colleague created the permalink using the Canary or Autopush ' +
+          'channel and you are trying to open it using Stable channel.',
+      ),
+      m(
+        'p',
+        'Try switching to Canary or Autopush channel from the Flags page ' +
+          ' and try again.',
+      ),
+    ),
+    buttons: [
+      {
+        text: 'Take me to the flags page',
+        primary: true,
+        action: () => Router.navigate('#!/flags/releaseChannel'),
+      },
+    ],
   });
 }

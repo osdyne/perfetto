@@ -13,14 +13,14 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {classNames} from '../base/classnames';
 
 interface DetailsShellAttrs {
   title: m.Children;
   description?: m.Children;
   buttons?: m.Children;
-  // Stretch/shrink the content to fill the parent vertically.
+
+  // Vertically fill parent container and disable scrolling
   fillParent?: boolean;
 }
 

@@ -12,14 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {LONG, Plugin, PluginContextTrace, PluginDescriptor} from '../../public';
+import {LONG} from '../../trace_processor/query_result';
+import {Trace} from '../../public/trace';
+import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
 import {
   SimpleSliceTrack,
   SimpleSliceTrackConfig,
 } from '../../frontend/simple_slice_track';
-
-class AndroidStartup implements Plugin {
-  async onTraceLoad(ctx: PluginContextTrace): Promise<void> {
+import {TrackNode} from '../../public/workspace';
+import {DebugSliceDetailsPanel} from '../../public/lib/debug_tracks/details_tab';
+class AndroidStartup implements PerfettoPlugin {
+  async onTraceLoad(ctx: Trace): Promise<void> {
     const e = ctx.engine;
     await e.query(`include perfetto module android.startup.startups;`);
 
@@ -39,13 +42,18 @@ class AndroidStartup implements Plugin {
       columns: {ts: 'ts', dur: 'dur', name: 'name'},
       argColumns: [],
     };
-    ctx.registerStaticTrack({
-      uri: `dev.perfetto.AndroidStartup#startups`,
-      displayName: 'Android App Startups',
-      trackFactory: (trackCtx) => {
-        return new SimpleSliceTrack(ctx.engine, trackCtx, config);
-      },
+    const uri = `/android_startups`;
+    const title = 'Android App Startups';
+    const track = new SimpleSliceTrack(ctx, {trackUri: uri}, config);
+    ctx.tracks.registerTrack({
+      uri,
+      title: 'Android App Startups',
+      track,
+      detailsPanel: ({eventId}) =>
+        new DebugSliceDetailsPanel(ctx, track.sqlTableName, eventId),
     });
+    const trackNode = new TrackNode({title, uri});
+    ctx.workspace.addChildInOrder(trackNode);
   }
 }
 

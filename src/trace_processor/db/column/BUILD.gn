@@ -30,12 +30,16 @@ source_set("column") {
     "null_overlay.h",
     "numeric_storage.cc",
     "numeric_storage.h",
+    "overlay_layer.cc",
+    "overlay_layer.h",
     "range_overlay.cc",
     "range_overlay.h",
     "selector_overlay.cc",
     "selector_overlay.h",
     "set_id_storage.cc",
     "set_id_storage.h",
+    "storage_layer.cc",
+    "storage_layer.h",
     "string_storage.cc",
     "string_storage.h",
     "types.h",
@@ -43,6 +47,7 @@ source_set("column") {
     "utils.h",
   ]
   deps = [
+    "..:compare",
     "../..:metatrace",
     "../../../../gn:default_deps",
     "../../../../include/perfetto/trace_processor",
@@ -75,6 +80,7 @@ perfetto_unittest_source_set("unittests") {
   sources = [
     "arrangement_overlay_unittest.cc",
     "dense_null_overlay_unittest.cc",
+    "fake_storage_unittest.cc",
     "id_storage_unittest.cc",
     "null_overlay_unittest.cc",
     "numeric_storage_unittest.cc",

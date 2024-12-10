@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {classNames} from '../base/classnames';
 import {Hotkey, Platform} from '../base/hotkeys';
 import {isString} from '../base/object_utils';
@@ -37,18 +36,28 @@ import {
 } from '../widgets/multiselect';
 import {Popup, PopupPosition} from '../widgets/popup';
 import {Portal} from '../widgets/portal';
-import {FilterableSelect, Select} from '../widgets/select';
+import {Select} from '../widgets/select';
 import {Spinner} from '../widgets/spinner';
 import {Switch} from '../widgets/switch';
 import {TextInput} from '../widgets/text_input';
 import {MultiParagraphText, TextParagraph} from '../widgets/text_paragraph';
 import {LazyTreeNode, Tree, TreeNode} from '../widgets/tree';
 import {VegaView} from '../widgets/vega_view';
-
-import {createPage} from './pages';
+import {PageAttrs} from '../core/router';
 import {PopupMenuButton} from './popup_menu';
 import {TableShowcase} from './tables/table_showcase';
 import {TreeTable, TreeTableAttrs} from './widgets/treetable';
+import {Intent} from '../widgets/common';
+import {
+  VirtualTable,
+  VirtualTableAttrs,
+  VirtualTableRow,
+} from '../widgets/virtual_table';
+import {TagInput} from '../widgets/tag_input';
+import {SegmentedButtons} from '../widgets/segmented_buttons';
+import {MiddleEllipsis} from '../widgets/middle_ellipsis';
+import {Chip, ChipBar} from '../widgets/chip';
+import {TrackWidget} from '../widgets/track_widget';
 
 const DATA_ENGLISH_LETTER_FREQUENCY = {
   table: [
@@ -235,6 +244,14 @@ enum DataExample {
   Empty = 'Empty',
 }
 
+function arg<T>(
+  anyArg: unknown,
+  valueIfTrue: T,
+  valueIfFalse: T | undefined = undefined,
+): T | undefined {
+  return Boolean(anyArg) ? valueIfTrue : valueIfFalse;
+}
+
 function getExampleSpec(example: SpecExample): string {
   switch (example) {
     case SpecExample.BarChart:
@@ -290,6 +307,7 @@ function PortalButton() {
       return [
         m(Button, {
           label: 'Toggle Portal',
+          intent: Intent.Primary,
           onclick: () => {
             portalOpen = !portalOpen;
             raf.scheduleFullRedraw();
@@ -300,9 +318,9 @@ function PortalButton() {
             Portal,
             {
               style: {
-                position: absolute && 'absolute',
-                top: top && '0',
-                zIndex: zIndex ? '10' : '0',
+                position: arg(absolute, 'absolute'),
+                top: arg(top, '0'),
+                zIndex: arg(zIndex, '10', '0'),
                 background: 'white',
               },
             },
@@ -353,15 +371,29 @@ function ControlledPopup() {
 }
 
 type Options = {
-  [key: string]: EnumOption | boolean | string;
+  [key: string]: EnumOption | boolean | string | number;
 };
 
 class EnumOption {
-  constructor(public initial: string, public options: string[]) {}
+  constructor(
+    public initial: string,
+    public options: string[],
+  ) {}
 }
 
 interface WidgetTitleAttrs {
   label: string;
+}
+
+function recursiveTreeNode(): m.Children {
+  return m(LazyTreeNode, {
+    left: 'Recursive',
+    right: '...',
+    fetchData: async () => {
+      // await new Promise((r) => setTimeout(r, 1000));
+      return () => recursiveTreeNode();
+    },
+  });
 }
 
 class WidgetTitle implements m.ClassComponent<WidgetTitleAttrs> {
@@ -404,9 +436,7 @@ class WidgetShowcase implements m.ClassComponent<WidgetShowcaseAttrs> {
           const option = opts[key];
           if (option instanceof EnumOption) {
             this.optValues[key] = option.initial;
-          } else if (typeof option === 'boolean') {
-            this.optValues[key] = option;
-          } else if (isString(option)) {
+          } else {
             this.optValues[key] = option;
           }
         }
@@ -455,6 +485,8 @@ class WidgetShowcase implements m.ClassComponent<WidgetShowcaseAttrs> {
       return this.renderBooleanOption(key);
     } else if (isString(value)) {
       return this.renderStringOption(key);
+    } else if (typeof value === 'number') {
+      return this.renderNumberOption(key);
     } else {
       return null;
     }
@@ -465,21 +497,43 @@ class WidgetShowcase implements m.ClassComponent<WidgetShowcaseAttrs> {
       checked: this.optValues[key],
       label: key,
       onchange: () => {
-        this.optValues[key] = !this.optValues[key];
+        this.optValues[key] = !Boolean(this.optValues[key]);
         raf.scheduleFullRedraw();
       },
     });
   }
 
   private renderStringOption(key: string) {
-    return m(TextInput, {
-      placeholder: key,
-      value: this.optValues[key],
-      oninput: (e: Event) => {
-        this.optValues[key] = (e.target as HTMLInputElement).value;
-        raf.scheduleFullRedraw();
-      },
-    });
+    return m(
+      'label',
+      `${key}:`,
+      m(TextInput, {
+        placeholder: key,
+        value: this.optValues[key],
+        oninput: (e: Event) => {
+          this.optValues[key] = (e.target as HTMLInputElement).value;
+          raf.scheduleFullRedraw();
+        },
+      }),
+    );
+  }
+
+  private renderNumberOption(key: string) {
+    return m(
+      'label',
+      `${key}:`,
+      m(TextInput, {
+        type: 'number',
+        placeholder: key,
+        value: this.optValues[key],
+        oninput: (e: Event) => {
+          this.optValues[key] = Number.parseInt(
+            (e.target as HTMLInputElement).value,
+          );
+          raf.scheduleFullRedraw();
+        },
+      }),
+    );
   }
 
   private renderEnumOption(key: string, opt: EnumOption) {
@@ -487,16 +541,20 @@ class WidgetShowcase implements m.ClassComponent<WidgetShowcaseAttrs> {
       return m('option', {value: option}, option);
     });
     return m(
-      Select,
-      {
-        value: this.optValues[key],
-        onchange: (e: Event) => {
-          const el = e.target as HTMLSelectElement;
-          this.optValues[key] = el.value;
-          raf.scheduleFullRedraw();
+      'label',
+      `${key}:`,
+      m(
+        Select,
+        {
+          value: this.optValues[key],
+          onchange: (e: Event) => {
+            const el = e.target as HTMLSelectElement;
+            this.optValues[key] = el.value;
+            raf.scheduleFullRedraw();
+          },
         },
-      },
-      optionElements,
+        optionElements,
+      ),
     );
   }
 }
@@ -567,7 +625,55 @@ const files: File[] = [
   },
 ];
 
-export const WidgetsPage = createPage({
+let virtualTableData: {offset: number; rows: VirtualTableRow[]} = {
+  offset: 0,
+  rows: [],
+};
+
+function TagInputDemo() {
+  const tags: string[] = ['foo', 'bar', 'baz'];
+  let tagInputValue: string = '';
+
+  return {
+    view: () => {
+      return m(TagInput, {
+        tags,
+        value: tagInputValue,
+        onTagAdd: (tag) => {
+          tags.push(tag);
+          tagInputValue = '';
+          raf.scheduleFullRedraw();
+        },
+        onChange: (value) => {
+          tagInputValue = value;
+        },
+        onTagRemove: (index) => {
+          tags.splice(index, 1);
+          raf.scheduleFullRedraw();
+        },
+      });
+    },
+  };
+}
+
+function SegmentedButtonsDemo({attrs}: {attrs: {}}) {
+  let selectedIdx = 0;
+  return {
+    view: () => {
+      return m(SegmentedButtons, {
+        ...attrs,
+        options: [{label: 'Yes'}, {label: 'Maybe'}, {label: 'No'}],
+        selectedOption: selectedIdx,
+        onOptionSelected: (num) => {
+          selectedIdx = num;
+          raf.scheduleFullRedraw();
+        },
+      });
+    },
+  };
+}
+
+export class WidgetsPage implements m.ClassComponent<PageAttrs> {
   view() {
     return m(
       '.widgets-page',
@@ -576,9 +682,9 @@ export const WidgetsPage = createPage({
         label: 'Button',
         renderWidget: ({label, icon, rightIcon, ...rest}) =>
           m(Button, {
-            icon: icon ? 'send' : undefined,
-            rightIcon: rightIcon ? 'arrow_forward' : undefined,
-            label: label ? 'Button' : '',
+            icon: arg(icon, 'send'),
+            rightIcon: arg(rightIcon, 'arrow_forward'),
+            label: arg(label, 'Button', ''),
             ...rest,
           }),
         initialOpts: {
@@ -586,10 +692,21 @@ export const WidgetsPage = createPage({
           icon: true,
           rightIcon: false,
           disabled: false,
-          minimal: false,
+          intent: new EnumOption(Intent.None, Object.values(Intent)),
           active: false,
           compact: false,
           loading: false,
+        },
+      }),
+      m(WidgetShowcase, {
+        label: 'Segmented Buttons',
+        description: `
+          Segmented buttons are a group of buttons where one of them is
+          'selected'; they act similar to a set of radio buttons.
+        `,
+        renderWidget: (opts) => m(SegmentedButtonsDemo, opts),
+        initialOpts: {
+          disabled: false,
         },
       }),
       m(WidgetShowcase, {
@@ -603,7 +720,7 @@ export const WidgetsPage = createPage({
         label: 'Switch',
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         renderWidget: ({label, ...rest}: any) =>
-          m(Switch, {label: label ? 'Switch' : undefined, ...rest}),
+          m(Switch, {label: arg(label, 'Switch'), ...rest}),
         initialOpts: {
           label: true,
           disabled: false,
@@ -613,7 +730,7 @@ export const WidgetsPage = createPage({
         label: 'Text Input',
         renderWidget: ({placeholder, ...rest}) =>
           m(TextInput, {
-            placeholder: placeholder ? 'Placeholder...' : '',
+            placeholder: arg(placeholder, 'Placeholder...', ''),
             ...rest,
           }),
         initialOpts: {
@@ -634,22 +751,14 @@ export const WidgetsPage = createPage({
         },
       }),
       m(WidgetShowcase, {
-        label: 'Filterable Select',
-        renderWidget: () =>
-          m(FilterableSelect, {
-            values: ['foo', 'bar', 'baz'],
-            onSelected: () => {},
-          }),
-      }),
-      m(WidgetShowcase, {
         label: 'Empty State',
         renderWidget: ({header, content}) =>
           m(
             EmptyState,
             {
-              title: header && 'No search results found...',
+              title: arg(header, 'No search results found...'),
             },
-            content && m(Button, {label: 'Try again'}),
+            arg(content, m(Button, {label: 'Try again'})),
           ),
         initialOpts: {
           header: true,
@@ -662,11 +771,11 @@ export const WidgetsPage = createPage({
           m(
             Anchor,
             {
-              icon: icon && 'open_in_new',
+              icon: arg(icon, 'open_in_new'),
               href: 'https://perfetto.dev/docs/',
               target: '_blank',
             },
-            'Docs',
+            'This is some really long text and it will probably overflow the container',
           ),
         initialOpts: {
           icon: true,
@@ -767,7 +876,7 @@ export const WidgetsPage = createPage({
             }),
             popupPosition: PopupPosition.Top,
             label: 'Multi Select',
-            icon: icon ? Icons.LibraryAddCheck : undefined,
+            icon: arg(icon, Icons.LibraryAddCheck),
             onChange: (diffs: MultiSelectDiff[]) => {
               diffs.forEach(({id, checked}) => {
                 options[id] = checked;
@@ -984,6 +1093,7 @@ export const WidgetsPage = createPage({
                 return () => m(TreeNode, {left: 'foo'});
               },
             }),
+            recursiveTreeNode(),
           ),
         wide: true,
       }),
@@ -1152,9 +1262,131 @@ export const WidgetsPage = createPage({
           return m(TreeTable<File>, attrs);
         },
       }),
+      m(WidgetShowcase, {
+        label: 'VirtualTable',
+        description: `Virtualized table for efficient rendering of large datasets`,
+        renderWidget: () => {
+          const attrs: VirtualTableAttrs = {
+            columns: [
+              {header: 'x', width: '4em'},
+              {header: 'x^2', width: '8em'},
+            ],
+            rows: virtualTableData.rows,
+            firstRowOffset: virtualTableData.offset,
+            rowHeight: 20,
+            numRows: 500_000,
+            style: {height: '200px'},
+            onReload: (rowOffset, rowCount) => {
+              const rows = [];
+              for (let i = rowOffset; i < rowOffset + rowCount; i++) {
+                rows.push({id: i, cells: [i, i ** 2]});
+              }
+              virtualTableData = {
+                offset: rowOffset,
+                rows,
+              };
+              raf.scheduleFullRedraw();
+            },
+          };
+          return m(VirtualTable, attrs);
+        },
+      }),
+      m(WidgetShowcase, {
+        label: 'Tag Input',
+        description: `
+          TagInput displays Tag elements inside an input, followed by an
+          interactive text input. The container is styled to look like a
+          TextInput, but the actual editable element appears after the last tag.
+          Clicking anywhere on the container will focus the text input.`,
+        renderWidget: () => m(TagInputDemo),
+      }),
+      m(WidgetShowcase, {
+        label: 'Middle Ellipsis',
+        description: `
+          Sometimes the start and end of a bit of text are more important than
+          the middle. This element puts the ellipsis in the midde if the content
+          is too wide for its container.`,
+        renderWidget: (opts) =>
+          m(
+            'div',
+            {style: {width: Boolean(opts.squeeze) ? '150px' : '450px'}},
+            m(MiddleEllipsis, {
+              text: 'Lorem ipsum dolor sit amet, consectetur adipiscing elit',
+            }),
+          ),
+        initialOpts: {
+          squeeze: false,
+        },
+      }),
+      m(WidgetShowcase, {
+        label: 'Chip',
+        description: `A little chip or tag`,
+        renderWidget: (opts) => {
+          const {icon, ...rest} = opts;
+          return m(
+            ChipBar,
+            m(Chip, {
+              label: 'Foo',
+              icon: icon === true ? 'info' : undefined,
+              ...rest,
+            }),
+            m(Chip, {label: 'Bar', ...rest}),
+            m(Chip, {label: 'Baz', ...rest}),
+          );
+        },
+        initialOpts: {
+          intent: new EnumOption(Intent.None, Object.values(Intent)),
+          icon: true,
+          compact: false,
+          rounded: false,
+        },
+      }),
+      m(WidgetShowcase, {
+        label: 'Track',
+        description: `A track`,
+        renderWidget: (opts) => {
+          const {buttons, chips, multipleTracks, ...rest} = opts;
+          const dummyButtons = () => [
+            m(Button, {icon: 'info', compact: true}),
+            m(Button, {icon: 'settings', compact: true}),
+          ];
+          const dummyChips = () => ['foo', 'bar'];
+
+          const renderTrack = () =>
+            m(TrackWidget, {
+              buttons: Boolean(buttons) ? dummyButtons() : undefined,
+              chips: Boolean(chips) ? dummyChips() : undefined,
+              ...rest,
+            });
+
+          return m(
+            '',
+            {
+              style: {width: '500px', boxShadow: '0px 0px 1px 1px lightgray'},
+            },
+            Boolean(multipleTracks)
+              ? [renderTrack(), renderTrack(), renderTrack()]
+              : renderTrack(),
+          );
+        },
+        initialOpts: {
+          title: 'This is the title of the track',
+          buttons: true,
+          chips: true,
+          heightPx: 32,
+          indentationLevel: 3,
+          collapsible: true,
+          collapsed: true,
+          isSummary: false,
+          highlight: false,
+          error: false,
+          multipleTracks: false,
+          reorderable: false,
+        },
+      }),
     );
-  },
-});
+  }
+}
 
 class ModalShowcase implements m.ClassComponent {
   private static counter = 0;

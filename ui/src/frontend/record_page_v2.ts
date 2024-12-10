@@ -14,9 +14,7 @@
 
 import m from 'mithril';
 import {Attributes} from 'mithril';
-
 import {assertExists} from '../base/logging';
-import {Actions} from '../common/actions';
 import {RecordingConfigUtils} from '../common/recordingV2/recording_config_utils';
 import {
   ChromeTargetInfo,
@@ -33,9 +31,8 @@ import {
 } from '../common/recordingV2/recording_utils';
 import {targetFactoryRegistry} from '../common/recordingV2/target_factory_registry';
 import {raf} from '../core/raf_scheduler';
-
 import {globals} from './globals';
-import {createPage, PageAttrs} from './pages';
+import {PageAttrs} from '../core/router';
 import {recordConfigStore} from './record_config';
 import {
   Configurations,
@@ -57,6 +54,7 @@ import {RecordingSectionAttrs} from './recording/recording_sections';
 import {RecordingSettings} from './recording/recording_settings';
 import {FORCE_RESET_MESSAGE} from './recording/recording_ui_utils';
 import {showAddNewTargetModal} from './recording/reset_target_modal';
+import {createPermalink} from './permalink';
 
 const START_RECORDING_MESSAGE = 'Start Recording';
 
@@ -75,7 +73,7 @@ export interface TargetSelectionOptions {
 function isChromeTargetInfo(
   targetInfo: TargetInfo,
 ): targetInfo is ChromeTargetInfo {
-  return ['CHROME', 'CHROME_OS'].includes(targetInfo.targetType);
+  return ['CHROME', 'CHROME_OS', 'WINDOWS'].includes(targetInfo.targetType);
 }
 
 function RecordHeader() {
@@ -185,11 +183,7 @@ function Instructions(cssClass: string) {
       ? m(
           'button.permalinkconfig',
           {
-            onclick: () => {
-              globals.dispatch(
-                Actions.createPermalink({isRecordingConfig: true}),
-              );
-            },
+            onclick: () => createPermalink({mode: 'RECORDING_OPTS'}),
           },
           'Share recording settings',
         )
@@ -503,7 +497,7 @@ function recordMenu(routePage: string) {
   // possible for the target to be undefined here.
   const targetType = assertExists(controller.getTargetInfo()).targetType;
   const probes = [];
-  if (targetType === 'CHROME_OS' || targetType === 'LINUX') {
+  if (targetType === 'LINUX') {
     probes.push(cpuProbe, powerProbe, memoryProbe, chromeProbe, advancedProbe);
   } else if (targetType === 'WINDOWS') {
     probes.push(chromeProbe, etwProbe);
@@ -645,12 +639,12 @@ function getRecordContainer(subpage?: string): m.Vnode<any, any> {
   return m('.record-container', components);
 }
 
-export const RecordPageV2 = createPage({
+export class RecordPageV2 implements m.ClassComponent<PageAttrs> {
   oninit(): void {
     controller.initFactories();
-  },
+  }
 
-  view({attrs}: m.Vnode<PageAttrs>) {
+  view({attrs}: m.CVnode<PageAttrs>) {
     return m(
       '.record-page',
       controller.getState() > RecordingState.TARGET_INFO_DISPLAYED
@@ -658,5 +652,5 @@ export const RecordPageV2 = createPage({
         : [],
       getRecordContainer(attrs.subpage),
     );
-  },
-});
+  }
+}

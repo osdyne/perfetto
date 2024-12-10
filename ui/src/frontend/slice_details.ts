@@ -13,30 +13,32 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {BigintMath} from '../base/bigint_math';
 import {sqliteString} from '../base/string_utils';
 import {exists} from '../base/utils';
+import {SliceDetails} from '../trace_processor/sql_utils/slice';
 import {Anchor} from '../widgets/anchor';
 import {MenuItem, PopupMenu2} from '../widgets/menu';
 import {Section} from '../widgets/section';
 import {SqlRef} from '../widgets/sql_ref';
 import {Tree, TreeNode} from '../widgets/tree';
-
-import {SliceDetails} from './sql/slice';
 import {
   BreakdownByThreadState,
   BreakdownByThreadStateTreeNode,
 } from './sql/thread_state';
-import {addSqlTableTab} from './sql_table/tab';
-import {SqlTables} from './sql_table/well_known_tables';
-import {getProcessName, getThreadName} from './thread_and_process_info';
+import {addSqlTableTab} from './sql_table_tab_interface';
 import {DurationWidget} from './widgets/duration';
+import {renderProcessRef} from './widgets/process';
+import {renderThreadRef} from './widgets/thread';
 import {Timestamp} from './widgets/timestamp';
+import {getSqlTableDescription} from './widgets/sql/table/sql_table_registry';
+import {assertExists} from '../base/logging';
+import {Trace} from '../public/trace';
 
 // Renders a widget storing all of the generic details for a slice from the
 // slice table.
 export function renderDetails(
+  trace: Trace,
   slice: SliceDetails,
   durationBreakdown?: BreakdownByThreadState,
 ) {
@@ -55,10 +57,14 @@ export function renderDetails(
           m(MenuItem, {
             label: 'Slices with the same name',
             onclick: () => {
-              addSqlTableTab({
-                table: SqlTables.slice,
-                displayName: 'slice',
-                filters: [`name = ${sqliteString(slice.name)}`],
+              addSqlTableTab(trace, {
+                table: assertExists(getSqlTableDescription('slice')),
+                filters: [
+                  {
+                    op: (cols) => `${cols[0]} = ${sqliteString(slice.name)}`,
+                    columns: ['name'],
+                  },
+                ],
               });
             },
           }),
@@ -94,12 +100,12 @@ export function renderDetails(
       slice.thread &&
         m(TreeNode, {
           left: 'Thread',
-          right: getThreadName(slice.thread),
+          right: renderThreadRef(slice.thread),
         }),
       slice.process &&
         m(TreeNode, {
           left: 'Process',
-          right: getProcessName(slice.process),
+          right: renderProcessRef(slice.process),
         }),
       slice.process &&
         exists(slice.process.uid) &&

@@ -32,19 +32,12 @@
  * using the "floating" canvas technique described above.
  */
 
-import {Disposable, Trash} from '../base/disposable';
-import {
-  Rect,
-  Size,
-  expandRect,
-  intersectRects,
-  rebaseRect,
-  rectSize,
-} from '../base/geom';
+import {DisposableStack} from '../base/disposable_stack';
+import {Bounds2D, Rect2D, Size2D} from '../base/geom';
 
 export type LayoutShiftListener = (
   canvas: HTMLCanvasElement,
-  rect: Rect,
+  rect: Rect2D,
 ) => void;
 
 export type CanvasResizeListener = (
@@ -66,12 +59,12 @@ export interface VirtualCanvasOpts {
 }
 
 export class VirtualCanvas implements Disposable {
-  private readonly _trash = new Trash();
+  private readonly _trash = new DisposableStack();
   private readonly _canvasElement: HTMLCanvasElement;
   private readonly _targetElement: HTMLElement;
 
   // Describes the offset of the canvas w.r.t. the "target" container
-  private _canvasRect: Rect;
+  private _canvasRect: Rect2D;
   private _layoutShiftListener?: LayoutShiftListener;
   private _canvasResizeListener?: CanvasResizeListener;
 
@@ -93,47 +86,43 @@ export class VirtualCanvas implements Disposable {
 
     // Returns what the canvas rect should look like
     const getCanvasRect = () => {
-      const containerRect = containerElement.getBoundingClientRect();
+      const containerRect = new Rect2D(
+        containerElement.getBoundingClientRect(),
+      );
       const targetElementRect = targetElement.getBoundingClientRect();
 
       // Calculate the intersection of the container's viewport and the target
-      const intersection = intersectRects(containerRect, targetElementRect);
+      const intersection = containerRect.intersect(targetElementRect);
 
       // Pad the intersection by the overdraw amount
-      const intersectionExpanded = expandRect(intersection, overdrawPx);
+      const intersectionExpanded = intersection.expand(overdrawPx);
 
       // Intersect with the original target rect unless we want to avoid resizes
       const canvasTargetRect = avoidOverflowingContainer
-        ? intersectRects(intersectionExpanded, targetElementRect)
+        ? intersectionExpanded.intersect(targetElementRect)
         : intersectionExpanded;
 
-      return rebaseRect(
-        canvasTargetRect,
-        targetElementRect.x,
-        targetElementRect.y,
-      );
+      return canvasTargetRect.reframe(targetElementRect);
     };
 
     const updateCanvas = () => {
       let repaintRequired = false;
 
       const canvasRect = getCanvasRect();
-      const canvasRectSize = rectSize(canvasRect);
       const canvasRectPrev = this._canvasRect;
-      const canvasRectPrevSize = rectSize(canvasRectPrev);
       this._canvasRect = canvasRect;
 
       if (
-        canvasRectPrevSize.width !== canvasRectSize.width ||
-        canvasRectPrevSize.height !== canvasRectSize.height
+        canvasRectPrev.width !== canvasRect.width ||
+        canvasRectPrev.height !== canvasRect.height
       ) {
         // Canvas needs to change size, update its size
-        canvas.style.width = `${canvasRectSize.width}px`;
-        canvas.style.height = `${canvasRectSize.height}px`;
+        canvas.style.width = `${canvasRect.width}px`;
+        canvas.style.height = `${canvasRect.height}px`;
         this._canvasResizeListener?.(
           canvas,
-          canvasRectSize.width,
-          canvasRectSize.height,
+          canvasRect.width,
+          canvasRect.height,
         );
         repaintRequired = true;
       }
@@ -153,7 +142,7 @@ export class VirtualCanvas implements Disposable {
     containerElement.addEventListener('scroll', updateCanvas, {
       passive: true,
     });
-    this._trash.addCallback(() =>
+    this._trash.defer(() =>
       containerElement.removeEventListener('scroll', updateCanvas),
     );
 
@@ -164,7 +153,7 @@ export class VirtualCanvas implements Disposable {
 
     resizeObserver.observe(containerElement);
     resizeObserver.observe(targetElement);
-    this._trash.addCallback(() => {
+    this._trash.defer(() => {
       resizeObserver.disconnect();
     });
 
@@ -174,18 +163,18 @@ export class VirtualCanvas implements Disposable {
     const canvas = document.createElement('canvas');
     canvas.style.position = 'absolute';
     targetElement.appendChild(canvas);
-    this._trash.addCallback(() => {
+    this._trash.defer(() => {
       targetElement.removeChild(canvas);
     });
 
     this._canvasElement = canvas;
     this._targetElement = targetElement;
-    this._canvasRect = {
+    this._canvasRect = new Rect2D({
       left: 0,
       top: 0,
       bottom: 0,
       right: 0,
-    };
+    });
   }
 
   /**
@@ -225,7 +214,7 @@ export class VirtualCanvas implements Disposable {
   /**
    * The size of the target element, aka the size of the virtual canvas.
    */
-  get size(): Size {
+  get size(): Size2D {
     return {
       width: this._targetElement.clientWidth,
       height: this._targetElement.clientHeight,
@@ -237,21 +226,14 @@ export class VirtualCanvas implements Disposable {
    * This will need to be subtracted from any drawing operations to get the
    * right alignment within the virtual canvas.
    */
-  get canvasRect(): Rect {
+  get canvasRect(): Rect2D {
     return this._canvasRect;
-  }
-
-  /**
-   * The size of the floating canvas.
-   */
-  get canvasSize(): Size {
-    return rectSize(this._canvasRect);
   }
 
   /**
    * Stop listening to DOM events.
    */
-  dispose(): void {
+  [Symbol.dispose]() {
     this._trash.dispose();
   }
 
@@ -260,7 +242,7 @@ export class VirtualCanvas implements Disposable {
    * @param rect The rect to test.
    * @returns true if rect overlaps, false otherwise.
    */
-  overlapsCanvas(rect: Rect): boolean {
+  overlapsCanvas(rect: Bounds2D): boolean {
     const c = this._canvasRect;
     const y = rect.top < c.bottom && rect.bottom > c.top;
     const x = rect.left < c.right && rect.right > c.left;

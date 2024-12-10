@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {Disposable, Trash} from '../base/disposable';
+import {DisposableStack} from '../base/disposable_stack';
 import {currentTargetOffset, elementIsEditable} from '../base/dom_utils';
 import {raf} from '../core/raf_scheduler';
-
 import {Animation} from './animation';
-import {DragGestureHandler} from './drag_gesture_handler';
+import {DragGestureHandler} from '../base/drag_gesture_handler';
 
 // When first starting to pan or zoom, move at least this many units.
 const INITIAL_PAN_STEP_PX = 50;
@@ -120,7 +119,7 @@ export class PanAndZoomHandler implements Disposable {
     editing: boolean,
   ) => void;
   private endSelection: (edit: boolean) => void;
-  private trash: Trash;
+  private trash: DisposableStack;
 
   constructor({
     element,
@@ -150,13 +149,13 @@ export class PanAndZoomHandler implements Disposable {
     this.editSelection = editSelection;
     this.onSelection = onSelection;
     this.endSelection = endSelection;
-    this.trash = new Trash();
+    this.trash = new DisposableStack();
 
     document.body.addEventListener('keydown', this.boundOnKeyDown);
     document.body.addEventListener('keyup', this.boundOnKeyUp);
     this.element.addEventListener('mousemove', this.boundOnMouseMove);
     this.element.addEventListener('wheel', this.boundOnWheel, {passive: true});
-    this.trash.addCallback(() => {
+    this.trash.defer(() => {
       this.element.removeEventListener('wheel', this.boundOnWheel);
       this.element.removeEventListener('mousemove', this.boundOnMouseMove);
       document.body.removeEventListener('keyup', this.boundOnKeyUp);
@@ -167,7 +166,7 @@ export class PanAndZoomHandler implements Disposable {
     let dragStartX = -1;
     let dragStartY = -1;
     let edit = false;
-    this.trash.add(
+    this.trash.use(
       new DragGestureHandler(
         this.element,
         (x, y) => {
@@ -202,7 +201,7 @@ export class PanAndZoomHandler implements Disposable {
     );
   }
 
-  dispose() {
+  [Symbol.dispose]() {
     this.trash.dispose();
   }
 

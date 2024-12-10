@@ -16,12 +16,15 @@
 
 #include "src/trace_processor/db/column/data_layer.h"
 
+#include <algorithm>
 #include <cstdint>
+#include <iterator>
 #include <memory>
 #include <utility>
 #include <vector>
 
 #include "perfetto/base/logging.h"
+#include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/containers/string_pool.h"
 #include "src/trace_processor/db/column/arrangement_overlay.h"
@@ -30,11 +33,14 @@
 #include "src/trace_processor/db/column/id_storage.h"
 #include "src/trace_processor/db/column/null_overlay.h"
 #include "src/trace_processor/db/column/numeric_storage.h"
+#include "src/trace_processor/db/column/overlay_layer.h"
 #include "src/trace_processor/db/column/range_overlay.h"
 #include "src/trace_processor/db/column/selector_overlay.h"
 #include "src/trace_processor/db/column/set_id_storage.h"
+#include "src/trace_processor/db/column/storage_layer.h"
 #include "src/trace_processor/db/column/string_storage.h"
 #include "src/trace_processor/db/column/types.h"
+#include "src/trace_processor/db/compare.h"
 
 namespace perfetto::trace_processor::column {
 
@@ -113,10 +119,57 @@ std::unique_ptr<DataLayerChain> DataLayer::MakeChain(
   PERFETTO_FATAL("For GCC");
 }
 
+Range DataLayerChain::OrderedIndexSearchValidated(
+    FilterOp op,
+    SqlValue value,
+    const OrderedIndices& indices) const {
+  auto lb = [&]() {
+    return static_cast<uint32_t>(std::distance(
+        indices.data,
+        std::lower_bound(indices.data, indices.data + indices.size, value,
+                         [this](uint32_t idx, const SqlValue& v) {
+                           return compare::SqlValueComparator(
+                               Get_AvoidUsingBecauseSlow(idx), v);
+                         })));
+  };
+  auto ub = [&]() {
+    return static_cast<uint32_t>(std::distance(
+        indices.data,
+        std::upper_bound(indices.data, indices.data + indices.size, value,
+                         [this](const SqlValue& v, uint32_t idx) {
+                           return compare::SqlValueComparator(
+                               v, Get_AvoidUsingBecauseSlow(idx));
+                         })));
+  };
+  switch (op) {
+    case FilterOp::kEq:
+      return {lb(), ub()};
+    case FilterOp::kLe:
+      return {0, ub()};
+    case FilterOp::kLt:
+      return {0, lb()};
+    case FilterOp::kGe:
+      return {lb(), indices.size};
+    case FilterOp::kGt:
+      return {ub(), indices.size};
+    case FilterOp::kIsNull:
+      PERFETTO_CHECK(value.is_null());
+      return {0, ub()};
+    case FilterOp::kIsNotNull:
+      PERFETTO_CHECK(value.is_null());
+      return {ub(), indices.size};
+    case FilterOp::kNe:
+    case FilterOp::kGlob:
+    case FilterOp::kRegex:
+      PERFETTO_FATAL("Wrong filtering operation");
+  }
+  PERFETTO_FATAL("For GCC");
+}
+
 ArrangementOverlay::ArrangementOverlay(
     const std::vector<uint32_t>* arrangement,
     DataLayerChain::Indices::State arrangement_state)
-    : DataLayer(Impl::kArrangement),
+    : OverlayLayer(Impl::kArrangement),
       arrangement_(arrangement),
       arrangement_state_(arrangement_state) {}
 ArrangementOverlay::~ArrangementOverlay() = default;
@@ -130,7 +183,7 @@ std::unique_ptr<DataLayerChain> ArrangementOverlay::MakeChain(
 }
 
 DenseNullOverlay::DenseNullOverlay(const BitVector* non_null)
-    : DataLayer(Impl::kDenseNull), non_null_(non_null) {}
+    : OverlayLayer(Impl::kDenseNull), non_null_(non_null) {}
 DenseNullOverlay::~DenseNullOverlay() = default;
 
 std::unique_ptr<DataLayerChain> DenseNullOverlay::MakeChain(
@@ -143,7 +196,7 @@ std::unique_ptr<DataLayerChain> DummyStorage::MakeChain() {
   return std::make_unique<ChainImpl>();
 }
 
-IdStorage::IdStorage() : DataLayer(Impl::kId) {}
+IdStorage::IdStorage() : StorageLayer(Impl::kId) {}
 IdStorage::~IdStorage() = default;
 
 std::unique_ptr<DataLayerChain> IdStorage::MakeChain() {
@@ -151,7 +204,7 @@ std::unique_ptr<DataLayerChain> IdStorage::MakeChain() {
 }
 
 NullOverlay::NullOverlay(const BitVector* non_null)
-    : DataLayer(Impl::kNull), non_null_(non_null) {}
+    : OverlayLayer(Impl::kNull), non_null_(non_null) {}
 NullOverlay::~NullOverlay() = default;
 
 std::unique_ptr<DataLayerChain> NullOverlay::MakeChain(
@@ -163,7 +216,7 @@ std::unique_ptr<DataLayerChain> NullOverlay::MakeChain(
 NumericStorageBase::NumericStorageBase(ColumnType type,
                                        bool is_sorted,
                                        Impl impl)
-    : DataLayer(impl), storage_type_(type), is_sorted_(is_sorted) {}
+    : StorageLayer(impl), storage_type_(type), is_sorted_(is_sorted) {}
 
 NumericStorageBase::~NumericStorageBase() = default;
 
@@ -186,7 +239,7 @@ template class NumericStorage<int32_t>;
 template class NumericStorage<int64_t>;
 
 RangeOverlay::RangeOverlay(const Range* range)
-    : DataLayer(Impl::kRange), range_(range) {}
+    : OverlayLayer(Impl::kRange), range_(range) {}
 RangeOverlay::~RangeOverlay() = default;
 
 std::unique_ptr<DataLayerChain> RangeOverlay::MakeChain(
@@ -196,7 +249,7 @@ std::unique_ptr<DataLayerChain> RangeOverlay::MakeChain(
 }
 
 SelectorOverlay::SelectorOverlay(const BitVector* selector)
-    : DataLayer(Impl::kSelector), selector_(selector) {}
+    : OverlayLayer(Impl::kSelector), selector_(selector) {}
 SelectorOverlay::~SelectorOverlay() = default;
 
 std::unique_ptr<DataLayerChain> SelectorOverlay::MakeChain(
@@ -206,7 +259,7 @@ std::unique_ptr<DataLayerChain> SelectorOverlay::MakeChain(
 }
 
 SetIdStorage::SetIdStorage(const std::vector<uint32_t>* values)
-    : DataLayer(Impl::kSetId), values_(values) {}
+    : StorageLayer(Impl::kSetId), values_(values) {}
 SetIdStorage::~SetIdStorage() = default;
 
 std::unique_ptr<DataLayerChain> SetIdStorage::MakeChain() {
@@ -216,7 +269,7 @@ std::unique_ptr<DataLayerChain> SetIdStorage::MakeChain() {
 StringStorage::StringStorage(StringPool* string_pool,
                              const std::vector<StringPool::Id>* data,
                              bool is_sorted)
-    : DataLayer(Impl::kString),
+    : StorageLayer(Impl::kString),
       data_(data),
       string_pool_(string_pool),
       is_sorted_(is_sorted) {}

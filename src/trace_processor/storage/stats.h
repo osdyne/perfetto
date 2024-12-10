@@ -17,11 +17,9 @@
 #ifndef SRC_TRACE_PROCESSOR_STORAGE_STATS_H_
 #define SRC_TRACE_PROCESSOR_STORAGE_STATS_H_
 
-#include <stddef.h>
+#include <cstddef>
 
-namespace perfetto {
-namespace trace_processor {
-namespace stats {
+namespace perfetto::trace_processor::stats {
 
 // Compile time list of parsing and processing stats.
 // clang-format off
@@ -74,6 +72,8 @@ namespace stats {
        "enable. See ftrace_setup_errors in the metadata table for details."),  \
   F(ftrace_abi_errors_skipped_zero_data_length,                                \
                                           kSingle,  kInfo,     kAnalysis, ""), \
+  F(ftrace_thermal_exynos_acpm_unknown_tz_id,                                  \
+                                          kSingle,  kError,    kAnalysis, ""), \
   F(fuchsia_non_numeric_counters,         kSingle,  kError,    kAnalysis, ""), \
   F(fuchsia_timestamp_overflow,           kSingle,  kError,    kAnalysis, ""), \
   F(fuchsia_invalid_event,                kSingle,  kError,    kAnalysis, ""), \
@@ -153,7 +153,13 @@ namespace stats {
   F(traced_buf_patches_succeeded,         kIndexed, kInfo,     kTrace,    ""), \
   F(traced_buf_readaheads_failed,         kIndexed, kInfo,     kTrace,    ""), \
   F(traced_buf_readaheads_succeeded,      kIndexed, kInfo,     kTrace,    ""), \
-  F(traced_buf_trace_writer_packet_loss,  kIndexed, kDataLoss, kTrace,    ""), \
+  F(traced_buf_trace_writer_packet_loss,  kIndexed, kDataLoss, kTrace,         \
+      "The tracing service observed packet loss for this buffer during this "  \
+      "tracing session. This also counts packet loss that happened before "    \
+      "the RING_BUFFER start or after the DISCARD buffer end."),               \
+  F(traced_buf_sequence_packet_loss,      kIndexed, kDataLoss, kAnalysis,      \
+      "The number of groups of consecutive packets lost in each sequence for " \
+      "this buffer"), \
   F(traced_buf_write_wrap_count,          kIndexed, kInfo,     kTrace,    ""), \
   F(traced_chunks_discarded,              kSingle,  kInfo,     kTrace,    ""), \
   F(traced_data_sources_registered,       kSingle,  kInfo,     kTrace,    ""), \
@@ -256,12 +262,57 @@ namespace stats {
   F(compact_sched_waking_skipped,         kSingle,  kInfo,     kAnalysis, ""), \
   F(empty_chrome_metadata,                kSingle,  kError,    kTrace,    ""), \
   F(ninja_parse_errors,                   kSingle,  kError,    kTrace,    ""), \
-  F(perf_cpu_lost_records,                kIndexed, kDataLoss, kTrace,    ""), \
+  F(perf_cpu_lost_records,                kIndexed, kDataLoss, kTrace,         \
+      "Count of perf samples lost due to kernel buffer overruns. The trace "   \
+      "is missing information, but it's not known which processes are "        \
+      "affected. Consider lowering the sampling frequency or raising "         \
+      "the ring_buffer_pages config option."),                                 \
   F(perf_process_shard_count,             kIndexed, kInfo,     kTrace,    ""), \
   F(perf_chosen_process_shard,            kIndexed, kInfo,     kTrace,    ""), \
   F(perf_guardrail_stop_ts,               kIndexed, kDataLoss, kTrace,    ""), \
-  F(perf_samples_skipped,                 kSingle,  kInfo,     kTrace,    ""), \
-  F(perf_samples_skipped_dataloss,        kSingle,  kDataLoss, kTrace,    ""), \
+  F(perf_unknown_record_type,             kIndexed, kInfo,     kAnalysis, ""), \
+  F(perf_record_skipped,                  kIndexed, kError,    kAnalysis, ""), \
+  F(perf_samples_skipped,                 kSingle,  kError,    kAnalysis,      \
+      "Count of skipped perf samples that otherwise matched the tracing "      \
+      "config. This will cause a process to be completely absent from the "    \
+      "trace, but does *not* imply data loss for processes that do have "      \
+      "samples in this trace."),                                               \
+  F(perf_counter_skipped_because_no_cpu,  kSingle,  kError,    kAnalysis, ""), \
+  F(perf_features_skipped,                kIndexed, kInfo,     kAnalysis, ""), \
+  F(perf_samples_cpu_mode_unknown,        kSingle,  kError,    kAnalysis, ""), \
+  F(perf_samples_skipped_dataloss,        kSingle,  kDataLoss, kTrace,         \
+      "Count of perf samples lost within the profiler (traced_perf), likely "  \
+      "due to load shedding. This may impact any traced processes. The trace " \
+      "protobuf needs to be inspected manually to confirm which processes "    \
+      "are affected."),                                                        \
+  F(perf_dummy_mapping_used,              kSingle,  kInfo,     kAnalysis, ""), \
+  F(perf_aux_missing,                     kSingle,  kDataLoss, kTrace,         \
+      "Number of bytes missing in AUX data streams due to missing "            \
+      "PREF_RECORD_AUX messages."),                                            \
+  F(perf_aux_ignored,                     kSingle,  kInfo,     kTrace,         \
+       "AUX data was ignored because the proper parser is not implemented."), \
+  F(perf_aux_lost,                        kSingle,  kDataLoss, kTrace,         \
+      "Gaps in the AUX data stream pased to the tokenizer."), \
+  F(perf_aux_truncated,                   kSingle,  kDataLoss, kTrace,         \
+      "Data was truncated when being written to the AUX stream at the "        \
+      "source."),\
+  F(perf_aux_partial,                     kSingle,  kDataLoss, kTrace,         \
+      "The PERF_RECORD_AUX contained partial data."), \
+  F(perf_aux_collision,                   kSingle,  kDataLoss, kTrace,         \
+      "The collection of a sample colliden with another. You should reduce "   \
+      "the rate at which samples are collected."),                             \
+  F(perf_auxtrace_missing,                kSingle,  kDataLoss, kTrace,         \
+      "Number of bytes missing in AUX data streams due to missing "            \
+      "PREF_RECORD_AUXTRACE messages."),                                       \
+  F(perf_unknown_aux_data,                kIndexed, kDataLoss, kTrace,         \
+      "AUX data type encountered for which there is no known parser."),        \
+  F(perf_no_tsc_data,                     kSingle,  kInfo,     kTrace,         \
+      "TSC data unavailable. Will be unable to translate HW clocks."),         \
+  F(spe_no_timestamp,                     kSingle,  kInfo,     kTrace,         \
+      "SPE record with no timestamp. Will try our best to assign a "           \
+      "timestamp."),                                                           \
+  F(spe_record_droped,                    kSingle,  kDataLoss, kTrace,         \
+      "SPE record dropped. E.g. Unable to assign it a timestamp."),            \
   F(memory_snapshot_parser_failure,       kSingle,  kError,    kAnalysis, ""), \
   F(thread_time_in_state_out_of_order,    kSingle,  kError,    kAnalysis, ""), \
   F(thread_time_in_state_unknown_cpu_freq,                                     \
@@ -289,6 +340,10 @@ namespace stats {
   F(v8_intern_errors,                                                          \
                                           kSingle,  kDataLoss, kAnalysis,      \
       "Failed to resolve V8 interned data."),                                  \
+  F(v8_isolate_has_no_code_range,                                              \
+                                          kSingle,  kError,    kAnalysis,      \
+      "V8 isolate had no code range. THis is currently no supported and means" \
+      "we will be unable to parse JS code events for this isolate."),          \
   F(v8_no_defaults,                                                            \
                                           kSingle,  kDataLoss, kAnalysis,      \
       "Failed to resolve V8 default data."),                                   \
@@ -298,6 +353,21 @@ namespace stats {
   F(v8_unknown_code_type,                 kSingle,  kError,    kAnalysis, ""), \
   F(v8_code_load_missing_code_range,      kSingle,  kError,    kAnalysis,      \
       "V8 load had no code range or an empty one. Event ignored."),            \
+  F(winscope_inputmethod_clients_parse_errors,                                 \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "InputMethod clients packet has unknown fields, which results in "       \
+      "some arguments missing. You may need a newer version of trace "         \
+      "processor to parse them."),                                             \
+  F(winscope_inputmethod_manager_service_parse_errors,                         \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "InputMethod manager service packet has unknown fields, which results "  \
+      "in some arguments missing. You may need a newer version of trace "      \
+      "processor to parse them."),                                             \
+  F(winscope_inputmethod_service_parse_errors,                                 \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "InputMethod service packet has unknown fields, which results in "       \
+      "some arguments missing. You may need a newer version of trace "         \
+      "processor to parse them."),                                             \
   F(winscope_sf_layers_parse_errors,      kSingle,  kInfo,     kAnalysis,      \
       "SurfaceFlinger layers snapshot has unknown fields, which results in "   \
       "some arguments missing. You may need a newer version of trace "         \
@@ -321,13 +391,44 @@ namespace stats {
   F(winscope_protolog_missing_interned_stacktrace_parse_errors,                \
                                           kSingle,  kInfo,     kAnalysis,      \
       "Failed to find interned ProtoLog stacktrace."),                         \
+  F(winscope_protolog_message_decoding_failed,                                 \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "Failed to decode ProtoLog message."),                                   \
+  F(winscope_protolog_view_config_collision,                                   \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "Got a viewer config collision!"),                                       \
+  F(winscope_viewcapture_parse_errors,                                         \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "ViewCapture packet has unknown fields, which results in some "          \
+      "arguments missing. You may need a newer version of trace processor "    \
+      "to parse them."),                                                       \
+  F(winscope_viewcapture_missing_interned_string_parse_errors,                 \
+                                          kSingle,  kInfo,     kAnalysis,      \
+      "Failed to find interned ViewCapture string."),                          \
+  F(winscope_windowmanager_parse_errors, kSingle,  kInfo,     kAnalysis,       \
+      "WindowManager state packet has unknown fields, which results "          \
+      "in some arguments missing. You may need a newer version of trace "      \
+      "processor to parse them."),                                             \
   F(jit_unknown_frame,                    kSingle,  kDataLoss, kTrace,         \
       "Indicates that we were unable to determine the function for a frame in "\
       "a jitted memory region"),                                               \
   F(ftrace_missing_event_id,              kSingle,  kInfo,    kAnalysis,       \
       "Indicates that the ftrace event was dropped because the event id was "  \
       "missing. This is an 'info' stat rather than an error stat because "     \
-      "this can be legitimately missing due to proto filtering.")
+      "this can be legitimately missing due to proto filtering."),             \
+  F(android_input_event_parse_errors,     kSingle,  kInfo,     kAnalysis,      \
+      "Android input event packet has unknown fields, which results "          \
+      "in some arguments missing. You may need a newer version of trace "      \
+      "processor to parse them."),                                             \
+  F(mali_unknown_mcu_state_id,            kSingle,  kError,   kAnalysis,       \
+      "An invalid Mali GPU MCU state ID was detected."),                       \
+  F(pixel_modem_negative_timestamp,       kSingle,  kError,   kAnalysis,       \
+      "A negative timestamp was received from a Pixel modem event."),          \
+  F(legacy_v8_cpu_profile_invalid_callsite, kSingle,  kInfo,  kAnalysis,       \
+      "Indicates a callsite in legacy v8 CPU profiling is invalid."),          \
+  F(legacy_v8_cpu_profile_invalid_sample, kSingle,  kError,  kAnalysis,        \
+      "Indicates a sample in legacy v8 CPU profile is invalid. This will "     \
+      "cause CPU samples to be missing in the UI.")
 // clang-format on
 
 enum Type {
@@ -347,7 +448,7 @@ enum Source {
   // being reflected in the stats table.
   kTrace,
 
-  // The counter is genrated when importing / processing the trace in the trace
+  // The counter is generated when importing / processing the trace in the trace
   // processor.
   kAnalysis
 };
@@ -381,8 +482,6 @@ constexpr Source kSources[] = {PERFETTO_TP_STATS(PERFETTO_TP_STATS_SOURCE)};
 constexpr char const* kDescriptions[] = {
     PERFETTO_TP_STATS(PERFETTO_TP_STATS_DESCRIPTION)};
 
-}  // namespace stats
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor::stats
 
 #endif  // SRC_TRACE_PROCESSOR_STORAGE_STATS_H_

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {MeminfoCounters, VmstatCounters} from '../../protos';
 import {globals} from '../globals';
 import {
@@ -28,7 +27,6 @@ import {
   Toggle,
   ToggleAttrs,
 } from '../record_widgets';
-
 import {POLL_INTERVAL_MS, RecordingSectionAttrs} from './recording_sections';
 
 class HeapSettings implements m.ClassComponent<RecordingSectionAttrs> {
@@ -82,10 +80,8 @@ class HeapSettings implements m.ClassComponent<RecordingSectionAttrs> {
         title: 'Sampling interval',
         cssClass: '.thin',
         values: [
-          /* eslint-disable no-multi-spaces */
           0, 1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192,
           16384, 32768, 65536, 131072, 262144, 524288, 1048576,
-          /* eslint-enable no-multi-spaces */
         ],
         unit: 'B',
         min: 0,

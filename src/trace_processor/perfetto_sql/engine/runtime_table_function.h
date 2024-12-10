@@ -24,7 +24,7 @@
 #include <vector>
 
 #include "perfetto/base/logging.h"
-#include "src/trace_processor/perfetto_sql/engine/function_util.h"
+#include "src/trace_processor/perfetto_sql/parser/function_util.h"
 #include "src/trace_processor/sqlite/bindings/sqlite_module.h"
 #include "src/trace_processor/sqlite/module_lifecycle_manager.h"
 #include "src/trace_processor/sqlite/sql_source.h"
@@ -117,6 +117,10 @@ struct RuntimeTableFunctionModule
   static int Eof(sqlite3_vtab_cursor*);
   static int Column(sqlite3_vtab_cursor*, sqlite3_context*, int);
   static int Rowid(sqlite3_vtab_cursor*, sqlite_int64*);
+
+  // This needs to happen at the end as it depends on the functions
+  // defined above.
+  static constexpr sqlite3_module kModule = CreateModule();
 };
 
 }  // namespace perfetto::trace_processor
