@@ -194,12 +194,12 @@ function getSections(trace?: Trace): Section[] {
             globals.getConversionJobStatus('create_permalink') ===
             ConversionJobStatus.InProgress,
         },
-        {
-          t: 'Download',
-          a: (e: Event) => trace && downloadTrace(e, trace),
-          i: 'file_download',
-          checkDownloadDisabled: true,
-        },
+        // {
+        //   t: 'Download',
+        //   a: (e: Event) => trace && downloadTrace(e, trace),
+        //   i: 'file_download',
+        //   checkDownloadDisabled: true,
+        // },
         {t: 'Query (SQL)', a: navigateQuery, i: 'database'},
         {
           t: 'Insights',
@@ -218,42 +218,42 @@ function getSections(trace?: Trace): Section[] {
       ],
     },
 
-    {
-      title: 'Convert trace',
-      summary: 'Convert to other formats',
-      expanded: true,
-      hideIfNoTraceLoaded: true,
-      items: [
-        // {
-        //   t: 'Switch to legacy UI',
-        //   a: openCurrentTraceWithOldUI,
-        //   i: 'filter_none',
-        //   isPending: () =>
-        //     globals.getConversionJobStatus('open_in_legacy') ===
-        //     ConversionJobStatus.InProgress,
-        // },
-        {
-          t: 'Convert to .json',
-          a: convertTraceToJson,
-          i: 'file_download',
-          isPending: () =>
-            globals.getConversionJobStatus('convert_json') ===
-            ConversionJobStatus.InProgress,
-          checkDownloadDisabled: true,
-        },
+    // {
+    //   title: 'Convert trace',
+    //   summary: 'Convert to other formats',
+    //   expanded: true,
+    //   hideIfNoTraceLoaded: true,
+    //   items: [
+    //     {
+    //       t: 'Switch to legacy UI',
+    //       a: openCurrentTraceWithOldUI,
+    //       i: 'filter_none',
+    //       isPending: () =>
+    //         globals.getConversionJobStatus('open_in_legacy') ===
+    //         ConversionJobStatus.InProgress,
+    //     },
+    //     {
+    //       t: 'Convert to .json',
+    //       a: convertTraceToJson,
+    //       i: 'file_download',
+    //       isPending: () =>
+    //         globals.getConversionJobStatus('convert_json') ===
+    //         ConversionJobStatus.InProgress,
+    //       checkDownloadDisabled: true,
+    //     },
 
-        {
-          t: 'Convert to .systrace',
-          a: convertTraceToSystrace,
-          i: 'file_download',
-          isVisible: () => Boolean(trace?.traceInfo.hasFtrace),
-          isPending: () =>
-            globals.getConversionJobStatus('convert_systrace') ===
-            ConversionJobStatus.InProgress,
-          checkDownloadDisabled: true,
-        },
-      ],
-    },
+    //     {
+    //       t: 'Convert to .systrace',
+    //       a: convertTraceToSystrace,
+    //       i: 'file_download',
+    //       isVisible: () => Boolean(trace?.traceInfo.hasFtrace),
+    //       isPending: () =>
+    //         globals.getConversionJobStatus('convert_systrace') ===
+    //         ConversionJobStatus.InProgress,
+    //       checkDownloadDisabled: true,
+    //     },
+    //   ],
+    // },
 
     // {
     //   title: 'Example Traces',
@@ -275,22 +275,22 @@ function getSections(trace?: Trace): Section[] {
           a: getBugReportUrl(),
           i: 'bug_report',
         },
-        ...(trace
-          ? [
-              {
-                t: 'Record metatrace',
-                a: (e: Event) => recordMetatrace(e, trace.engine),
-                i: 'fiber_smart_record',
-                checkMetatracingDisabled: true,
-              },
-              {
-                t: 'Finalise metatrace',
-                a: (e: Event) => finaliseMetatrace(e, trace.engine),
-                i: 'file_download',
-                checkMetatracingEnabled: true,
-              },
-            ]
-          : []),
+        // ...(trace
+        //   ? [
+        //       {
+        //         t: 'Record metatrace',
+        //         a: (e: Event) => recordMetatrace(e, trace.engine),
+        //         i: 'fiber_smart_record',
+        //         checkMetatracingDisabled: true,
+        //       },
+        //       {
+        //         t: 'Finalise metatrace',
+        //         a: (e: Event) => finaliseMetatrace(e, trace.engine),
+        //         i: 'file_download',
+        //         checkMetatracingEnabled: true,
+        //       },
+        //     ]
+        //   : []),
       ],
     },
   ];
