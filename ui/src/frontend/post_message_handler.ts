@@ -62,6 +62,9 @@ export function isTrustedOrigin(origin: string): boolean {
   ) {
     return true;
   }
+  if (hostname.startsWith("vscode-webview://")) {
+    return true;
+  }
   return false;
 }
 
