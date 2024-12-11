@@ -215,8 +215,8 @@ export function postMessageHandler(messageEvent: MessageEvent) {
     // For external traces, we need to disable other features such as
     // downloading and sharing a trace.
     postedTrace.localOnly = true;
-    AppImpl.instance.openTraceFromBuffer(postedTrace);
     globals.dispatch(Actions.setSidebar({ visible: false }));
+    AppImpl.instance.openTraceFromBuffer(postedTrace);
   };
 
   const trustAndOpenTrace = () => {
