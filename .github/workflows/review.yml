@@ -4,6 +4,9 @@ on: [pull_request]
 jobs:
   review:
     runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      contents: read
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
@@ -16,7 +19,7 @@ jobs:
         id: artifact-upload
         with:
           name: otv
-          path: ${{ github.workspace }}/out/ui/ui/dist
+          path: ${{ github.workspace }}/dist
           retention-days: 5
       - uses: mshick/add-pr-comment@v2
         with:
