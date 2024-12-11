@@ -153,7 +153,7 @@ function insertSidebarMenuitems(
     });
 }
 
-function getSections(trace?: Trace): Section[] {
+function getSections(_trace?: Trace): Section[] {
   return [
     {
       title: 'Navigation',

@@ -51,7 +51,9 @@ export function isTrustedOrigin(origin: string): boolean {
   if (origin === 'null') return false;
   if (TRUSTED_ORIGINS.includes(origin)) return true;
   if (isUserTrustedOrigin(origin)) return true;
-
+  if (origin.startsWith("vscode-webview://")) {
+    return true;
+  }
   const hostname = new URL(origin).hostname;
   if (hostname.endsWith('.corp.google.com')) return true;
   if (hostname.endsWith('.c.googlers.com')) return true;
@@ -62,9 +64,7 @@ export function isTrustedOrigin(origin: string): boolean {
   ) {
     return true;
   }
-  if (hostname.startsWith("vscode-webview://")) {
-    return true;
-  }
+
   return false;
 }
 
