@@ -12,3 +12,15 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run bundle
+      - uses: actions/upload-artifact@v4
+        id: artifact-upload
+        with:
+          name: otv
+          path: ${{ github.workspace }}/out/ui/ui/dist
+          retention-days: 5
+      - uses: mshick/add-pr-comment@v2
+        with:
+          message-id: oscode-preview-artifact
+          message: |
+            [📦 OTV Preview](${{ steps.artifact-upload.outputs.artifact-url }})
+
