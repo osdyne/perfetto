@@ -22,7 +22,7 @@ export class CookieConsent implements m.ClassComponent {
   private showCookieConsent = true;
 
   oninit() {
-    this.showCookieConsent = true;
+    this.showCookieConsent = false;
     if (
       !globals.logging.isEnabled() ||
       localStorage.getItem(COOKIE_ACK_KEY) === 'true'

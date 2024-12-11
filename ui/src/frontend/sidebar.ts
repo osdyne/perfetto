@@ -161,7 +161,7 @@ function getSections(trace?: Trace): Section[] {
       expanded: true,
       items: [
         ...insertSidebarMenuitems('navigation'),
-        {t: 'Record new trace', a: navigateRecord, i: 'fiber_smart_record'},
+        // {t: 'Record new trace', a: navigateRecord, i: 'fiber_smart_record'},
         {
           t: 'Widgets',
           a: navigateWidgets,
@@ -255,12 +255,12 @@ function getSections(trace?: Trace): Section[] {
       ],
     },
 
-    {
-      title: 'Example Traces',
-      expanded: true,
-      summary: 'Open an example trace',
-      items: [...insertSidebarMenuitems('example_traces')],
-    },
+    // {
+    //   title: 'Example Traces',
+    //   expanded: true,
+    //   summary: 'Open an example trace',
+    //   items: [...insertSidebarMenuitems('example_traces')],
+    // },
 
     {
       title: 'Support',

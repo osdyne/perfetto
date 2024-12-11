@@ -20,6 +20,8 @@ import {initCssConstants} from './css_constants';
 import {toggleHelp} from './help_modal';
 import {scrollTo} from '../public/scroll_helper';
 import {AppImpl} from '../core/app_impl';
+import { globals } from './globals';
+import { Actions } from '../common/actions';
 
 const TRUSTED_ORIGINS_KEY = 'trustedOrigins';
 
@@ -211,6 +213,7 @@ export function postMessageHandler(messageEvent: MessageEvent) {
     // downloading and sharing a trace.
     postedTrace.localOnly = true;
     AppImpl.instance.openTraceFromBuffer(postedTrace);
+    globals.dispatch(Actions.setSidebar({ visible: false }));
   };
 
   const trustAndOpenTrace = () => {
