@@ -155,27 +155,27 @@ function insertSidebarMenuitems(
 
 function getSections(_trace?: Trace): Section[] {
   return [
-    {
-      title: 'Navigation',
-      summary: 'Open or record a new trace',
-      expanded: true,
-      items: [
-        ...insertSidebarMenuitems('navigation'),
-        // {t: 'Record new trace', a: navigateRecord, i: 'fiber_smart_record'},
-        {
-          t: 'Widgets',
-          a: navigateWidgets,
-          i: 'widgets',
-          isVisible: () => WIDGETS_PAGE_IN_NAV_FLAG.get(),
-        },
-        {
-          t: 'Plugins',
-          a: navigatePlugins,
-          i: 'extension',
-          isVisible: () => PLUGINS_PAGE_IN_NAV_FLAG.get(),
-        },
-      ],
-    },
+    // {
+    //   title: 'Navigation',
+    //   summary: 'Open or record a new trace',
+    //   expanded: true,
+    //   items: [
+    //     ...insertSidebarMenuitems('navigation'),
+    //     // {t: 'Record new trace', a: navigateRecord, i: 'fiber_smart_record'},
+    //     {
+    //       t: 'Widgets',
+    //       a: navigateWidgets,
+    //       i: 'widgets',
+    //       isVisible: () => WIDGETS_PAGE_IN_NAV_FLAG.get(),
+    //     },
+    //     {
+    //       t: 'Plugins',
+    //       a: navigatePlugins,
+    //       i: 'extension',
+    //       isVisible: () => PLUGINS_PAGE_IN_NAV_FLAG.get(),
+    //     },
+    //   ],
+    // },
 
     {
       title: 'Current Trace',

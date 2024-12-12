@@ -133,11 +133,11 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       },
       defaultHotkey: '!Mod+O',
     });
-    ctx.sidebar.addMenuItem({
-      commandId: OPEN_TRACE_COMMAND_ID,
-      group: 'navigation',
-      icon: 'folder_open',
-    });
+    // ctx.sidebar.addMenuItem({
+    //   commandId: OPEN_TRACE_COMMAND_ID,
+    //   group: 'navigation',
+    //   icon: 'folder_open',
+    // });
 
     // const OPEN_LEGACY_TRACE_COMMAND_ID =
     //   'perfetto.CoreCommands#openTraceInLegacyUi';

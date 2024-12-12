@@ -27,7 +27,6 @@ import {SerializedAppState} from '../public/state_serialization_schema';
 import {PostedTrace, TraceSource} from '../public/trace_source';
 import {loadTrace} from './load_trace';
 import {CORE_PLUGIN_ID} from './plugin_manager';
-import { globals } from '../frontend/globals';
 
 // The args that frontend/index.ts passes when calling AppImpl.initialize().
 // This is to deal with injections that would otherwise cause circular deps.
