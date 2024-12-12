@@ -13,16 +13,16 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {LegacySelection} from '../common/state';
-import {BottomTab} from '../frontend/bottom_tab';
-
-import {DetailsPanel, Tab} from '.';
+import {BottomTab} from './lib/bottom_tab';
+import {Tab} from './tab';
+import {exists} from '../base/utils';
+import {Trace} from './trace';
+import {TimeSpan} from '../base/time';
 
 export function getTrackName(
   args: Partial<{
     name: string | null;
-    utid: number;
+    utid: number | null;
     processName: string | null;
     pid: number | null;
     threadName: string | null;
@@ -96,10 +96,6 @@ export function getTrackName(
   return 'Unknown';
 }
 
-export interface BottomTabAdapterAttrs {
-  tabFactory: (sel: LegacySelection) => BottomTab | undefined;
-}
-
 /**
  * This adapter wraps a BottomTab, converting it into a the new "current
  * selection" API.
@@ -114,7 +110,7 @@ export interface BottomTabAdapterAttrs {
  * @example
  * new BottomTabAdapter({
       tabFactory: (sel) => {
-        if (sel.kind !== 'CHROME_SLICE') {
+        if (sel.kind !== 'SCHED_SLICE') {
           return undefined;
         }
         return new ChromeSliceDetailsTab({
@@ -122,36 +118,12 @@ export interface BottomTabAdapterAttrs {
             table: sel.table ?? 'slice',
             id: sel.id,
           },
-          engine: ctx.engine,
+          trace: ctx,
           uuid: uuidv4(),
         });
       },
     })
  */
-export class BottomTabToSCSAdapter implements DetailsPanel {
-  private oldSelection?: LegacySelection;
-  private bottomTab?: BottomTab;
-  private attrs: BottomTabAdapterAttrs;
-
-  constructor(attrs: BottomTabAdapterAttrs) {
-    this.attrs = attrs;
-  }
-
-  render(selection: LegacySelection): m.Children {
-    // Detect selection changes, assuming selection is immutable
-    if (selection !== this.oldSelection) {
-      this.oldSelection = selection;
-      this.bottomTab = this.attrs.tabFactory(selection);
-    }
-
-    return this.bottomTab?.renderPanel();
-  }
-
-  // Note: Must be called after render()
-  isLoading(): boolean {
-    return this.bottomTab?.isLoading() ?? false;
-  }
-}
 
 /**
  * This adapter wraps a BottomTab, converting it to work with the Tab API.
@@ -165,5 +137,39 @@ export class BottomTabToTabAdapter implements Tab {
 
   render(): m.Children {
     return this.bottomTab.viewTab();
+  }
+}
+
+export function getThreadOrProcUri(
+  upid: number | null,
+  utid: number | null,
+): string {
+  if (exists(upid)) {
+    return `/process_${upid}`;
+  } else if (exists(utid)) {
+    return `/thread_${utid}`;
+  } else {
+    throw new Error('No upid or utid defined...');
+  }
+}
+
+export function getThreadUriPrefix(upid: number | null, utid: number): string {
+  if (exists(upid)) {
+    return `/process_${upid}/thread_${utid}`;
+  } else {
+    return `/thread_${utid}`;
+  }
+}
+
+// Returns the time span of the current selection, or the visible window if
+// there is no current selection.
+export async function getTimeSpanOfSelectionOrVisibleWindow(
+  trace: Trace,
+): Promise<TimeSpan> {
+  const range = await trace.selection.findTimeRangeOfSelection();
+  if (exists(range)) {
+    return new TimeSpan(range.start, range.end);
+  } else {
+    return trace.timeline.visibleWindow.toTimeSpan();
   }
 }

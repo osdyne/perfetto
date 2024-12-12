@@ -13,15 +13,14 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {Icons} from '../base/semantic_icons';
-
 import {Button} from './button';
 import {Checkbox} from './checkbox';
 import {EmptyState} from './empty_state';
 import {Popup, PopupPosition} from './popup';
 import {scheduleFullRedraw} from './raf';
 import {TextInput} from './text_input';
+import {Intent} from './common';
 
 export interface Option {
   // The ID is used to indentify this option, and is used in callbacks.
@@ -46,7 +45,7 @@ export interface MultiSelectAttrs {
 }
 
 export type PopupMultiSelectAttrs = MultiSelectAttrs & {
-  minimal?: boolean;
+  intent?: Intent;
   compact?: boolean;
   icon?: string;
   label: string;
@@ -106,7 +105,6 @@ export class MultiSelect implements m.ClassComponent<MultiSelectAttrs> {
                   label:
                     this.searchText === '' ? 'Clear All' : 'Clear Filtered',
                   icon: Icons.Deselect,
-                  minimal: true,
                   onclick: () => {
                     const diffs = options
                       .filter(({checked}) => checked)
@@ -134,7 +132,6 @@ export class MultiSelect implements m.ClassComponent<MultiSelectAttrs> {
                 label:
                   this.searchText === '' ? 'Select All' : 'Select Filtered',
                 icon: Icons.SelectAll,
-                minimal: true,
                 compact: true,
                 onclick: () => {
                   const diffs = options
@@ -148,7 +145,6 @@ export class MultiSelect implements m.ClassComponent<MultiSelectAttrs> {
               m(Button, {
                 label: this.searchText === '' ? 'Clear All' : 'Clear Filtered',
                 icon: Icons.Deselect,
-                minimal: true,
                 compact: true,
                 onclick: () => {
                   const diffs = options
@@ -193,7 +189,6 @@ export class MultiSelect implements m.ClassComponent<MultiSelectAttrs> {
         },
         label: '',
         icon: 'close',
-        minimal: true,
       });
     } else {
       return null;
@@ -225,7 +220,7 @@ export class PopupMultiSelect
   implements m.ClassComponent<PopupMultiSelectAttrs>
 {
   view({attrs}: m.CVnode<PopupMultiSelectAttrs>) {
-    const {icon, popupPosition = PopupPosition.Auto, minimal, compact} = attrs;
+    const {icon, popupPosition = PopupPosition.Auto, intent, compact} = attrs;
 
     return m(
       Popup,
@@ -233,7 +228,7 @@ export class PopupMultiSelect
         trigger: m(Button, {
           label: this.labelText(attrs),
           icon,
-          minimal,
+          intent,
           compact,
         }),
         position: popupPosition,

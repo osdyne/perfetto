@@ -13,15 +13,13 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {Trash} from '../base/disposable';
 import {raf} from '../core/raf_scheduler';
 import {Button} from '../widgets/button';
 import {MenuItem, PopupMenu2} from '../widgets/menu';
-
 import {DEFAULT_DETAILS_CONTENT_HEIGHT} from './css_constants';
-import {DragGestureHandler} from './drag_gesture_handler';
+import {DragGestureHandler} from '../base/drag_gesture_handler';
 import {globals} from './globals';
+import {DisposableStack} from '../base/disposable_stack';
 
 const DRAG_HANDLE_HEIGHT_PX = 28;
 const UP_ICON = 'keyboard_arrow_up';
@@ -103,7 +101,7 @@ export class DragHandle implements m.ClassComponent<DragHandleAttrs> {
   // We can't get real fullscreen height until the pan_and_zoom_handler
   // exists.
   private fullscreenHeight = 0;
-  private trash = new Trash();
+  private trash = new DisposableStack();
 
   oncreate({dom, attrs}: m.CVnodeDOM<DragHandleAttrs>) {
     this.resize = attrs.resize;
@@ -111,7 +109,7 @@ export class DragHandle implements m.ClassComponent<DragHandleAttrs> {
     this.isClosed = this.height <= 0;
     this.fullscreenHeight = getFullScreenHeight();
     const elem = dom as HTMLElement;
-    this.trash.add(
+    this.trash.use(
       new DragGestureHandler(
         elem,
         this.onDrag.bind(this),
@@ -127,7 +125,7 @@ export class DragHandle implements m.ClassComponent<DragHandleAttrs> {
         this.toggleVisibility();
       },
     });
-    this.trash.add(cmd);
+    this.trash.use(cmd);
   }
 
   private toggleVisibility() {
@@ -209,7 +207,6 @@ export class DragHandle implements m.ClassComponent<DragHandleAttrs> {
               onTabClose(key);
               event.preventDefault();
             },
-            minimal: true,
             compact: true,
             icon: 'close',
           }),
@@ -237,7 +234,6 @@ export class DragHandle implements m.ClassComponent<DragHandleAttrs> {
           title: 'Open fullscreen',
           disabled: this.isFullscreen,
           icon: 'vertical_align_top',
-          minimal: true,
           compact: true,
         }),
         m(Button, {
@@ -246,7 +242,6 @@ export class DragHandle implements m.ClassComponent<DragHandleAttrs> {
           },
           title,
           icon,
-          minimal: true,
           compact: true,
         }),
       ),
@@ -258,7 +253,6 @@ export class DragHandle implements m.ClassComponent<DragHandleAttrs> {
       PopupMenu2,
       {
         trigger: m(Button, {
-          minimal: true,
           compact: true,
           icon: 'more_vert',
           disabled: entries.length === 0,

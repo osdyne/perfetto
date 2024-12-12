@@ -19,11 +19,13 @@
 
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/overlay_layer.h"
 #include "src/trace_processor/db/column/types.h"
 
 namespace perfetto::trace_processor::column {
@@ -31,10 +33,12 @@ namespace perfetto::trace_processor::column {
 // Storage which "selects" specific rows from an underlying storage using a
 // BitVector. See ArrangementOverlay for a more generic class which allows
 // duplication and rearragement but is less performant.
-class SelectorOverlay final : public DataLayer {
+class SelectorOverlay final : public OverlayLayer {
  public:
   explicit SelectorOverlay(const BitVector*);
   ~SelectorOverlay() override;
+
+  void Flatten(uint32_t* start, const uint32_t* end, uint32_t stride) override;
 
   std::unique_ptr<DataLayerChain> MakeChain(
       std::unique_ptr<DataLayerChain>,
@@ -56,15 +60,15 @@ class SelectorOverlay final : public DataLayer {
 
     void IndexSearchValidated(FilterOp p, SqlValue, Indices&) const override;
 
-    Range OrderedIndexSearchValidated(FilterOp,
-                                      SqlValue,
-                                      const OrderedIndices&) const override;
+    void StableSort(Token* start, Token* end, SortDirection) const override;
 
-    void StableSort(SortToken* start,
-                    SortToken* end,
-                    SortDirection) const override;
+    void Distinct(Indices&) const override;
 
-    void Serialize(StorageProto*) const override;
+    std::optional<Token> MaxElement(Indices&) const override;
+
+    std::optional<Token> MinElement(Indices&) const override;
+
+    SqlValue Get_AvoidUsingBecauseSlow(uint32_t index) const override;
 
     uint32_t size() const override { return selector_->size(); }
 

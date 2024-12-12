@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {EngineProxy, TrackContext} from '../public';
+import {TrackContext} from '../public/track';
 import {
-  CustomSqlDetailsPanelConfig,
   CustomSqlTableDefConfig,
   CustomSqlTableSliceTrack,
-} from '../tracks/custom_sql_table_slices';
-import {NamedSliceTrackTypes} from './named_slice_track';
-import {ARG_PREFIX, SliceColumns, SqlDataSource} from './debug_tracks';
+} from './tracks/custom_sql_table_slice_track';
+import {
+  SliceColumns,
+  SqlDataSource,
+} from '../public/lib/debug_tracks/debug_tracks';
 import {uuidv4Sql} from '../base/uuid';
-import {DisposableCallback} from '../base/disposable';
-import {DebugSliceDetailsTab} from '../tracks/debug/details_tab';
+import {ARG_PREFIX} from '../public/lib/debug_tracks/details_tab';
+import {createPerfettoTable} from '../trace_processor/sql_utils';
+import {Trace} from '../public/trace';
 
 export interface SimpleSliceTrackConfig {
   data: SqlDataSource;
@@ -30,53 +32,41 @@ export interface SimpleSliceTrackConfig {
   argColumns: string[];
 }
 
-export class SimpleSliceTrack extends CustomSqlTableSliceTrack<NamedSliceTrackTypes> {
+export class SimpleSliceTrack extends CustomSqlTableSliceTrack {
   private config: SimpleSliceTrackConfig;
-  private sqlTableName: string;
+  public readonly sqlTableName: string;
 
-  constructor(
-    engine: EngineProxy,
-    ctx: TrackContext,
-    config: SimpleSliceTrackConfig,
-  ) {
+  constructor(trace: Trace, ctx: TrackContext, config: SimpleSliceTrackConfig) {
     super({
-      engine,
-      trackKey: ctx.trackKey,
+      trace,
+      uri: ctx.trackUri,
     });
 
     this.config = config;
-    this.sqlTableName = `__simple_slice_${uuidv4Sql(ctx.trackKey)}`;
+    this.sqlTableName = `__simple_slice_${uuidv4Sql(ctx.trackUri)}`;
   }
 
   async getSqlDataSource(): Promise<CustomSqlTableDefConfig> {
-    await this.createTrackTable(
-      this.config.data,
-      this.config.columns,
-      this.config.argColumns,
+    const table = await createPerfettoTable(
+      this.engine,
+      this.sqlTableName,
+      this.createTableQuery(
+        this.config.data,
+        this.config.columns,
+        this.config.argColumns,
+      ),
     );
     return {
       sqlTableName: this.sqlTableName,
-      dispose: new DisposableCallback(() => this.destroyTrackTable()),
+      disposable: table,
     };
   }
 
-  getDetailsPanel(): CustomSqlDetailsPanelConfig {
-    // We currently borrow the debug slice details tab.
-    // TODO: Don't do this!
-    return {
-      kind: DebugSliceDetailsTab.kind,
-      config: {
-        sqlTableName: this.sqlTableName,
-        title: 'Debug Slice',
-      },
-    };
-  }
-
-  private async createTrackTable(
+  private createTableQuery(
     data: SqlDataSource,
     sliceColumns: SliceColumns,
     argColumns: string[],
-  ): Promise<void> {
+  ): string {
     // If the view has clashing names (e.g. "name" coming from joining two
     // different tables, we will see names like "name_1", "name_2", but they
     // won't be addressable from the SQL. So we explicitly name them through a
@@ -86,14 +76,12 @@ export class SimpleSliceTrack extends CustomSqlTableSliceTrack<NamedSliceTrackTy
 
     // TODO(altimin): Support removing this table when the track is closed.
     const dur = sliceColumns.dur === '0' ? 0 : sliceColumns.dur;
-    await this.engine.query(`
-      create table ${this.sqlTableName} as
+    return `
       with data${dataColumns} as (
         ${data.sqlSource}
       ),
       prepared_data as (
         select
-          row_number() over () as id,
           ${sliceColumns.ts} as ts,
           ifnull(cast(${dur} as int), -1) as dur,
           printf('%s', ${sliceColumns.name}) as name
@@ -102,14 +90,10 @@ export class SimpleSliceTrack extends CustomSqlTableSliceTrack<NamedSliceTrackTy
         from data
       )
       select
+        row_number() over (order by ts) as id,
         *
       from prepared_data
-      order by ts;`);
-  }
-
-  private async destroyTrackTable() {
-    if (this.engine.isAlive) {
-      await this.engine.query(`DROP TABLE IF EXISTS ${this.sqlTableName}`);
-    }
+      order by ts
+    `;
   }
 }

@@ -385,12 +385,13 @@ class GnParser(object):
           (type(self).__name__, type(other).__name__))
 
     def __repr__(self):
-      return json.dumps({
-          k: (list(sorted(v)) if isinstance(v, set) else v)
-          for (k, v) in iteritems(self.__dict__)
-      },
-                        indent=4,
-                        sort_keys=True)
+      return json.dumps(
+          {
+              k: (list(sorted(v)) if isinstance(v, set) else v)
+              for (k, v) in iteritems(self.__dict__)
+          },
+          indent=4,
+          sort_keys=True)
 
     def update(self, other):
       for key in ('cflags', 'data', 'defines', 'deps', 'include_dirs',
@@ -415,7 +416,10 @@ class GnParser(object):
     if target is not None:
       return target  # Target already processed.
 
-    desc = self.gn_desc_[gn_target_name]
+    desc = self.gn_desc_.get(gn_target_name)
+    if not desc:
+      return None
+
     target = GnParser.Target(gn_target_name, desc['type'])
     target.testonly = desc.get('testonly', False)
     target.toolchain = desc.get('toolchain', None)
@@ -529,12 +533,11 @@ class GnParser(object):
     return metadata.get('exports', [])
 
   def get_proto_paths(self, proto_desc):
-    # import_dirs in metadata will be available for source_set targets.
     metadata = proto_desc.get('metadata', {})
-    return metadata.get('import_dirs', [])
+    return metadata.get('proto_import_dirs', [])
 
-  def get_proto_target_type(self, target: Target
-                           ) -> Tuple[Optional[str], Optional[Dict]]:
+  def get_proto_target_type(
+      self, target: Target) -> Tuple[Optional[str], Optional[Dict]]:
     """ Checks if the target is a proto library and return the plugin.
 
         Returns:

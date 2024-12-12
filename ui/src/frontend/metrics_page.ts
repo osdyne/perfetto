@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {
   error,
   isError,
@@ -22,31 +21,21 @@ import {
   Result,
   success,
 } from '../base/result';
-import {pluginManager, PluginManager} from '../common/plugins';
 import {raf} from '../core/raf_scheduler';
-import {MetricVisualisation} from '../public';
-import {EngineProxy} from '../trace_processor/engine';
+import {MetricVisualisation} from '../public/plugin';
+import {Engine} from '../trace_processor/engine';
 import {STR} from '../trace_processor/query_result';
 import {Select} from '../widgets/select';
 import {Spinner} from '../widgets/spinner';
 import {VegaView} from '../widgets/vega_view';
-
-import {globals} from './globals';
-import {createPage} from './pages';
+import {PageWithTraceAttrs} from './pages';
+import {assertExists} from '../base/logging';
+import {AppImpl} from '../core/app_impl';
 
 type Format = 'json' | 'prototext' | 'proto';
 const FORMATS: Format[] = ['json', 'prototext', 'proto'];
 
-function getEngine(): EngineProxy | undefined {
-  const engineId = globals.getCurrentEngine()?.id;
-  if (engineId === undefined) {
-    return undefined;
-  }
-  const engine = globals.engines.get(engineId)?.getProxy('MetricsPage');
-  return engine;
-}
-
-async function getMetrics(engine: EngineProxy): Promise<string[]> {
+async function getMetrics(engine: Engine): Promise<string[]> {
   const metrics: string[] = [];
   const metricsResult = await engine.query('select name from trace_metrics');
   for (const it = metricsResult.iter({name: STR}); it.valid(); it.next()) {
@@ -56,7 +45,7 @@ async function getMetrics(engine: EngineProxy): Promise<string[]> {
 }
 
 async function getMetric(
-  engine: EngineProxy,
+  engine: Engine,
   metric: string,
   format: Format,
 ): Promise<string> {
@@ -69,8 +58,7 @@ async function getMetric(
 }
 
 class MetricsController {
-  engine: EngineProxy;
-  plugins: PluginManager;
+  engine: Engine;
   private _metrics: string[];
   private _selected?: string;
   private _result: Result<string>;
@@ -78,8 +66,7 @@ class MetricsController {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   private _json: any;
 
-  constructor(plugins: PluginManager, engine: EngineProxy) {
-    this.plugins = plugins;
+  constructor(engine: Engine) {
     this.engine = engine;
     this._metrics = [];
     this._result = success('');
@@ -95,7 +82,7 @@ class MetricsController {
   }
 
   get visualisations(): MetricVisualisation[] {
-    return this.plugins
+    return AppImpl.instance.plugins
       .metricVisualisations()
       .filter((v) => v.metric === this.selected);
   }
@@ -234,11 +221,9 @@ class MetricPicker implements m.ClassComponent<MetricPickerAttrs> {
   }
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 interface MetricVizViewAttrs {
   visualisation: MetricVisualisation;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  data: any;
+  data: unknown;
 }
 
 class MetricVizView implements m.ClassComponent<MetricVizViewAttrs> {
@@ -255,25 +240,19 @@ class MetricVizView implements m.ClassComponent<MetricVizViewAttrs> {
   }
 }
 
-class MetricPageContents implements m.ClassComponent {
-  controller?: MetricsController;
+export class MetricsPage implements m.ClassComponent<PageWithTraceAttrs> {
+  private controller?: MetricsController;
 
-  oncreate() {
-    const engine = getEngine();
-    if (engine !== undefined) {
-      this.controller = new MetricsController(pluginManager, engine);
-    }
+  oninit({attrs}: m.Vnode<PageWithTraceAttrs>) {
+    const engine = attrs.trace.engine.getProxy('MetricsPage');
+    this.controller = new MetricsController(engine);
   }
 
   view() {
-    const controller = this.controller;
-    if (controller === undefined) {
-      return m('');
-    }
-
+    const controller = assertExists(this.controller);
     const json = controller.resultAsJson;
-
-    return [
+    return m(
+      '.metrics-page',
       m(MetricPicker, {
         controller,
       }),
@@ -286,12 +265,6 @@ class MetricPageContents implements m.ClassComponent {
           return m(MetricVizView, {visualisation, data});
         }),
       m(MetricResultView, {result: controller.result}),
-    ];
+    );
   }
 }
-
-export const MetricsPage = createPage({
-  view() {
-    return m('.metrics-page', m(MetricPageContents));
-  },
-});

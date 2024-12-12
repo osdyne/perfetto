@@ -13,10 +13,8 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {assertExists, assertTrue} from '../base/logging';
 import {isString} from '../base/object_utils';
-import {Actions} from '../common/actions';
 import {getCurrentChannel} from '../common/channels';
 import {TRACE_SUFFIX} from '../common/constants';
 import {ConversionJobStatus} from '../common/conversion_jobs';
@@ -24,35 +22,35 @@ import {
   disableMetatracingAndGetTrace,
   enableMetatracing,
   isMetatracingEnabled,
-} from '../common/metatracing';
-import {EngineMode} from '../common/state';
+} from '../core/metatracing';
+import {Engine, EngineMode} from '../trace_processor/engine';
 import {featureFlags} from '../core/feature_flags';
 import {raf} from '../core/raf_scheduler';
 import {SCM_REVISION, VERSION} from '../gen/perfetto_version';
-import {Engine} from '../trace_processor/engine';
 import {showModal} from '../widgets/modal';
-
 import {Animation} from './animation';
 import {downloadData, downloadUrl} from './download_utils';
 import {globals} from './globals';
 import {toggleHelp} from './help_modal';
 import {
-  isLegacyTrace,
-  openFileWithLegacyTraceViewer,
-} from './legacy_trace_viewer';
-import {Router} from './router';
-import {createTraceLink, isDownloadable, shareTrace} from './trace_attrs';
+  createTraceLink,
+  isDownloadable,
+  isTraceLoaded,
+  shareTrace,
+} from './trace_attrs';
 import {
-  convertToJson,
   convertTraceToJsonAndDownload,
   convertTraceToSystraceAndDownload,
 } from './trace_converter';
-import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
+import {openInOldUIWithSizeCheck} from './legacy_trace_viewer';
+import {formatHotkey} from '../base/hotkeys';
+import {SidebarMenuItem} from '../public/sidebar';
+import {AppImpl} from '../core/app_impl';
+import {Trace} from '../public/trace';
+import {Router} from '../core/router';
 
 const GITILES_URL =
   'https://android.googlesource.com/platform/external/perfetto';
-
-let lastTabTitle = '';
 
 function getBugReportUrl(): string {
   if (globals.isInternalUser) {
@@ -97,20 +95,19 @@ const VIZ_PAGE_IN_NAV_FLAG = featureFlags.register({
   defaultValue: true,
 });
 
+export interface OptionalTraceAttrs {
+  trace?: Trace;
+}
+
 function shouldShowHiringBanner(): boolean {
   return globals.isInternalUser && HIRING_BANNER_FLAG.get();
 }
-
-export const EXAMPLE_ANDROID_TRACE_URL =
-  'https://storage.googleapis.com/perfetto-misc/example_android_trace_15s';
-
-export const EXAMPLE_CHROME_TRACE_URL =
-  'https://storage.googleapis.com/perfetto-misc/chrome_example_wikipedia.perfetto_trace.gz';
 
 interface SectionItem {
   t: string;
   a: string | ((e: Event) => void);
   i: string;
+  title?: string;
   isPending?: () => boolean;
   isVisible?: () => boolean;
   internalUserOnly?: boolean;
@@ -128,34 +125,57 @@ interface Section {
   appendOpenedTraceTitle?: boolean;
 }
 
-function getSections(): Section[] {
+function insertSidebarMenuitems(
+  groupSelector: SidebarMenuItem['group'],
+): ReadonlyArray<SectionItem> {
+  return AppImpl.instance.sidebar.menuItems
+    .valuesAsArray()
+    .filter(({group}) => group === groupSelector)
+    .sort((a, b) => {
+      const prioA = a.priority ?? 0;
+      const prioB = b.priority ?? 0;
+      return prioA - prioB;
+    })
+    .map((item) => {
+      const cmd = globals.commandManager.getCommand(item.commandId);
+      const title = cmd.defaultHotkey
+        ? `${cmd.name} [${formatHotkey(cmd.defaultHotkey)}]`
+        : cmd.name;
+      return {
+        t: cmd.name,
+        a: (e: Event) => {
+          e.preventDefault();
+          cmd.callback();
+        },
+        i: item.icon,
+        title,
+      };
+    });
+}
+
+function getSections(_trace?: Trace): Section[] {
   return [
-    {
-      title: 'Navigation',
-      summary: 'Open or record a new trace',
-      expanded: true,
-      items: [
-        {t: 'Open trace file', a: popupFileSelectionDialog, i: 'folder_open'},
-        // {
-        //   t: 'Open with legacy UI',
-        //   a: popupFileSelectionDialogOldUI,
-        //   i: 'filter_none',
-        // },
-        {t: 'Record new trace', a: navigateRecord, i: 'fiber_smart_record'},
-        {
-          t: 'Widgets',
-          a: navigateWidgets,
-          i: 'widgets',
-          isVisible: () => WIDGETS_PAGE_IN_NAV_FLAG.get(),
-        },
-        {
-          t: 'Plugins',
-          a: navigatePlugins,
-          i: 'extension',
-          isVisible: () => PLUGINS_PAGE_IN_NAV_FLAG.get(),
-        },
-      ],
-    },
+    // {
+    //   title: 'Navigation',
+    //   summary: 'Open or record a new trace',
+    //   expanded: true,
+    //   items: [
+    //     ...insertSidebarMenuitems('navigation'),
+    //     // {t: 'Record new trace', a: navigateRecord, i: 'fiber_smart_record'},
+    //     {
+    //       t: 'Widgets',
+    //       a: navigateWidgets,
+    //       i: 'widgets',
+    //       isVisible: () => WIDGETS_PAGE_IN_NAV_FLAG.get(),
+    //     },
+    //     {
+    //       t: 'Plugins',
+    //       a: navigatePlugins,
+    //       i: 'extension',
+    //       isVisible: () => PLUGINS_PAGE_IN_NAV_FLAG.get(),
+    //     },
+    //   ],
+    // },
 
     {
       title: 'Current Trace',
@@ -174,12 +194,12 @@ function getSections(): Section[] {
             globals.getConversionJobStatus('create_permalink') ===
             ConversionJobStatus.InProgress,
         },
-        {
-          t: 'Download',
-          a: downloadTrace,
-          i: 'file_download',
-          checkDownloadDisabled: true,
-        },
+        // {
+        //   t: 'Download',
+        //   a: (e: Event) => trace && downloadTrace(e, trace),
+        //   i: 'file_download',
+        //   checkDownloadDisabled: true,
+        // },
         {t: 'Query (SQL)', a: navigateQuery, i: 'database'},
         {
           t: 'Insights',
@@ -198,60 +218,49 @@ function getSections(): Section[] {
       ],
     },
 
-    {
-      title: 'Convert trace',
-      summary: 'Convert to other formats',
-      expanded: true,
-      hideIfNoTraceLoaded: true,
-      items: [
-        // {
-        //   t: 'Switch to legacy UI',
-        //   a: openCurrentTraceWithOldUI,
-        //   i: 'filter_none',
-        //   isPending: () =>
-        //     globals.getConversionJobStatus('open_in_legacy') ===
-        //     ConversionJobStatus.InProgress,
-        // },
-        {
-          t: 'Convert to .json',
-          a: convertTraceToJson,
-          i: 'file_download',
-          isPending: () =>
-            globals.getConversionJobStatus('convert_json') ===
-            ConversionJobStatus.InProgress,
-          checkDownloadDisabled: true,
-        },
+    // {
+    //   title: 'Convert trace',
+    //   summary: 'Convert to other formats',
+    //   expanded: true,
+    //   hideIfNoTraceLoaded: true,
+    //   items: [
+    //     {
+    //       t: 'Switch to legacy UI',
+    //       a: openCurrentTraceWithOldUI,
+    //       i: 'filter_none',
+    //       isPending: () =>
+    //         globals.getConversionJobStatus('open_in_legacy') ===
+    //         ConversionJobStatus.InProgress,
+    //     },
+    //     {
+    //       t: 'Convert to .json',
+    //       a: convertTraceToJson,
+    //       i: 'file_download',
+    //       isPending: () =>
+    //         globals.getConversionJobStatus('convert_json') ===
+    //         ConversionJobStatus.InProgress,
+    //       checkDownloadDisabled: true,
+    //     },
 
-        {
-          t: 'Convert to .systrace',
-          a: convertTraceToSystrace,
-          i: 'file_download',
-          isVisible: () => globals.hasFtrace,
-          isPending: () =>
-            globals.getConversionJobStatus('convert_systrace') ===
-            ConversionJobStatus.InProgress,
-          checkDownloadDisabled: true,
-        },
-      ],
-    },
+    //     {
+    //       t: 'Convert to .systrace',
+    //       a: convertTraceToSystrace,
+    //       i: 'file_download',
+    //       isVisible: () => Boolean(trace?.traceInfo.hasFtrace),
+    //       isPending: () =>
+    //         globals.getConversionJobStatus('convert_systrace') ===
+    //         ConversionJobStatus.InProgress,
+    //       checkDownloadDisabled: true,
+    //     },
+    //   ],
+    // },
 
-    {
-      title: 'Example Traces',
-      expanded: true,
-      summary: 'Open an example trace',
-      items: [
-        {
-          t: 'Open Android example',
-          a: openTraceUrl(EXAMPLE_ANDROID_TRACE_URL),
-          i: 'description',
-        },
-        {
-          t: 'Open Chrome example',
-          a: openTraceUrl(EXAMPLE_CHROME_TRACE_URL),
-          i: 'description',
-        },
-      ],
-    },
+    // {
+    //   title: 'Example Traces',
+    //   expanded: true,
+    //   summary: 'Open an example trace',
+    //   items: [...insertSidebarMenuitems('example_traces')],
+    // },
 
     {
       title: 'Support',
@@ -266,18 +275,22 @@ function getSections(): Section[] {
           a: getBugReportUrl(),
           i: 'bug_report',
         },
-        {
-          t: 'Record metatrace',
-          a: recordMetatrace,
-          i: 'fiber_smart_record',
-          checkMetatracingDisabled: true,
-        },
-        {
-          t: 'Finalise metatrace',
-          a: finaliseMetatrace,
-          i: 'file_download',
-          checkMetatracingEnabled: true,
-        },
+        // ...(trace
+        //   ? [
+        //       {
+        //         t: 'Record metatrace',
+        //         a: (e: Event) => recordMetatrace(e, trace.engine),
+        //         i: 'fiber_smart_record',
+        //         checkMetatracingDisabled: true,
+        //       },
+        //       {
+        //         t: 'Finalise metatrace',
+        //         a: (e: Event) => finaliseMetatrace(e, trace.engine),
+        //         i: 'file_download',
+        //         checkMetatracingEnabled: true,
+        //       },
+        //     ]
+        //   : []),
       ],
     },
   ];
@@ -286,24 +299,6 @@ function getSections(): Section[] {
 function openHelp(e: Event) {
   e.preventDefault();
   toggleHelp();
-}
-
-function getFileElement(): HTMLInputElement {
-  return assertExists(
-    document.querySelector<HTMLInputElement>('input[type=file]'),
-  );
-}
-
-function popupFileSelectionDialog(e: Event) {
-  e.preventDefault();
-  delete getFileElement().dataset['useCatapultLegacyUi'];
-  getFileElement().click();
-}
-
-function popupFileSelectionDialogOldUI(e: Event) {
-  e.preventDefault();
-  getFileElement().dataset['useCatapultLegacyUi'] = '1';
-  getFileElement().click();
 }
 
 function downloadTraceFromUrl(url: string): Promise<File> {
@@ -316,12 +311,8 @@ function downloadTraceFromUrl(url: string): Promise<File> {
       xhr.responseType = 'blob';
       xhr.onprogress = (progress) => {
         const percent = ((100 * progress.loaded) / progress.total).toFixed(1);
-        globals.dispatch(
-          Actions.updateStatus({
-            msg: `Downloading trace ${percent}%`,
-            timestamp: Date.now() / 1000,
-          }),
-        );
+        const msg = `Downloading trace ${percent}%`;
+        AppImpl.instance.omnibox.showStatusMessage(msg);
       };
     },
     extract: (xhr) => {
@@ -332,8 +323,7 @@ function downloadTraceFromUrl(url: string): Promise<File> {
 
 export async function getCurrentTrace(): Promise<Blob> {
   // Caller must check engine exists.
-  const engine = assertExists(globals.getCurrentEngine());
-  const src = engine.source;
+  const src = assertExists(AppImpl.instance.trace?.traceInfo.source);
   if (src.type === 'ARRAY_BUFFER') {
     return new Blob([src.buffer]);
   } else if (src.type === 'FILE') {
@@ -385,96 +375,6 @@ function convertTraceToJson(e: Event) {
     .catch((error) => {
       throw new Error(`Failed to get current trace ${error}`);
     });
-}
-
-export function isTraceLoaded(): boolean {
-  return globals.getCurrentEngine() !== undefined;
-}
-
-export function openTraceUrl(url: string): (e: Event) => void {
-  return (e) => {
-    globals.logging.logEvent('Trace Actions', 'Open example trace');
-    e.preventDefault();
-    globals.dispatch(Actions.openTraceFromUrl({url}));
-  };
-}
-
-function onInputElementFileSelectionChanged(e: Event) {
-  if (!(e.target instanceof HTMLInputElement)) {
-    throw new Error('Not an input element');
-  }
-  if (!e.target.files) return;
-  const file = e.target.files[0];
-  // Reset the value so onchange will be fired with the same file.
-  e.target.value = '';
-
-  if (e.target.dataset['useCatapultLegacyUi'] === '1') {
-    openWithLegacyUi(file);
-    return;
-  }
-
-  globals.logging.logEvent('Trace Actions', 'Open trace from file');
-  globals.dispatch(Actions.openTraceFromFile({file}));
-}
-
-async function openWithLegacyUi(file: File) {
-  // Switch back to the old catapult UI.
-  globals.logging.logEvent('Trace Actions', 'Open trace in Legacy UI');
-  if (await isLegacyTrace(file)) {
-    openFileWithLegacyTraceViewer(file);
-    return;
-  }
-  openInOldUIWithSizeCheck(file);
-}
-
-function openInOldUIWithSizeCheck(trace: Blob) {
-  // Perfetto traces smaller than 50mb can be safely opened in the legacy UI.
-  if (trace.size < 1024 * 1024 * 50) {
-    convertToJson(trace);
-    return;
-  }
-
-  // Give the user the option to truncate larger perfetto traces.
-  const size = Math.round(trace.size / (1024 * 1024));
-  showModal({
-    title: 'Legacy UI may fail to open this trace',
-    content: m(
-      'div',
-      m(
-        'p',
-        `This trace is ${size}mb, opening it in the legacy UI ` + `may fail.`,
-      ),
-      m(
-        'p',
-        'More options can be found at ',
-        m(
-          'a',
-          {
-            href: 'https://goto.google.com/opening-large-traces',
-            target: '_blank',
-          },
-          'go/opening-large-traces',
-        ),
-        '.',
-      ),
-    ),
-    buttons: [
-      {
-        text: 'Open full trace (not recommended)',
-        action: () => convertToJson(trace),
-      },
-      {
-        text: 'Open beginning of trace',
-        action: () => convertToJson(trace, /* truncate*/ 'start'),
-      },
-      {
-        text: 'Open end of trace',
-        primary: true,
-        action: () => convertToJson(trace, /* truncate*/ 'end'),
-      },
-    ],
-  });
-  return;
 }
 
 function navigateRecord(e: Event) {
@@ -532,16 +432,14 @@ function handleShareTrace(e: Event) {
   shareTrace();
 }
 
-function downloadTrace(e: Event) {
+function downloadTrace(e: Event, trace: Trace) {
   e.preventDefault();
   if (!isDownloadable() || !isTraceLoaded()) return;
   globals.logging.logEvent('Trace Actions', 'Download trace');
 
-  const engine = globals.getCurrentEngine();
-  if (!engine) return;
   let url = '';
   let fileName = `trace${TRACE_SUFFIX}`;
-  const src = engine.source;
+  const src = trace.traceInfo.source;
   if (src.type === 'URL') {
     url = src.url;
     fileName = url.split('/').slice(-1)[0];
@@ -566,27 +464,18 @@ function downloadTrace(e: Event) {
   downloadUrl(fileName, url);
 }
 
-function getCurrentEngine(): Engine | undefined {
-  const engineId = globals.getCurrentEngine()?.id;
-  if (engineId === undefined) return undefined;
-  return globals.engines.get(engineId);
-}
-
 function highPrecisionTimersAvailable(): boolean {
   // High precision timers are available either when the page is cross-origin
   // isolated or when the trace processor is a standalone binary.
   return (
     window.crossOriginIsolated ||
-    globals.getCurrentEngine()?.mode === 'HTTP_RPC'
+    AppImpl.instance.trace?.engine.mode === 'HTTP_RPC'
   );
 }
 
-function recordMetatrace(e: Event) {
+function recordMetatrace(e: Event, engine: Engine) {
   e.preventDefault();
   globals.logging.logEvent('Trace Actions', 'Record metatrace');
-
-  const engine = getCurrentEngine();
-  if (!engine) return;
 
   if (!highPrecisionTimersAvailable()) {
     const PROMPT = `High-precision timers are not available to WASM trace processor yet.
@@ -622,14 +511,11 @@ Alternatively, connect to a trace_processor_shell --httpd instance.
   }
 }
 
-async function finaliseMetatrace(e: Event) {
+async function finaliseMetatrace(e: Event, engine: Engine) {
   e.preventDefault();
   globals.logging.logEvent('Trace Actions', 'Finalise metatrace');
 
   const jsEvents = disableMetatracingAndGetTrace();
-
-  const engine = getCurrentEngine();
-  if (!engine) return;
 
   const result = await engine.stopAndGetMetatrace();
   if (result.error.length !== 0) {
@@ -639,15 +525,15 @@ async function finaliseMetatrace(e: Event) {
   downloadData('metatrace', result.metatrace, jsEvents);
 }
 
-const EngineRPCWidget: m.Component = {
-  view() {
+class EngineRPCWidget implements m.ClassComponent<OptionalTraceAttrs> {
+  view({attrs}: m.CVnode<OptionalTraceAttrs>) {
     let cssClass = '';
     let title = 'Number of pending SQL queries';
     let label: string;
     let failed = false;
     let mode: EngineMode | undefined;
 
-    const engine = globals.state.engine;
+    const engine = attrs.trace?.engine;
     if (engine !== undefined) {
       mode = engine.mode;
       if (engine.failed !== undefined) {
@@ -665,7 +551,7 @@ const EngineRPCWidget: m.Component = {
     if (mode === undefined) {
       if (
         globals.httpRpcState.connected &&
-        globals.state.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE'
+        AppImpl.instance.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE'
       ) {
         mode = 'HTTP_RPC';
       } else {
@@ -682,14 +568,15 @@ const EngineRPCWidget: m.Component = {
       title += '\n(Query engine: built-in WASM)';
     }
 
+    const numReqs = attrs.trace?.engine.numRequestsPending ?? 0;
     return m(
       `.dbg-info-square${cssClass}`,
       {title},
       m('div', label),
-      m('div', `${failed ? 'FAIL' : globals.numQueuedQueries}`),
+      m('div', `${failed ? 'FAIL' : numReqs}`),
     );
-  },
-};
+  }
+}
 
 const ServiceWorkerWidget: m.Component = {
   view() {
@@ -771,11 +658,11 @@ const ServiceWorkerWidget: m.Component = {
   },
 };
 
-const SidebarFooter: m.Component = {
-  view() {
+class SidebarFooter implements m.ClassComponent<OptionalTraceAttrs> {
+  view({attrs}: m.CVnode<OptionalTraceAttrs>) {
     return m(
       '.sidebar-footer',
-      m(EngineRPCWidget),
+      m(EngineRPCWidget, attrs),
       m(ServiceWorkerWidget),
       m(
         '.version',
@@ -790,8 +677,8 @@ const SidebarFooter: m.Component = {
         ),
       ),
     );
-  },
-};
+  }
+}
 
 class HiringBanner implements m.ClassComponent {
   view() {
@@ -809,12 +696,12 @@ class HiringBanner implements m.ClassComponent {
   }
 }
 
-export class Sidebar implements m.ClassComponent {
+export class Sidebar implements m.ClassComponent<OptionalTraceAttrs> {
   private _redrawWhileAnimating = new Animation(() => raf.scheduleFullRedraw());
-  view() {
+  view({attrs}: m.CVnode<OptionalTraceAttrs>) {
     if (globals.hideSidebar) return null;
     const vdomSections = [];
-    for (const section of getSections()) {
+    for (const section of getSections(attrs.trace)) {
       if (section.hideIfNoTraceLoaded && !isTraceLoaded()) continue;
       const vdomItems = [];
       for (const item of section.items) {
@@ -869,46 +756,21 @@ export class Sidebar implements m.ClassComponent {
           };
         }
         vdomItems.push(
-          m('li', m(`a${css}`, attrs, m('i.material-icons', item.i), item.t)),
+          m(
+            'li',
+            m(
+              `a${css}`,
+              {...attrs, title: item.title},
+              m('i.material-icons', item.i),
+              item.t,
+            ),
+          ),
         );
       }
       if (section.appendOpenedTraceTitle) {
-        const engine = globals.state.engine;
-        if (engine !== undefined) {
-          let traceTitle = '';
-          let traceUrl = '';
-          switch (engine.source.type) {
-            case 'FILE':
-              // Split on both \ and / (because C:\Windows\paths\are\like\this).
-              traceTitle = engine.source.file.name.split(/[/\\]/).pop()!;
-              const fileSizeMB = Math.ceil(engine.source.file.size / 1e6);
-              traceTitle += ` (${fileSizeMB} MB)`;
-              break;
-            case 'URL':
-              traceUrl = engine.source.url;
-              traceTitle = traceUrl.split('/').pop()!;
-              break;
-            case 'ARRAY_BUFFER':
-              traceTitle = engine.source.title;
-              traceUrl = engine.source.url || '';
-              const arrayBufferSizeMB = Math.ceil(
-                engine.source.buffer.byteLength / 1e6,
-              );
-              traceTitle += ` (${arrayBufferSizeMB} MB)`;
-              break;
-            case 'HTTP_RPC':
-              traceTitle = `RPC @ ${HttpRpcEngine.hostAndPort}`;
-              break;
-            default:
-              break;
-          }
-          if (traceTitle !== '') {
-            const tabTitle = `${traceTitle} - Perfetto UI`;
-            if (tabTitle !== lastTabTitle) {
-              document.title = lastTabTitle = tabTitle;
-            }
-            vdomItems.unshift(m('li', createTraceLink(traceTitle, traceUrl)));
-          }
+        if (globals.traceContext.traceTitle) {
+          const {traceTitle, traceUrl} = globals.traceContext;
+          vdomItems.unshift(m('li', createTraceLink(traceTitle, traceUrl)));
         }
       }
       vdomSections.push(
@@ -953,7 +815,7 @@ export class Sidebar implements m.ClassComponent {
           {
             onclick: () => {
               globals.commandManager.runCommand(
-                'dev.perfetto.CoreCommands#ToggleLeftSidebar',
+                'perfetto.CoreCommands#ToggleLeftSidebar',
               );
             },
           },
@@ -966,12 +828,13 @@ export class Sidebar implements m.ClassComponent {
           ),
         ),
       ),
-      m('input.trace_file[type=file]', {
-        onchange: onInputElementFileSelectionChanged,
-      }),
       m(
         '.sidebar-scroll',
-        m('.sidebar-scroll-container', ...vdomSections, m(SidebarFooter)),
+        m(
+          '.sidebar-scroll-container',
+          ...vdomSections,
+          m(SidebarFooter, attrs),
+        ),
       ),
     );
   }

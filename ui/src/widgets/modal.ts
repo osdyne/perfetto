@@ -13,10 +13,9 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {defer} from '../base/deferred';
-
 import {scheduleFullRedraw} from './raf';
+import {Icon} from './icon';
 
 // This module deals with modal dialogs. Unlike most components, here we want to
 // render the DOM elements outside of the corresponding vdom tree. For instance
@@ -156,7 +155,7 @@ export class Modal implements m.ClassComponent<ModalAttrs> {
           m(
             'button[aria-label=Close Modal]',
             {onclick: () => closeModal(attrs.key)},
-            m.trust('&#x2715'),
+            m(Icon, {icon: 'close'}),
           ),
         ),
         m('main', vnode.children),
@@ -214,7 +213,7 @@ export async function showModal(userAttrs: ModalAttrs): Promise<void> {
 
   // If the user doesn't specify a key (to match the closeModal), generate a
   // random key to distinguish two showModal({key:undefined}) calls.
-  const key = userAttrs.key || `${++generationCounter}`;
+  const key = userAttrs.key ?? `${++generationCounter}`;
   const attrs: ModalAttrs = {
     ...userAttrs,
     key,
@@ -226,6 +225,15 @@ export async function showModal(userAttrs: ModalAttrs): Promise<void> {
   currentModal = attrs;
   scheduleFullRedraw();
   return returnedClosePromise;
+}
+
+// Technically we don't need to redraw the whole app, but it's the more
+// pragmatic option. This is exposed to keep the plugin code more clear, so it's
+// evident why a redraw is requested.
+export function redrawModal() {
+  if (currentModal !== undefined) {
+    scheduleFullRedraw();
+  }
 }
 
 // Closes the full-screen modal dialog (if any).

@@ -14,12 +14,10 @@
 
 import {Draft, produce} from 'immer';
 import m from 'mithril';
-
 import {copyToClipboard} from '../base/clipboard';
 import {assertExists} from '../base/logging';
 import {Actions} from '../common/actions';
 import {RecordConfig} from '../controller/record_config_types';
-
 import {globals} from './globals';
 
 export declare type Setter<T> = (draft: Draft<RecordConfig>, val: T) => void;
@@ -139,7 +137,7 @@ export class Toggle implements m.ClassComponent<ToggleAttrs> {
     const enabled = attrs.isEnabled(globals.state.recordConfig);
 
     return m(
-      `.toggle${enabled ? '.enabled' : ''}${attrs.cssClass || ''}`,
+      `.toggle${enabled ? '.enabled' : ''}${attrs.cssClass ?? ''}`,
       m(
         'label',
         m(`input[type=checkbox]`, {
@@ -232,7 +230,7 @@ export class Slider implements m.ClassComponent<SliderAttrs> {
       };
     }
     return m(
-      '.slider' + (attrs.cssClass || ''),
+      '.slider' + (attrs.cssClass ?? ''),
       m('header', attrs.title),
       description ? m('header.descr', attrs.description) : '',
       attrs.icon !== undefined ? m('i.material-icons', attrs.icon) : [],
@@ -301,7 +299,7 @@ export class Dropdown implements m.ClassComponent<DropdownAttrs> {
     }
     const label = `${attrs.title} ${numSelected ? `(${numSelected})` : ''}`;
     return m(
-      `select.dropdown${attrs.cssClass || ''}[multiple=multiple]`,
+      `select.dropdown${attrs.cssClass ?? ''}[multiple=multiple]`,
       {
         onblur: (e: Event) => this.resetScroll(e.target as HTMLSelectElement),
         onmouseleave: (e: Event) =>
@@ -343,7 +341,7 @@ export class Textarea implements m.ClassComponent<TextareaAttrs> {
         attrs.title,
         attrs.docsLink && [' ', m(DocsChip, {href: attrs.docsLink})],
       ),
-      m(`textarea.extra-input${attrs.cssClass || ''}`, {
+      m(`textarea.extra-input${attrs.cssClass ?? ''}`, {
         onchange: (e: Event) =>
           this.onChange(attrs, e.target as HTMLTextAreaElement),
         placeholder: attrs.placeholder,

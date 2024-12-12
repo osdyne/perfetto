@@ -71,13 +71,13 @@ import QueryServiceStateRequest = protos.perfetto.protos.QueryServiceStateReques
 import QueryServiceStateResponse = protos.perfetto.protos.QueryServiceStateResponse;
 import ReadBuffersRequest = protos.perfetto.protos.ReadBuffersRequest;
 import ReadBuffersResponse = protos.perfetto.protos.ReadBuffersResponse;
+import RegisterSqlPackageArgs = protos.perfetto.protos.RegisterSqlPackageArgs;
+import RegisterSqlPackageResult = protos.perfetto.protos.RegisterSqlPackageResult;
 import ResetTraceProcessorArgs = protos.perfetto.protos.ResetTraceProcessorArgs;
 import StatCounters = protos.perfetto.protos.SysStatsConfig.StatCounters;
 import StatusResult = protos.perfetto.protos.StatusResult;
 import SysStatsConfig = protos.perfetto.protos.SysStatsConfig;
-import Trace = protos.perfetto.protos.Trace;
 import TraceConfig = protos.perfetto.protos.TraceConfig;
-import TracePacket = protos.perfetto.protos.TracePacket;
 import TraceProcessorApiVersion = protos.perfetto.protos.TraceProcessorApiVersion;
 import TraceProcessorRpc = protos.perfetto.protos.TraceProcessorRpc;
 import TraceProcessorRpcStream = protos.perfetto.protos.TraceProcessorRpcStream;
@@ -140,13 +140,13 @@ export {
   QueryServiceStateResponse,
   ReadBuffersRequest,
   ReadBuffersResponse,
+  RegisterSqlPackageArgs,
+  RegisterSqlPackageResult,
   ResetTraceProcessorArgs,
   StatCounters,
   StatusResult,
   SysStatsConfig,
-  Trace,
   TraceConfig,
-  TracePacket,
   TraceProcessorApiVersion,
   TraceProcessorRpc,
   TraceProcessorRpcStream,

@@ -14,6 +14,7 @@
 
 import {assertExists, assertTrue} from '../../base/logging';
 import {currentDateHourAndMinute} from '../../base/time';
+import {AppImpl} from '../../core/app_impl';
 import {raf} from '../../core/raf_scheduler';
 import {globals} from '../../frontend/globals';
 import {autosaveConfigStore} from '../../frontend/record_config';
@@ -25,7 +26,6 @@ import {couldNotClaimInterface} from '../../frontend/recording/reset_interface_m
 import {TraceConfig} from '../../protos';
 import {Actions} from '../actions';
 import {TRACE_SUFFIX} from '../constants';
-
 import {genTraceConfig} from './recording_config_utils';
 import {RecordingError, showRecordingModal} from './recording_error_handling';
 import {
@@ -307,13 +307,11 @@ export class RecordingPageController {
     if (this.tracingSessionWrapper !== tracingSessionWrapper) {
       return;
     }
-    globals.dispatch(
-      Actions.openTraceFromBuffer({
-        title: 'Recorded trace',
-        buffer: trace.buffer,
-        fileName: `trace_${currentDateHourAndMinute()}${TRACE_SUFFIX}`,
-      }),
-    );
+    AppImpl.instance.openTraceFromBuffer({
+      title: 'Recorded trace',
+      buffer: trace.buffer,
+      fileName: `trace_${currentDateHourAndMinute()}${TRACE_SUFFIX}`,
+    });
     this.clearRecordingState();
   }
 

@@ -19,9 +19,10 @@
 #include <algorithm>
 #include <cstdint>
 #include <functional>
-#include <iterator>
 #include <limits>
+#include <optional>
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 #include "perfetto/base/logging.h"
@@ -29,12 +30,12 @@
 #include "perfetto/trace_processor/basic_types.h"
 #include "src/trace_processor/containers/bit_vector.h"
 #include "src/trace_processor/db/column/data_layer.h"
+#include "src/trace_processor/db/column/storage_layer.h"
 #include "src/trace_processor/db/column/types.h"
 #include "src/trace_processor/db/column/utils.h"
 #include "src/trace_processor/tp_metatrace.h"
 
 #include "protos/perfetto/trace_processor/metatrace_categories.pbzero.h"
-#include "protos/perfetto/trace_processor/serialization.pbzero.h"
 
 namespace perfetto::trace_processor::column {
 namespace {
@@ -42,14 +43,17 @@ namespace {
 template <typename Comparator>
 void IndexSearchWithComparator(uint32_t val, DataLayerChain::Indices& indices) {
   indices.tokens.erase(
-      std::remove_if(indices.tokens.begin(), indices.tokens.end(),
-                     [val](const DataLayerChain::Indices::Token& idx) {
-                       return !Comparator()(idx.index, val);
-                     }),
+      std::remove_if(
+          indices.tokens.begin(), indices.tokens.end(),
+          [val](const Token& idx) { return !Comparator()(idx.index, val); }),
       indices.tokens.end());
 }
 
 }  // namespace
+
+StorageLayer::StoragePtr IdStorage::GetStoragePtr() {
+  return Id{};
+}
 
 SearchValidationResult IdStorage::ChainImpl::ValidateSearchConstraints(
     FilterOp op,
@@ -59,12 +63,6 @@ SearchValidationResult IdStorage::ChainImpl::ValidateSearchConstraints(
     if (op == FilterOp::kIsNotNull) {
       return SearchValidationResult::kAllData;
     }
-    if (op == FilterOp::kIsNull) {
-      return SearchValidationResult::kNoData;
-    }
-    PERFETTO_DFATAL(
-        "Invalid filter operation. NULL should only be compared with 'IS NULL' "
-        "and 'IS NOT NULL'");
     return SearchValidationResult::kNoData;
   }
 
@@ -245,47 +243,6 @@ void IdStorage::ChainImpl::IndexSearchValidated(FilterOp op,
   PERFETTO_FATAL("FilterOp not matched");
 }
 
-Range IdStorage::ChainImpl::OrderedIndexSearchValidated(
-    FilterOp op,
-    SqlValue sql_val,
-    const OrderedIndices& indices) const {
-  PERFETTO_DCHECK(op != FilterOp::kNe);
-
-  PERFETTO_TP_TRACE(
-      metatrace::Category::DB, "IdStorage::ChainImpl::OrderedIndexSearch",
-      [indices, op](metatrace::Record* r) {
-        r->AddArg("Count", std::to_string(indices.size));
-        r->AddArg("Op", std::to_string(static_cast<uint32_t>(op)));
-      });
-
-  // It's a valid filter operation if |sql_val| is a double, although it
-  // requires special logic.
-  if (sql_val.type == SqlValue::kDouble) {
-    switch (utils::CompareIntColumnWithDouble(op, &sql_val)) {
-      case SearchValidationResult::kOk:
-        break;
-      case SearchValidationResult::kAllData:
-        return {0, indices.size};
-      case SearchValidationResult::kNoData:
-        return {};
-    }
-  }
-  auto val = static_cast<uint32_t>(sql_val.AsLong());
-
-  // OrderedIndices are monotonic non contiguous values if OrderedIndexSearch
-  // was called. Look for the first and last index and find the result of
-  // looking for this range in IdStorage.
-  Range indices_range(indices.data[0], indices.data[indices.size - 1] + 1);
-  Range bin_search_ret = BinarySearchIntrinsic(op, val, indices_range);
-
-  const auto* start_ptr = std::lower_bound(
-      indices.data, indices.data + indices.size, bin_search_ret.start);
-  const auto* end_ptr = std::lower_bound(start_ptr, indices.data + indices.size,
-                                         bin_search_ret.end);
-  return {static_cast<uint32_t>(std::distance(indices.data, start_ptr)),
-          static_cast<uint32_t>(std::distance(indices.data, end_ptr))};
-}
-
 Range IdStorage::ChainImpl::BinarySearchIntrinsic(FilterOp op,
                                                   Id val,
                                                   Range range) {
@@ -310,17 +267,19 @@ Range IdStorage::ChainImpl::BinarySearchIntrinsic(FilterOp op,
   PERFETTO_FATAL("FilterOp not matched");
 }
 
-void IdStorage::ChainImpl::StableSort(SortToken* start,
-                                      SortToken* end,
+void IdStorage::ChainImpl::StableSort(Token* start,
+                                      Token* end,
                                       SortDirection direction) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB,
+                    "IdStorage::ChainImpl::StableSort");
   switch (direction) {
     case SortDirection::kAscending:
-      std::stable_sort(start, end, [](const SortToken& a, const SortToken& b) {
+      std::stable_sort(start, end, [](const Token& a, const Token& b) {
         return a.index < b.index;
       });
       return;
     case SortDirection::kDescending:
-      std::stable_sort(start, end, [](const SortToken& a, const SortToken& b) {
+      std::stable_sort(start, end, [](const Token& a, const Token& b) {
         return a.index > b.index;
       });
       return;
@@ -328,8 +287,40 @@ void IdStorage::ChainImpl::StableSort(SortToken* start,
   PERFETTO_FATAL("For GCC");
 }
 
-void IdStorage::ChainImpl::Serialize(StorageProto* storage) const {
-  storage->set_id_storage();
+void IdStorage::ChainImpl::Distinct(Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB, "IdStorage::ChainImpl::Distinct");
+  std::unordered_set<uint32_t> s;
+  indices.tokens.erase(
+      std::remove_if(
+          indices.tokens.begin(), indices.tokens.end(),
+          [&s](const Token& idx) { return !s.insert(idx.index).second; }),
+      indices.tokens.end());
+}
+
+std::optional<Token> IdStorage::ChainImpl::MaxElement(Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB,
+                    "IdStorage::ChainImpl::MaxElement");
+  auto tok = std::max_element(
+      indices.tokens.begin(), indices.tokens.end(),
+      [](const Token& a, const Token& b) { return a.index < b.index; });
+  return (tok == indices.tokens.end()) ? std::nullopt
+                                       : std::make_optional(*tok);
+}
+
+std::optional<Token> IdStorage::ChainImpl::MinElement(Indices& indices) const {
+  PERFETTO_TP_TRACE(metatrace::Category::DB,
+                    "IdStorage::ChainImpl::MinElement");
+  auto tok = std::min_element(
+      indices.tokens.begin(), indices.tokens.end(),
+      [](const Token& a, const Token& b) { return a.index > b.index; });
+  if (tok == indices.tokens.end()) {
+    return std::nullopt;
+  }
+  return *tok;
+}
+
+SqlValue IdStorage::ChainImpl::Get_AvoidUsingBecauseSlow(uint32_t index) const {
+  return SqlValue::Long(index);
 }
 
 }  // namespace perfetto::trace_processor::column

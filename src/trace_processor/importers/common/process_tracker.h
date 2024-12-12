@@ -17,8 +17,12 @@
 #ifndef SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_PROCESS_TRACKER_H_
 #define SRC_TRACE_PROCESSOR_IMPORTERS_COMMON_PROCESS_TRACKER_H_
 
-#include <tuple>
+#include <cstdint>
+#include <optional>
+#include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
 #include "perfetto/ext/base/flat_hash_map.h"
 #include "perfetto/ext/base/string_view.h"
@@ -35,6 +39,7 @@ namespace trace_processor {
 enum class ThreadNamePriority {
   kOther = 0,
   kFtrace = 1,
+  kEtwTrace = 1,
   kProcessTree = 2,
   kTrackDescriptorThreadType = 3,
   kTrackDescriptor = 4,
@@ -92,7 +97,7 @@ class ProcessTracker {
   // Called when a thread is seen the process tree. Retrieves the matching utid
   // for the tid and the matching upid for the tgid and stores both.
   // Virtual for testing.
-  virtual UniqueTid UpdateThread(uint32_t tid, uint32_t tgid);
+  virtual UniqueTid UpdateThread(uint32_t tid, uint32_t pid);
 
   // Associates trusted_pid with track UUID.
   void UpdateTrustedPid(uint32_t trusted_pid, uint64_t uuid);

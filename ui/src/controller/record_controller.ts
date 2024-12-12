@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import {Message, Method, rpc, RPCImplCallback} from 'protobufjs';
-
 import {isString} from '../base/object_utils';
 import {base64Encode} from '../base/string_utils';
 import {Actions} from '../common/actions';
@@ -24,12 +23,12 @@ import {
   AdbRecordingTarget,
   isAdbTarget,
   isChromeTarget,
+  isWindowsTarget,
   RecordingTarget,
 } from '../common/state';
 import {globals} from '../frontend/globals';
 import {publishBufferUsage, publishTrackData} from '../frontend/publish';
 import {ConsumerPort, TraceConfig} from '../protos';
-
 import {AdbOverWebUsb} from './adb';
 import {AdbConsumerPort} from './adb_shell_controller';
 import {AdbSocketConsumerPort} from './adb_socket_controller';
@@ -46,6 +45,7 @@ import {
 import {Controller} from './controller';
 import {RecordConfig} from './record_config_types';
 import {Consumer, RpcConsumerPort} from './record_controller_interfaces';
+import {AppImpl} from '../core/app_impl';
 
 type RPCImplMethod = Method | rpc.ServiceMethod<Message<{}>, Message<{}>>;
 
@@ -329,13 +329,11 @@ export class RecordController extends Controller<'main'> implements Consumer {
       return;
     }
     const trace = this.generateTrace();
-    globals.dispatch(
-      Actions.openTraceFromBuffer({
-        title: 'Recorded trace',
-        buffer: trace.buffer,
-        fileName: `recorded_trace${this.recordedTraceSuffix}`,
-      }),
-    );
+    AppImpl.instance.openTraceFromBuffer({
+      title: 'Recorded trace',
+      buffer: trace.buffer,
+      fileName: `recorded_trace${this.recordedTraceSuffix}`,
+    });
     this.traceBuffer = [];
   }
 
@@ -398,7 +396,7 @@ export class RecordController extends Controller<'main'> implements Consumer {
     const controllerPromise = new Promise<RpcConsumerPort>(
       async (resolve, _) => {
         let controller: RpcConsumerPort | undefined = undefined;
-        if (isChromeTarget(target)) {
+        if (isChromeTarget(target) || isWindowsTarget(target)) {
           controller = new ChromeExtensionConsumerPort(
             this.extensionPort,
             this,

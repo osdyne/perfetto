@@ -131,7 +131,8 @@ class TestResults:
         f"{c.green('[  PASSED  ]')} "
         f"{tests_no - len(self.test_failures)} tests.\n")
     if len(self.test_failures) > 0:
-      res += (f"{c.red('[  FAILED  ]')} " f"{len(self.test_failures)} tests.\n")
+      res += (f"{c.red('[  FAILED  ]')} "
+              f"{len(self.test_failures)} tests.\n")
       for failure in self.test_failures:
         res += f"{c.red('[  FAILED  ]')} {failure}\n"
     return res
@@ -202,6 +203,7 @@ class TestCaseRunner:
         self.trace_processor_path,
         '--analyze-trace-proto-content',
         '--crop-track-events',
+        '--extra-checks',
         '--run-metrics',
         self.test.blueprint.query.name,
         '--metrics-output=%s' % ('json' if is_json_output else 'binary'),
@@ -265,6 +267,7 @@ class TestCaseRunner:
         self.trace_processor_path,
         '--analyze-trace-proto-content',
         '--crop-track-events',
+        '--extra-checks',
         '-q',
         query,
         '--perf-file',
@@ -379,6 +382,7 @@ class TestCaseRunner:
       return res
 
     if result.exit_code != 0 or not result.passed:
+      result.passed = False
       str += result.stderr
 
       if result.exit_code == 0:
@@ -451,7 +455,8 @@ class DiffTestsRunner:
 
   def run_all_tests(self, metrics_descriptor_paths: List[str],
                     chrome_extensions: str, test_extensions: str,
-                    keep_input: bool, rebase: bool) -> TestResults:
+                    winscope_extensions: str, keep_input: bool,
+                    rebase: bool) -> TestResults:
     perf_results = []
     failures = []
     rebased = []
@@ -459,7 +464,8 @@ class DiffTestsRunner:
 
     with concurrent.futures.ProcessPoolExecutor() as e:
       fut = [
-          e.submit(test.execute, [chrome_extensions, test_extensions],
+          e.submit(test.execute,
+                   [chrome_extensions, test_extensions, winscope_extensions],
                    metrics_descriptor_paths, keep_input, rebase)
           for test in self.test_runners
       ]

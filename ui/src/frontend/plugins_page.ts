@@ -13,48 +13,55 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {pluginManager, pluginRegistry} from '../common/plugins';
 import {raf} from '../core/raf_scheduler';
 import {Button} from '../widgets/button';
-
 import {exists} from '../base/utils';
-import {PluginDescriptor} from '../public';
-import {createPage} from './pages';
+import {PluginDescriptor} from '../public/plugin';
 import {defaultPlugins} from '../core/default_plugins';
+import {Intent} from '../widgets/common';
+import {PageAttrs} from '../core/router';
+import {AppImpl} from '../core/app_impl';
 
-export const PluginsPage = createPage({
+export class PluginsPage implements m.ClassComponent<PageAttrs> {
   view() {
+    const pluginManager = AppImpl.instance.plugins;
+    const registeredPlugins = pluginManager.getRegisteredPlugins();
     return m(
       '.pf-plugins-page',
       m('h1', 'Plugins'),
+      pluginManager.needsRestart &&
+        m(
+          'h3.restart_needed',
+          'Some plugins have been disabled. ' +
+            'Please reload your page to apply the changes.',
+        ),
       m(
         '.pf-plugins-topbar',
         m(Button, {
-          minimal: false,
+          intent: Intent.Primary,
           label: 'Disable All',
           onclick: async () => {
-            for (const plugin of pluginRegistry.values()) {
-              await pluginManager.disablePlugin(plugin.pluginId, true);
+            for (const plugin of registeredPlugins) {
+              await pluginManager.disablePlugin(plugin.pluginId);
               raf.scheduleFullRedraw();
             }
           },
         }),
         m(Button, {
-          minimal: false,
+          intent: Intent.Primary,
           label: 'Enable All',
           onclick: async () => {
-            for (const plugin of pluginRegistry.values()) {
-              await pluginManager.enablePlugin(plugin.pluginId, true);
+            for (const plugin of registeredPlugins) {
+              await pluginManager.enablePlugin(plugin.pluginId);
               raf.scheduleFullRedraw();
             }
           },
         }),
         m(Button, {
-          minimal: false,
+          intent: Intent.Primary,
           label: 'Restore Defaults',
           onclick: async () => {
-            await pluginManager.restoreDefaults(true);
+            await pluginManager.restoreDefaults();
             raf.scheduleFullRedraw();
           },
         }),
@@ -69,15 +76,14 @@ export const PluginsPage = createPage({
           m('span', 'Control'),
           m('span', 'Load Time'),
         ],
-        Array.from(pluginRegistry.values()).map((plugin) => {
-          return renderPluginRow(plugin);
-        }),
+        registeredPlugins.map((plugin) => renderPluginRow(plugin)),
       ),
     );
-  },
-});
+  }
+}
 
 function renderPluginRow(plugin: PluginDescriptor): m.Children {
+  const pluginManager = AppImpl.instance.plugins;
   const pluginId = plugin.pluginId;
   const isDefault = defaultPlugins.includes(pluginId);
   const pluginDetails = pluginManager.plugins.get(pluginId);
@@ -94,12 +100,13 @@ function renderPluginRow(plugin: PluginDescriptor): m.Children {
       ? m('.pf-tag.pf-active', 'Active')
       : m('.pf-tag.pf-inactive', 'Inactive'),
     m(Button, {
-      label: isActive ? 'Disable' : 'Enable',
+      label: isEnabled ? 'Disable' : 'Enable',
+      intent: Intent.Primary,
       onclick: async () => {
-        if (isActive) {
-          await pluginManager.disablePlugin(pluginId, true);
+        if (isEnabled) {
+          await pluginManager.disablePlugin(pluginId);
         } else {
-          await pluginManager.enablePlugin(pluginId, true);
+          await pluginManager.enablePlugin(pluginId);
         }
         raf.scheduleFullRedraw();
       },

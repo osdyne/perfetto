@@ -29,8 +29,8 @@
 #include "perfetto/base/status.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/public/compiler.h"
-#include "src/trace_processor/perfetto_sql/engine/function_util.h"
 #include "src/trace_processor/perfetto_sql/engine/perfetto_sql_engine.h"
+#include "src/trace_processor/perfetto_sql/parser/function_util.h"
 #include "src/trace_processor/sqlite/bindings/sqlite_result.h"
 #include "src/trace_processor/sqlite/module_lifecycle_manager.h"
 #include "src/trace_processor/sqlite/sqlite_utils.h"
@@ -51,14 +51,14 @@ auto CreateTableStrFromState(RuntimeTableFunctionModule::State* state) {
   columns.reserve(state->return_values.size());
   for (const auto& ret : state->return_values) {
     columns.emplace_back(ret.name().ToStdString() + " " +
-                         sqlite::utils::SqlValueTypeToString(
+                         sqlite::utils::SqlValueTypeToSqliteTypeName(
                              sql_argument::TypeToSqlValueType(ret.type())));
   }
   for (const auto& arg : state->prototype.arguments) {
     // Add the "in_" prefix to every argument param to avoid clashes between the
     // output and input parameters.
     columns.emplace_back("in_" + arg.name().ToStdString() + " " +
-                         sqlite::utils::SqlValueTypeToString(
+                         sqlite::utils::SqlValueTypeToSqliteTypeName(
                              sql_argument::TypeToSqlValueType(arg.type())) +
                          " HIDDEN");
   }

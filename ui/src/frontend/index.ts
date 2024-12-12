@@ -13,28 +13,26 @@
 // limitations under the License.
 
 // Keep this import first.
+import '../base/disposable_polyfill';
 import '../base/static_initializers';
-import '../gen/all_plugins';
-
+import NON_CORE_PLUGINS from '../gen/all_plugins';
+import CORE_PLUGINS from '../gen/all_core_plugins';
 import {Draft} from 'immer';
 import m from 'mithril';
-
 import {defer} from '../base/deferred';
 import {addErrorHandler, reportError} from '../base/logging';
 import {Store} from '../base/store';
 import {Actions, DeferredAction, StateActions} from '../common/actions';
-import {flattenArgs, traceEvent} from '../common/metatracing';
-import {pluginManager} from '../common/plugins';
+import {traceEvent} from '../core/metatracing';
 import {State} from '../common/state';
 import {initController, runControllers} from '../controller';
 import {isGetCategoriesResponse} from '../controller/chrome_proxy_record_controller';
 import {RECORDING_V2_FLAG, featureFlags} from '../core/feature_flags';
-import {initLiveReloadIfLocalhost} from '../core/live_reload';
+import {initLiveReload} from '../core/live_reload';
 import {raf} from '../core/raf_scheduler';
 import {initWasm} from '../trace_processor/wasm_engine_proxy';
 import {setScheduleFullRedraw} from '../widgets/raf';
-
-import {App} from './app';
+import {UiMain} from './ui_main';
 import {initCssConstants} from './css_constants';
 import {registerDebugGlobals} from './debug';
 import {maybeShowErrorDialog} from './error_dialog';
@@ -49,7 +47,7 @@ import {postMessageHandler} from './post_message_handler';
 import {QueryPage} from './query_page';
 import {RecordPage, updateAvailableAdbDevices} from './record_page';
 import {RecordPageV2} from './record_page_v2';
-import {Route, Router} from './router';
+import {Route, Router} from '../core/router';
 import {CheckHttpRpcConnection} from './rpc_http_dialog';
 import {TraceInfoPage} from './trace_info_page';
 import {maybeOpenTraceFromRoute} from './trace_url_handler';
@@ -58,6 +56,14 @@ import {VizPage} from './viz_page';
 import {WidgetsPage} from './widgets_page';
 import {HttpRpcEngine} from '../trace_processor/http_rpc_engine';
 import {showModal} from '../widgets/modal';
+import {initAnalytics} from './analytics';
+import {IdleDetector} from './idle_detector';
+import {IdleDetectorWindow} from './idle_detector_interface';
+import {pageWithTrace} from './pages';
+import {AppImpl} from '../core/app_impl';
+import {setAddSqlTableTabImplFunction} from './sql_table_tab_interface';
+import {addSqlTableTabImpl} from './sql_table_tab';
+import {getServingRoot} from '../base/http_utils';
 
 const EXTENSION_ID = 'lfmkphfpdbjijhpomgecfikhfohaoine';
 
@@ -70,52 +76,6 @@ const CSP_WS_PERMISSIVE_PORT = featureFlags.register({
     'https://ui.perfetto.dev/#!/?rpc_port=1234',
   defaultValue: false,
 });
-
-class FrontendApi {
-  constructor() {
-    globals.store.subscribe(this.handleStoreUpdate);
-  }
-
-  private handleStoreUpdate = (store: Store<State>, oldState: State) => {
-    const newState = store.state;
-
-    // If the visible time in the global state has been updated more
-    // recently than the visible time handled by the frontend @ 60fps,
-    // update it. This typically happens when restoring the state from a
-    // permalink.
-    globals.timeline.mergeState(newState.frontendLocalState);
-
-    // Only redraw if something other than the frontendLocalState changed.
-    let key: keyof State;
-    for (key in store.state) {
-      if (key !== 'frontendLocalState' && oldState[key] !== newState[key]) {
-        raf.scheduleFullRedraw();
-        break;
-      }
-    }
-
-    // Run in microtask to avoid avoid reentry
-    setTimeout(runControllers, 0);
-  };
-
-  dispatchMultiple(actions: DeferredAction[]) {
-    const edits = actions.map((action) => {
-      return traceEvent(
-        `action.${action.type}`,
-        () => {
-          return (draft: Draft<State>) => {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            (StateActions as any)[action.type](draft, action.args);
-          };
-        },
-        {
-          args: flattenArgs(action.args),
-        },
-      );
-    });
-    globals.store.edit(edits);
-  }
-}
 
 function setExtensionAvailability(available: boolean) {
   globals.dispatch(
@@ -201,11 +161,59 @@ function setupContentSecurityPolicy() {
   document.head.appendChild(meta);
 }
 
+function setupExtentionPort(extensionLocalChannel: MessageChannel) {
+  // We proxy messages between the extension and the controller because the
+  // controller's worker can't access chrome.runtime.
+  const extensionPort =
+    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
+    window.chrome && chrome.runtime
+      ? chrome.runtime.connect(EXTENSION_ID)
+      : undefined;
+
+  setExtensionAvailability(extensionPort !== undefined);
+
+  if (extensionPort) {
+    // Send messages to keep-alive the extension port.
+    const interval = setInterval(() => {
+      extensionPort.postMessage({
+        method: 'ExtensionVersion',
+      });
+    }, 25000);
+    extensionPort.onDisconnect.addListener((_) => {
+      setExtensionAvailability(false);
+      clearInterval(interval);
+      void chrome.runtime.lastError; // Needed to not receive an error log.
+    });
+    // This forwards the messages from the extension to the controller.
+    extensionPort.onMessage.addListener(
+      (message: object, _port: chrome.runtime.Port) => {
+        if (isGetCategoriesResponse(message)) {
+          globals.dispatch(Actions.setChromeCategories(message));
+          return;
+        }
+        extensionLocalChannel.port2.postMessage(message);
+      },
+    );
+  }
+
+  // This forwards the messages from the controller to the extension
+  extensionLocalChannel.port2.onmessage = ({data}) => {
+    if (extensionPort) extensionPort.postMessage(data);
+  };
+}
+
 function main() {
+  // Setup content security policy before anything else.
+  setupContentSecurityPolicy();
+
+  AppImpl.initialize({
+    rootUrl: getServingRoot(),
+    initialRouteArgs: Router.parseUrl(window.location.href).args,
+    clearState: () => globals.dispatch(Actions.clearState({})),
+  });
+
   // Wire up raf for widgets.
   setScheduleFullRedraw(() => raf.scheduleFullRedraw());
-
-  setupContentSecurityPolicy();
 
   // Load the css. The load is asynchronous and the CSS is not ready by the time
   // appendChild returns.
@@ -246,68 +254,19 @@ function main() {
   initWasm(globals.root);
   initController(extensionLocalChannel.port1);
 
-  const dispatch = (action: DeferredAction) => {
-    frontendApi.dispatchMultiple([action]);
-  };
-
-  const router = new Router({
-    '/': HomePage,
-    '/viewer': ViewerPage,
-    '/record': RECORDING_V2_FLAG.get() ? RecordPageV2 : RecordPage,
-    '/query': QueryPage,
-    '/insights': InsightsPage,
-    '/flags': FlagsPage,
-    '/metrics': MetricsPage,
-    '/info': TraceInfoPage,
-    '/widgets': WidgetsPage,
-    '/viz': VizPage,
-    '/plugins': PluginsPage,
-  });
-  router.onRouteChanged = routeChange;
-
   // These need to be set before globals.initialize.
   const route = Router.parseUrl(window.location.href);
   globals.embeddedMode = route.args.mode === 'embedded';
   globals.hideSidebar = route.args.hideSidebar === true;
 
-  globals.initialize(dispatch, router);
+  globals.initialize(stateActionDispatcher, initAnalytics);
 
   globals.serviceWorkerController.install();
 
-  const frontendApi = new FrontendApi();
+  globals.store.subscribe(scheduleRafAndRunControllersOnStateChange);
   globals.publishRedraw = () => raf.scheduleFullRedraw();
 
-  // We proxy messages between the extension and the controller because the
-  // controller's worker can't access chrome.runtime.
-  const extensionPort =
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-    window.chrome && chrome.runtime
-      ? chrome.runtime.connect(EXTENSION_ID)
-      : undefined;
-
-  setExtensionAvailability(extensionPort !== undefined);
-
-  if (extensionPort) {
-    extensionPort.onDisconnect.addListener((_) => {
-      setExtensionAvailability(false);
-      void chrome.runtime.lastError; // Needed to not receive an error log.
-    });
-    // This forwards the messages from the extension to the controller.
-    extensionPort.onMessage.addListener(
-      (message: object, _port: chrome.runtime.Port) => {
-        if (isGetCategoriesResponse(message)) {
-          globals.dispatch(Actions.setChromeCategories(message));
-          return;
-        }
-        extensionLocalChannel.port2.postMessage(message);
-      },
-    );
-  }
-
-  // This forwards the messages from the controller to the extension
-  extensionLocalChannel.port2.onmessage = ({data}) => {
-    if (extensionPort) extensionPort.postMessage(data);
-  };
+  setupExtentionPort(extensionLocalChannel);
 
   // Put debug variables in the global scope for better debugging.
   registerDebugGlobals();
@@ -327,7 +286,9 @@ function main() {
     document.body.classList.add('testing');
   }
 
-  pluginManager.initialize();
+  (window as {} as IdleDetectorWindow).waitForPerfettoIdle = (ms?: number) => {
+    return new IdleDetector().waitForPerfettoIdle(ms);
+  };
 }
 
 function onCssLoaded() {
@@ -336,11 +297,33 @@ function onCssLoaded() {
   // And replace it with the root <main> element which will be used by mithril.
   document.body.innerHTML = '';
 
+  const router = new Router({
+    '/': HomePage,
+    '/flags': FlagsPage,
+    '/info': pageWithTrace(TraceInfoPage),
+    '/insights': pageWithTrace(InsightsPage),
+    '/metrics': pageWithTrace(MetricsPage),
+    '/plugins': PluginsPage,
+    '/query': pageWithTrace(QueryPage),
+    '/record': RECORDING_V2_FLAG.get() ? RecordPageV2 : RecordPage,
+    '/viewer': pageWithTrace(ViewerPage),
+    '/viz': pageWithTrace(VizPage),
+    '/widgets': WidgetsPage,
+  });
+  router.onRouteChanged = routeChange;
+
   raf.domRedraw = () => {
-    m.render(document.body, m(App, globals.router.resolve()));
+    m.render(document.body, m(UiMain, router.resolve()));
   };
 
-  initLiveReloadIfLocalhost(globals.embeddedMode);
+  if (
+    (location.origin.startsWith('http://localhost:') ||
+      location.origin.startsWith('http://127.0.0.1:')) &&
+    !globals.embeddedMode &&
+    !globals.testing
+  ) {
+    initLiveReload();
+  }
 
   if (!RECORDING_V2_FLAG.get()) {
     updateAvailableAdbDevices();
@@ -365,26 +348,14 @@ function onCssLoaded() {
   maybeChangeRpcPortFromFragment();
   CheckHttpRpcConnection().then(() => {
     const route = Router.parseUrl(window.location.href);
-    globals.dispatch(
-      Actions.maybeSetPendingDeeplink({
-        ts: route.args.ts,
-        tid: route.args.tid,
-        dur: route.args.dur,
-        pid: route.args.pid,
-        query: route.args.query,
-        visStart: route.args.visStart,
-        visEnd: route.args.visEnd,
-      }),
-    );
-
     if (!globals.embeddedMode) {
       installFileDropHandler();
     }
 
     // Don't allow postMessage or opening trace from route when the user says
     // that they want to reuse the already loaded trace in trace processor.
-    const engine = globals.getCurrentEngine();
-    if (engine && engine.source.type === 'HTTP_RPC') {
+    const traceSource = AppImpl.instance.trace?.traceInfo.source;
+    if (traceSource && traceSource.type === 'HTTP_RPC') {
       return;
     }
 
@@ -395,6 +366,26 @@ function onCssLoaded() {
     // cases.
     routeChange(route);
   });
+
+  // Force one initial render to get everything in place
+  m.render(document.body, m(UiMain, router.resolve()));
+
+  // TODO(primiano): this injection is to break a cirular dependency. See
+  // comment in sql_table_tab_interface.ts. Remove once we add an extension
+  // point for context menus.
+  setAddSqlTableTabImplFunction(addSqlTableTabImpl);
+
+  // Initialize plugins, now that we are ready to go.
+  const pluginManager = AppImpl.instance.plugins;
+  CORE_PLUGINS.forEach((p) => pluginManager.registerPlugin(p));
+  NON_CORE_PLUGINS.forEach((p) => pluginManager.registerPlugin(p));
+  pluginManager.initialize();
+  const route = Router.parseUrl(window.location.href);
+  for (const pluginId of (route.args.enablePlugins ?? '').split(',')) {
+    if (pluginManager.hasPlugin(pluginId)) {
+      pluginManager.activatePlugin(pluginId);
+    }
+  }
 }
 
 // If the URL is /#!?rpc_port=1234, change the default RPC port.
@@ -427,6 +418,30 @@ function maybeChangeRpcPortFromFragment() {
       HttpRpcEngine.rpcPort = route.args.rpc_port;
     }
   }
+}
+
+function stateActionDispatcher(actions: DeferredAction[]) {
+  const edits = actions.map((action) => {
+    return traceEvent(`action.${action.type}`, () => {
+      return (draft: Draft<State>) => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        (StateActions as any)[action.type](draft, action.args);
+      };
+    });
+  });
+  globals.store.edit(edits);
+}
+
+function scheduleRafAndRunControllersOnStateChange(
+  store: Store<State>,
+  oldState: State,
+) {
+  // Only redraw if something actually changed
+  if (oldState !== store.state) {
+    raf.scheduleFullRedraw();
+  }
+  // Run in a separate task to avoid avoid reentry.
+  setTimeout(runControllers, 0);
 }
 
 main();

@@ -13,8 +13,7 @@
 // limitations under the License.
 
 import m from 'mithril';
-
-import {SortDirection} from '../common/state';
+import {SortDirection} from '../base/comparison_utils';
 import {raf} from '../core/raf_scheduler';
 
 export interface RegularPopupMenuItem {

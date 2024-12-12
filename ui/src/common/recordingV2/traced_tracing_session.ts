@@ -13,7 +13,6 @@
 // limitations under the License.
 
 import protobuf from 'protobufjs/minimal';
-
 import {defer, Deferred} from '../../base/deferred';
 import {assertExists, assertFalse, assertTrue} from '../../base/logging';
 import {
@@ -35,7 +34,6 @@ import {
   ReadBuffersResponse,
   TraceConfig,
 } from '../../protos';
-
 import {RecordingError} from './recording_error_handling';
 import {
   ByteStream,
@@ -52,6 +50,7 @@ import {
   PARSING_UNRECOGNIZED_PORT,
   RECORDING_IN_PROGRESS,
 } from './recording_utils';
+import {exists} from '../../base/utils';
 
 // See wire_protocol.proto for more details.
 const WIRE_PROTOCOL_HEADER_SIZE = 4;
@@ -240,8 +239,7 @@ export class TracedTracingSession implements TracingSession {
       return;
     }
     const method = this.availableMethods.find((m) => m.name === methodName);
-    // eslint-disable-next-line @typescript-eslint/strict-boolean-expressions
-    if (!method || !method.id) {
+    if (!exists(method) || !exists(method.id)) {
       throw new RecordingError(
         `Method ${methodName} not supported by the target`,
       );
@@ -327,13 +325,11 @@ export class TracedTracingSession implements TracingSession {
     const frame = IPCFrame.decode(frameBuffer.slice());
     if (frame.msg === 'msgBindServiceReply') {
       const msgBindServiceReply = frame.msgBindServiceReply;
-      /* eslint-disable @typescript-eslint/strict-boolean-expressions */
       if (
-        msgBindServiceReply &&
-        msgBindServiceReply.methods &&
-        msgBindServiceReply.serviceId
+        exists(msgBindServiceReply) &&
+        exists(msgBindServiceReply.methods) &&
+        exists(msgBindServiceReply.serviceId)
       ) {
-        /* eslint-enable */
         assertTrue(msgBindServiceReply.success === true);
         this.availableMethods = msgBindServiceReply.methods;
         this.serviceId = msgBindServiceReply.serviceId;
@@ -344,7 +340,7 @@ export class TracedTracingSession implements TracingSession {
       // We process messages without a `replyProto` field (for instance
       // `FreeBuffers` does not have `replyProto`). However, we ignore messages
       // without a valid 'success' field.
-      if (!msgInvokeMethodReply || !msgInvokeMethodReply.success) {
+      if (msgInvokeMethodReply?.success !== true) {
         return;
       }
 
@@ -361,25 +357,23 @@ export class TracedTracingSession implements TracingSession {
       const data = {...decoder(msgInvokeMethodReply.replyProto)};
 
       if (method === 'ReadBuffers') {
-        if (data.slices) {
-          for (const slice of data.slices) {
-            this.partialPacket.push(slice);
-            if (slice.lastSliceForPacket) {
-              let bufferSize = 0;
-              for (const slice of this.partialPacket) {
-                bufferSize += slice.data!.length;
-              }
-              const tracePacket = new Uint8Array(bufferSize);
-              let written = 0;
-              for (const slice of this.partialPacket) {
-                const data = slice.data!;
-                tracePacket.set(data, written);
-                written += data.length;
-              }
-              this.traceProtoWriter.uint32(TRACE_PACKET_PROTO_TAG);
-              this.traceProtoWriter.bytes(tracePacket);
-              this.partialPacket = [];
+        for (const slice of data.slices ?? []) {
+          this.partialPacket.push(slice);
+          if (slice.lastSliceForPacket === true) {
+            let bufferSize = 0;
+            for (const slice of this.partialPacket) {
+              bufferSize += slice.data!.length;
             }
+            const tracePacket = new Uint8Array(bufferSize);
+            let written = 0;
+            for (const slice of this.partialPacket) {
+              const data = slice.data!;
+              tracePacket.set(data, written);
+              written += data.length;
+            }
+            this.traceProtoWriter.uint32(TRACE_PACKET_PROTO_TAG);
+            this.traceProtoWriter.bytes(tracePacket);
+            this.partialPacket = [];
           }
         }
         if (msgInvokeMethodReply.hasMore === false) {
@@ -396,7 +390,7 @@ export class TracedTracingSession implements TracingSession {
       } else if (method === 'GetTraceStats') {
         const maybePendingStatsMessage = this.pendingStatsMessages.shift();
         if (maybePendingStatsMessage) {
-          maybePendingStatsMessage.resolve(data?.traceStats?.bufferStats || []);
+          maybePendingStatsMessage.resolve(data?.traceStats?.bufferStats ?? []);
         }
       } else if (method === 'FreeBuffers') {
         // No action required. If we successfully read a whole trace,

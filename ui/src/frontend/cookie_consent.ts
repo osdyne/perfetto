@@ -13,9 +13,7 @@
 // limitations under the License.
 
 import m from 'mithril';
-
 import {raf} from '../core/raf_scheduler';
-
 import {globals} from './globals';
 
 const COOKIE_ACK_KEY = 'cookieAck';
@@ -24,7 +22,7 @@ export class CookieConsent implements m.ClassComponent {
   private showCookieConsent = true;
 
   oninit() {
-    this.showCookieConsent = true;
+    this.showCookieConsent = false;
     if (
       !globals.logging.isEnabled() ||
       localStorage.getItem(COOKIE_ACK_KEY) === 'true'

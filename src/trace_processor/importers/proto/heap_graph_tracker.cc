@@ -62,8 +62,9 @@ void ForReferenceSet(TraceStorage* storage,
     return;
 
   auto* ref = storage->mutable_heap_graph_reference_table();
-  auto it =
-      ref->FilterToIterator({ref->reference_set_id().eq(*reference_set_id)});
+  Query q;
+  q.constraints = {ref->reference_set_id().eq(*reference_set_id)};
+  auto it = ref->FilterToIterator(q);
 
   for (; it; ++it) {
     if (!fn(it.row_reference()))
@@ -92,10 +93,10 @@ std::optional<ObjectTable::Id> GetReferredObj(const TraceStorage& storage,
                                               uint32_t ref_set_id,
                                               const std::string& field_name) {
   const auto& refs_tbl = storage.heap_graph_reference_table();
-
-  auto refs_it = refs_tbl.FilterToIterator(
-      {refs_tbl.reference_set_id().eq(ref_set_id),
-       refs_tbl.field_name().eq(NullTermStringView(field_name))});
+  Query q;
+  q.constraints = {refs_tbl.reference_set_id().eq(ref_set_id),
+                   refs_tbl.field_name().eq(NullTermStringView(field_name))};
+  auto refs_it = refs_tbl.FilterToIterator(q);
   if (!refs_it) {
     return std::nullopt;
   }
@@ -110,8 +111,10 @@ BuildSuperclassMap(UniquePid upid, int64_t ts, TraceStorage* storage) {
   // Resolve superclasses by iterating heap graph objects and identifying the
   // superClass field.
   const auto& objects_tbl = storage->heap_graph_object_table();
-  auto obj_it = objects_tbl.FilterToIterator(
-      {objects_tbl.upid().eq(upid), objects_tbl.graph_sample_ts().eq(ts)});
+  Query q;
+  q.constraints = {objects_tbl.upid().eq(upid),
+                   objects_tbl.graph_sample_ts().eq(ts)};
+  auto obj_it = objects_tbl.FilterToIterator(q);
   for (; obj_it; ++obj_it) {
     auto obj_id = obj_it.id();
     auto class_descriptor = GetClassDescriptor(*storage, obj_id);
@@ -583,13 +586,14 @@ void HeapGraphTracker::FinalizeProfile(uint32_t seq_id) {
       }
     }
     if (!class_package) {
-      auto app_id = storage_->process_table()
-                        .android_appid()[sequence_state.current_upid];
+      auto app_id = storage_->process_table()[sequence_state.current_upid]
+                        .android_appid();
       if (app_id) {
-        auto pkg_row = storage_->package_list_table().uid().IndexOf(*app_id);
-        if (pkg_row) {
-          class_package =
-              storage_->package_list_table().package_name()[*pkg_row];
+        for (auto it = storage_->package_list_table().IterateRows(); it; ++it) {
+          if (it.uid() == *app_id) {
+            class_package = it.package_name();
+            break;
+          }
         }
       }
     }
@@ -673,14 +677,16 @@ void HeapGraphTracker::PopulateNativeSize(const SequenceState& seq) {
   };
   std::vector<Cleaner> cleaners;
 
-  auto class_it =
-      class_tbl.FilterToIterator({class_tbl.name().eq("sun.misc.Cleaner")});
+  Query q;
+  q.constraints = {class_tbl.name().eq("sun.misc.Cleaner")};
+  auto class_it = class_tbl.FilterToIterator(q);
   for (; class_it; ++class_it) {
     auto class_id = class_it.id();
-    auto obj_it = objects_tbl.FilterToIterator(
-        {objects_tbl.type_id().eq(class_id.value),
-         objects_tbl.upid().eq(seq.current_upid),
-         objects_tbl.graph_sample_ts().eq(seq.current_ts)});
+    Query query;
+    query.constraints = {objects_tbl.type_id().eq(class_id.value),
+                         objects_tbl.upid().eq(seq.current_upid),
+                         objects_tbl.graph_sample_ts().eq(seq.current_ts)};
+    auto obj_it = objects_tbl.FilterToIterator(query);
     for (; obj_it; ++obj_it) {
       ObjectTable::Id cleaner_obj_id = obj_it.id();
       std::optional<ObjectTable::Id> referent_id =
@@ -731,18 +737,18 @@ void HeapGraphTracker::PopulateSuperClasses(const SequenceState& seq) {
 
   auto* classes_tbl = storage_->mutable_heap_graph_class_table();
   std::map<ClassDescriptor, ClassTable::Id> class_to_id;
-  for (uint32_t idx = 0; idx < classes_tbl->row_count(); ++idx) {
-    class_to_id[{classes_tbl->name()[idx], classes_tbl->location()[idx]}] =
-        classes_tbl->id()[idx];
+  for (auto it = classes_tbl->IterateRows(); it; ++it) {
+    class_to_id[{it.name(), it.location()}] = it.id();
   }
 
   // Iterate through the classes table and annotate with superclasses.
   // We iterate all rows on the classes table (even though the superclass
   // mapping was generated on the current sequence) - if we cannot identify
   // a superclass we will just skip.
-  for (uint32_t idx = 0; idx < classes_tbl->row_count(); ++idx) {
-    auto name = storage_->GetString(classes_tbl->name()[idx]);
-    auto location = classes_tbl->location()[idx];
+  for (uint32_t i = 0; i < classes_tbl->row_count(); ++i) {
+    auto rr = (*classes_tbl)[i];
+    auto name = storage_->GetString(rr.name());
+    auto location = rr.location();
     auto normalized = GetNormalizedType(name);
     if (normalized.is_static_class || normalized.number_of_arrays > 0)
       continue;
@@ -761,9 +767,7 @@ void HeapGraphTracker::PopulateSuperClasses(const SequenceState& seq) {
       // instances would not appear here).
       continue;
     }
-    auto superclass_id = superclass_it->second;
-    // Mutate the superclass column
-    classes_tbl->mutable_superclass_id()->Set(idx, superclass_id);
+    rr.set_superclass_id(superclass_it->second);
   }
 }
 

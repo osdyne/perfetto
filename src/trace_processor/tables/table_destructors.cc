@@ -20,6 +20,7 @@
 #include "src/trace_processor/tables/jit_tables_py.h"
 #include "src/trace_processor/tables/memory_tables_py.h"
 #include "src/trace_processor/tables/metadata_tables_py.h"
+#include "src/trace_processor/tables/perf_tables_py.h"
 #include "src/trace_processor/tables/profiler_tables_py.h"
 #include "src/trace_processor/tables/sched_tables_py.h"
 #include "src/trace_processor/tables/slice_tables_py.h"
@@ -40,6 +41,9 @@ namespace tables {
 AndroidDumpstateTable::~AndroidDumpstateTable() = default;
 AndroidGameInterventionListTable::~AndroidGameInterventionListTable() = default;
 AndroidLogTable::~AndroidLogTable() = default;
+AndroidKeyEventsTable::~AndroidKeyEventsTable() = default;
+AndroidMotionEventsTable::~AndroidMotionEventsTable() = default;
+AndroidInputEventDispatchTable::~AndroidInputEventDispatchTable() = default;
 
 // counter_tables_py.h
 CounterTable::~CounterTable() = default;
@@ -61,14 +65,19 @@ ProcessTable::~ProcessTable() = default;
 FiledescriptorTable::~FiledescriptorTable() = default;
 ClockSnapshotTable::~ClockSnapshotTable() = default;
 MachineTable::~MachineTable() = default;
+TraceFileTable::~TraceFileTable() = default;
+
+// perf_tables.py
+SpeRecordTable::~SpeRecordTable() = default;
 
 // profiler_tables_py.h
 StackProfileMappingTable::~StackProfileMappingTable() = default;
 StackProfileFrameTable::~StackProfileFrameTable() = default;
 StackProfileCallsiteTable::~StackProfileCallsiteTable() = default;
-StackSampleTable::~StackSampleTable() = default;
 CpuProfileStackSampleTable::~CpuProfileStackSampleTable() = default;
+PerfSessionTable::~PerfSessionTable() = default;
 PerfSampleTable::~PerfSampleTable() = default;
+InstrumentsSampleTable::~InstrumentsSampleTable() = default;
 SymbolTable::~SymbolTable() = default;
 HeapProfileAllocationTable::~HeapProfileAllocationTable() = default;
 ExperimentalFlamegraphTable::~ExperimentalFlamegraphTable() = default;
@@ -93,6 +102,7 @@ GraphicsFrameSliceTable::~GraphicsFrameSliceTable() = default;
 ExpectedFrameTimelineSliceTable::~ExpectedFrameTimelineSliceTable() = default;
 ActualFrameTimelineSliceTable::~ActualFrameTimelineSliceTable() = default;
 ExperimentalFlatSliceTable::~ExperimentalFlatSliceTable() = default;
+AndroidNetworkPacketsTable::~AndroidNetworkPacketsTable() = default;
 
 // track_tables_py.h
 TrackTable::~TrackTable() = default;
@@ -136,15 +146,20 @@ V8WasmCodeTable::~V8WasmCodeTable() = default;
 V8RegexpCodeTable::~V8RegexpCodeTable() = default;
 
 // winscope_tables_py.h
+InputMethodClientsTable::~InputMethodClientsTable() = default;
+InputMethodManagerServiceTable::~InputMethodManagerServiceTable() = default;
+InputMethodServiceTable::~InputMethodServiceTable() = default;
+ProtoLogTable::~ProtoLogTable() = default;
 SurfaceFlingerLayersSnapshotTable::~SurfaceFlingerLayersSnapshotTable() =
     default;
 SurfaceFlingerLayerTable::~SurfaceFlingerLayerTable() = default;
 SurfaceFlingerTransactionsTable::~SurfaceFlingerTransactionsTable() = default;
+ViewCaptureTable::~ViewCaptureTable() = default;
+WindowManagerTable::~WindowManagerTable() = default;
 WindowManagerShellTransitionsTable::~WindowManagerShellTransitionsTable() =
     default;
 WindowManagerShellTransitionHandlersTable::
     ~WindowManagerShellTransitionHandlersTable() = default;
-ProtoLogTable::~ProtoLogTable() = default;
 
 }  // namespace tables
 

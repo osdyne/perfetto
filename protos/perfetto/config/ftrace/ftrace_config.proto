@@ -18,13 +18,17 @@ syntax = "proto2";
 
 package perfetto.protos;
 
-// Next id: 28
+// Next id: 30
 message FtraceConfig {
   // Ftrace events to record, example: "sched/sched_switch".
   repeated string ftrace_events = 1;
   // Android-specific event categories:
   repeated string atrace_categories = 2;
   repeated string atrace_apps = 3;
+  // Some processes can emit data through atrace or through the perfetto SDK via
+  // the "track_event" data source. For these categories, the SDK will be
+  // preferred, if possible, for this config.
+  repeated string atrace_categories_prefer_sdk = 28;
 
   // Size of each per-cpu kernel ftrace ring buffer.
   // Not guaranteed if there are multiple concurrent tracing sessions, as the
@@ -41,9 +45,9 @@ message FtraceConfig {
   // of 50 means that a read pass is triggered as soon as any per-cpu buffer is
   // half-full. Not guaranteed if there are multiple concurrent tracing
   // sessions.
-  // Currently does nothing on Linux kernels below v6.1.
-  // Introduced in: perfetto v43.
-  optional uint32 drain_buffer_percent = 26;
+  // Currently does nothing on Linux kernels below v6.9.
+  // Introduced in: perfetto v48.
+  optional uint32 drain_buffer_percent = 29;
 
   // Configuration for compact encoding of scheduler events. When enabled (and
   // recording the relevant ftrace events), specific high-volume events are
@@ -233,4 +237,7 @@ message FtraceConfig {
   // the recording in the kernel.
   // Introduced in: perfetto v43.
   optional bool buffer_size_lower_bound = 27;
+
+  // Previously drain_buffer_percent, perfetto v43-v47.
+  reserved 26;
 }

@@ -32,6 +32,7 @@
 #include "perfetto/base/time.h"
 #include "perfetto/ext/base/circular_queue.h"
 #include "perfetto/ext/base/periodic_task.h"
+#include "perfetto/ext/base/string_view.h"
 #include "perfetto/ext/base/uuid.h"
 #include "perfetto/ext/base/weak_ptr.h"
 #include "perfetto/ext/tracing/core/basic_types.h"
@@ -211,7 +212,7 @@ class TracingServiceImpl : public TracingService {
     ~ConsumerEndpointImpl() override;
 
     void NotifyOnTracingDisabled(const std::string& error);
-    void NotifyCloneSnapshotTrigger();
+    void NotifyCloneSnapshotTrigger(const std::string& trigger_name);
 
     // TracingService::ConsumerEndpoint implementation.
     void EnableTracing(const TraceConfig&, base::ScopedFile) override;
@@ -344,17 +345,17 @@ class TracingServiceImpl : public TracingService {
                              base::ScopedFile);
   void ChangeTraceConfig(ConsumerEndpointImpl*, const TraceConfig&);
 
-  base::Status StartTracing(TracingSessionID);
+  void StartTracing(TracingSessionID);
   void DisableTracing(TracingSessionID, bool disable_immediately = false);
   void Flush(TracingSessionID tsid,
              uint32_t timeout_ms,
              ConsumerEndpoint::FlushCallback,
              FlushFlags);
   void FlushAndDisableTracing(TracingSessionID);
-  void FlushAndCloneSession(ConsumerEndpointImpl*,
-                            TracingSessionID,
-                            bool skip_filter,
-                            bool for_bugreport);
+  base::Status FlushAndCloneSession(ConsumerEndpointImpl*,
+                                    TracingSessionID,
+                                    bool skip_filter,
+                                    bool for_bugreport);
 
   // Starts reading the internal tracing buffers from the tracing session `tsid`
   // and sends them to `*consumer` (which must be != nullptr).
@@ -662,8 +663,8 @@ class TracingServiceImpl : public TracingService {
     // Set to true on the first call to MaybeNotifyAllDataSourcesStarted().
     bool did_notify_all_data_source_started = false;
 
-    // Stores all lifecycle events of a particular type (i.e. associated with a
-    // single field id in the TracingServiceEvent proto).
+    // Stores simple lifecycle events of a particular type (i.e. associated with
+    // a single field id in the TracingServiceEvent proto).
     struct LifecycleEvent {
       LifecycleEvent(uint32_t f_id, uint32_t m_size = 1)
           : field_id(f_id), max_size(m_size), timestamps(m_size) {}
@@ -682,6 +683,17 @@ class TracingServiceImpl : public TracingService {
       base::CircularQueue<int64_t> timestamps;
     };
     std::vector<LifecycleEvent> lifecycle_events;
+
+    // Stores arbitrary lifecycle events that don't fit in lifecycle_events as
+    // serialized TracePacket protos.
+    struct ArbitraryLifecycleEvent {
+      int64_t timestamp;
+      std::vector<uint8_t> data;
+    };
+
+    std::optional<ArbitraryLifecycleEvent> slow_start_event;
+
+    std::vector<ArbitraryLifecycleEvent> last_flush_events;
 
     using ClockSnapshotData = ClockSnapshotVector;
 
@@ -744,6 +756,8 @@ class TracingServiceImpl : public TracingService {
   TracingServiceImpl(const TracingServiceImpl&) = delete;
   TracingServiceImpl& operator=(const TracingServiceImpl&) = delete;
 
+  bool IsInitiatorPrivileged(const TracingSession&);
+
   DataSourceInstance* SetupDataSource(const TraceConfig::DataSource&,
                                       const TraceConfig::ProducerConfig&,
                                       const RegisteredDataSource&,
@@ -794,8 +808,9 @@ class TracingServiceImpl : public TracingService {
   void MaybeEmitReceivedTriggers(TracingSession*, std::vector<TracePacket>*);
   void MaybeEmitRemoteClockSync(TracingSession*, std::vector<TracePacket>*);
   void MaybeNotifyAllDataSourcesStarted(TracingSession*);
-  void OnFlushTimeout(TracingSessionID, FlushRequestID);
+  void OnFlushTimeout(TracingSessionID, FlushRequestID, FlushFlags);
   void OnDisableTracingTimeout(TracingSessionID);
+  void OnAllDataSourceStartedTimeout(TracingSessionID);
   void DisableTracingNotifyConsumerAndFlushFile(TracingSession*);
   void PeriodicFlushTask(TracingSessionID, bool post_next_only);
   void CompleteFlush(TracingSessionID tsid,
@@ -898,7 +913,6 @@ class TracingServiceImpl : public TracingService {
 
   bool smb_scraping_enabled_ = false;
   bool lockdown_mode_ = false;
-  uint32_t min_write_period_ms_ = 100;       // Overridable for testing.
   int64_t trigger_window_ns_ = kOneDayInNs;  // Overridable for testing.
 
   std::minstd_rand trigger_probability_rand_;

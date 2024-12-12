@@ -16,11 +16,14 @@
 
 #include "src/trace_processor/importers/proto/profile_packet_sequence_state.h"
 
+#include <cstdint>
 #include <memory>
+#include <optional>
 
 #include "src/trace_processor/importers/common/mapping_tracker.h"
 #include "src/trace_processor/importers/common/stack_profile_tracker.h"
-#include "src/trace_processor/importers/proto/packet_sequence_state.h"
+#include "src/trace_processor/importers/proto/packet_sequence_state_generation.h"
+#include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 #include "test/gtest_and_gmock.h"
 
@@ -61,7 +64,7 @@ class HeapProfileTrackerDupTest : public ::testing::Test {
     context.storage.reset(new TraceStorage());
     context.mapping_tracker.reset(new MappingTracker(&context));
     context.stack_profile_tracker.reset(new StackProfileTracker(&context));
-    packet_sequence_state.reset(new PacketSequenceState(&context));
+    sequence_state = PacketSequenceStateGeneration::CreateFirst(&context);
 
     mapping_name = context.storage->InternString("[mapping]");
     fully_qualified_mapping_name = context.storage->InternString("/[mapping]");
@@ -71,8 +74,7 @@ class HeapProfileTrackerDupTest : public ::testing::Test {
 
  protected:
   ProfilePacketSequenceState& profile_packet_sequence_state() {
-    return *packet_sequence_state->current_generation()
-                ->GetOrCreate<ProfilePacketSequenceState>();
+    return *sequence_state->GetCustomState<ProfilePacketSequenceState>();
   }
   void InsertMapping(const Packet& packet) {
     profile_packet_sequence_state().AddString(packet.mapping_name_id,
@@ -117,7 +119,7 @@ class HeapProfileTrackerDupTest : public ::testing::Test {
   StringId build;
   StringId frame_name;
   TraceProcessorContext context;
-  std::unique_ptr<PacketSequenceState> packet_sequence_state;
+  RefPtr<PacketSequenceStateGeneration> sequence_state;
 };
 
 // Insert the same mapping from two different packets, with different strings
@@ -128,19 +130,19 @@ TEST_F(HeapProfileTrackerDupTest, Mapping) {
   InsertMapping(kSecondPacket);
   profile_packet_sequence_state().FinalizeProfile();
 
-  EXPECT_THAT(context.storage->stack_profile_mapping_table().build_id()[0],
+  EXPECT_THAT(context.storage->stack_profile_mapping_table()[0].build_id(),
               context.storage->InternString({kBuildIDHexName}));
-  EXPECT_THAT(context.storage->stack_profile_mapping_table().exact_offset()[0],
+  EXPECT_THAT(context.storage->stack_profile_mapping_table()[0].exact_offset(),
               kMappingExactOffset);
-  EXPECT_THAT(context.storage->stack_profile_mapping_table().start_offset()[0],
+  EXPECT_THAT(context.storage->stack_profile_mapping_table()[0].start_offset(),
               kMappingStartOffset);
-  EXPECT_THAT(context.storage->stack_profile_mapping_table().start()[0],
+  EXPECT_THAT(context.storage->stack_profile_mapping_table()[0].start(),
               kMappingStart);
-  EXPECT_THAT(context.storage->stack_profile_mapping_table().end()[0],
+  EXPECT_THAT(context.storage->stack_profile_mapping_table()[0].end(),
               kMappingEnd);
-  EXPECT_THAT(context.storage->stack_profile_mapping_table().load_bias()[0],
+  EXPECT_THAT(context.storage->stack_profile_mapping_table()[0].load_bias(),
               kMappingLoadBias);
-  EXPECT_THAT(context.storage->stack_profile_mapping_table().name()[0],
+  EXPECT_THAT(context.storage->stack_profile_mapping_table()[0].name(),
               fully_qualified_mapping_name);
 }
 
@@ -153,9 +155,9 @@ TEST_F(HeapProfileTrackerDupTest, Frame) {
   profile_packet_sequence_state().FinalizeProfile();
 
   const auto& frames = context.storage->stack_profile_frame_table();
-  EXPECT_THAT(frames.name()[0], frame_name);
-  EXPECT_THAT(frames.mapping()[0], MappingId{0});
-  EXPECT_THAT(frames.rel_pc()[0], kFrameRelPc);
+  EXPECT_THAT(frames[0].name(), frame_name);
+  EXPECT_THAT(frames[0].mapping(), MappingId{0});
+  EXPECT_THAT(frames[0].rel_pc(), kFrameRelPc);
 }
 
 // Insert the same callstack from two different packets, assert it is only
@@ -167,18 +169,15 @@ TEST_F(HeapProfileTrackerDupTest, Callstack) {
   profile_packet_sequence_state().FinalizeProfile();
 
   const auto& callsite_table = context.storage->stack_profile_callsite_table();
-  const auto& depth = callsite_table.depth();
-  const auto& parent_id = callsite_table.parent_id();
-  const auto& frame_id = callsite_table.frame_id();
 
-  EXPECT_EQ(depth[0], 0u);
-  EXPECT_EQ(depth[1], 1u);
+  EXPECT_EQ(callsite_table[0].depth(), 0u);
+  EXPECT_EQ(callsite_table[1].depth(), 1u);
 
-  EXPECT_EQ(parent_id[0], std::nullopt);
-  EXPECT_EQ(parent_id[1], CallsiteId{0});
+  EXPECT_EQ(callsite_table[0].parent_id(), std::nullopt);
+  EXPECT_EQ(callsite_table[1].parent_id(), CallsiteId{0});
 
-  EXPECT_EQ(frame_id[0], FrameId{0});
-  EXPECT_EQ(frame_id[1], FrameId{0});
+  EXPECT_EQ(callsite_table[0].frame_id(), FrameId{0});
+  EXPECT_EQ(callsite_table[1].frame_id(), FrameId{0});
 }
 
 std::optional<CallsiteId> FindCallstack(const TraceStorage& storage,
@@ -186,10 +185,10 @@ std::optional<CallsiteId> FindCallstack(const TraceStorage& storage,
                                         std::optional<CallsiteId> parent,
                                         FrameId frame_id) {
   const auto& callsites = storage.stack_profile_callsite_table();
-  for (uint32_t i = 0; i < callsites.row_count(); ++i) {
-    if (callsites.depth()[i] == depth && callsites.parent_id()[i] == parent &&
-        callsites.frame_id()[i] == frame_id) {
-      return callsites.id()[i];
+  for (auto it = callsites.IterateRows(); it; ++it) {
+    if (it.depth() == depth && it.parent_id() == parent &&
+        it.frame_id() == frame_id) {
+      return it.id();
     }
   }
   return std::nullopt;
@@ -200,9 +199,9 @@ TEST(HeapProfileTrackerTest, SourceMappingPath) {
   context.storage.reset(new TraceStorage());
   context.mapping_tracker.reset(new MappingTracker(&context));
   context.stack_profile_tracker.reset(new StackProfileTracker(&context));
-  PacketSequenceState pss(&context);
+  auto state = PacketSequenceStateGeneration::CreateFirst(&context);
   ProfilePacketSequenceState& ppss =
-      *pss.current_generation()->GetOrCreate<ProfilePacketSequenceState>();
+      *state->GetCustomState<ProfilePacketSequenceState>();
 
   constexpr auto kBuildId = 1u;
   constexpr auto kMappingNameId1 = 2u;
@@ -224,7 +223,7 @@ TEST(HeapProfileTrackerTest, SourceMappingPath) {
   ppss.CommitAllocations();
   auto foo_bar_id = context.storage->string_pool().GetId("/foo/bar");
   ASSERT_NE(foo_bar_id, std::nullopt);
-  EXPECT_THAT(context.storage->stack_profile_mapping_table().name()[0],
+  EXPECT_THAT(context.storage->stack_profile_mapping_table()[0].name(),
               *foo_bar_id);
 }
 
@@ -235,9 +234,9 @@ TEST(HeapProfileTrackerTest, Functional) {
   context.mapping_tracker.reset(new MappingTracker(&context));
   context.stack_profile_tracker.reset(new StackProfileTracker(&context));
 
-  PacketSequenceState pss(&context);
+  auto state = PacketSequenceStateGeneration::CreateFirst(&context);
   ProfilePacketSequenceState& ppss =
-      *pss.current_generation()->GetOrCreate<ProfilePacketSequenceState>();
+      *state->GetCustomState<ProfilePacketSequenceState>();
 
   uint32_t next_string_intern_id = 1;
 
