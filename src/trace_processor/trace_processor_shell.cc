@@ -14,22 +14,29 @@
  * limitations under the License.
  */
 
-#include <errno.h>
 #include <fcntl.h>
-#include <stdio.h>
 #include <sys/stat.h>
+#include <algorithm>
 #include <cctype>
+#include <cerrno>
+#include <chrono>
 #include <cinttypes>
-#include <functional>
-#include <iostream>
+#include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
+#include <string_view>
 #include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include <google/protobuf/compiler/parser.h>
+#include <google/protobuf/descriptor.pb.h>
 #include <google/protobuf/dynamic_message.h>
+#include <google/protobuf/io/tokenizer.h>
 #include <google/protobuf/io/zero_copy_stream_impl.h>
 #include <google/protobuf/text_format.h>
 
@@ -38,23 +45,29 @@
 #include "perfetto/base/status.h"
 #include "perfetto/base/time.h"
 #include "perfetto/ext/base/file_utils.h"
-#include "perfetto/ext/base/flat_hash_map.h"
-#include "perfetto/ext/base/getopt.h"
+#include "perfetto/ext/base/getopt.h"  // IWYU pragma: keep
 #include "perfetto/ext/base/scoped_file.h"
+#include "perfetto/ext/base/scoped_mmap.h"
 #include "perfetto/ext/base/status_or.h"
 #include "perfetto/ext/base/string_splitter.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/version.h"
-
+#include "perfetto/trace_processor/basic_types.h"
+#include "perfetto/trace_processor/iterator.h"
 #include "perfetto/trace_processor/metatrace_config.h"
 #include "perfetto/trace_processor/read_trace.h"
+#include "perfetto/trace_processor/trace_blob.h"
+#include "perfetto/trace_processor/trace_blob_view.h"
 #include "perfetto/trace_processor/trace_processor.h"
+#include "src/profiling/deobfuscator.h"
+#include "src/profiling/symbolizer/local_symbolizer.h"
+#include "src/profiling/symbolizer/symbolize_database.h"
+#include "src/profiling/symbolizer/symbolizer.h"
 #include "src/trace_processor/metrics/all_chrome_metrics.descriptor.h"
 #include "src/trace_processor/metrics/all_webview_metrics.descriptor.h"
 #include "src/trace_processor/metrics/metrics.descriptor.h"
 #include "src/trace_processor/read_trace_internal.h"
 #include "src/trace_processor/rpc/stdiod.h"
-#include "src/trace_processor/sqlite/sqlite_utils.h"
 #include "src/trace_processor/util/sql_modules.h"
 #include "src/trace_processor/util/status_macros.h"
 
@@ -63,10 +76,6 @@
 #if PERFETTO_BUILDFLAG(PERFETTO_TP_HTTPD)
 #include "src/trace_processor/rpc/httpd.h"
 #endif
-#include "src/profiling/deobfuscator.h"
-#include "src/profiling/symbolizer/local_symbolizer.h"
-#include "src/profiling/symbolizer/symbolize_database.h"
-#include "src/profiling/symbolizer/symbolizer.h"
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||   \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
@@ -98,8 +107,7 @@
 #include <unistd.h>  // For getuid() in GetConfigPath().
 #endif
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 
 namespace {
 TraceProcessor* g_tp;
@@ -270,9 +278,7 @@ base::Status ExportTraceToDatabase(const std::string& output_name) {
   bool attach_has_more = attach_it.Next();
   PERFETTO_DCHECK(!attach_has_more);
 
-  base::Status status = attach_it.Status();
-  if (!status.ok())
-    return base::ErrStatus("%s", status.c_message());
+  RETURN_IF_ERROR(attach_it.Status());
 
   // Export real and virtual tables.
   auto tables_it = g_tp->ExecuteQuery("SELECT name FROM perfetto_tables");
@@ -285,14 +291,9 @@ base::Status ExportTraceToDatabase(const std::string& output_name) {
     auto export_it = g_tp->ExecuteQuery(export_sql);
     bool export_has_more = export_it.Next();
     PERFETTO_DCHECK(!export_has_more);
-
-    status = export_it.Status();
-    if (!status.ok())
-      return base::ErrStatus("%s", status.c_message());
+    RETURN_IF_ERROR(export_it.Status());
   }
-  status = tables_it.Status();
-  if (!status.ok())
-    return base::ErrStatus("%s", status.c_message());
+  RETURN_IF_ERROR(tables_it.Status());
 
   // Export views.
   auto views_it =
@@ -309,21 +310,14 @@ base::Status ExportTraceToDatabase(const std::string& output_name) {
     auto export_it = g_tp->ExecuteQuery(sql);
     bool export_has_more = export_it.Next();
     PERFETTO_DCHECK(!export_has_more);
-
-    status = export_it.Status();
-    if (!status.ok())
-      return base::ErrStatus("%s", status.c_message());
+    RETURN_IF_ERROR(export_it.Status());
   }
-  status = views_it.Status();
-  if (!status.ok())
-    return base::ErrStatus("%s", status.c_message());
+  RETURN_IF_ERROR(views_it.Status());
 
   auto detach_it = g_tp->ExecuteQuery("DETACH DATABASE perfetto_export");
   bool detach_has_more = attach_it.Next();
   PERFETTO_DCHECK(!detach_has_more);
-  status = detach_it.Status();
-  return status.ok() ? base::OkStatus()
-                     : base::ErrStatus("%s", status.c_message());
+  return detach_it.Status();
 }
 
 class ErrorPrinter : public google::protobuf::io::ErrorCollector {
@@ -336,7 +330,7 @@ class ErrorPrinter : public google::protobuf::io::ErrorCollector {
   }
 };
 
-// This function returns an indentifier for a metric suitable for use
+// This function returns an identifier for a metric suitable for use
 // as an SQL table name (i.e. containing no forward or backward slashes).
 std::string BaseName(std::string metric_path) {
   std::replace(metric_path.begin(), metric_path.end(), '\\', '/');
@@ -387,7 +381,7 @@ base::Status ExtendMetricsProto(const std::string& extend_metrics_proto,
   return g_tp->ExtendMetricsProto(metric_proto.data(), metric_proto.size());
 }
 
-enum OutputFormat {
+enum MetricV1OutputFormat {
   kBinaryProto,
   kTextProto,
   kJson,
@@ -400,21 +394,21 @@ struct MetricNameAndPath {
 };
 
 base::Status RunMetrics(const std::vector<MetricNameAndPath>& metrics,
-                        OutputFormat format) {
+                        MetricV1OutputFormat format) {
   std::vector<std::string> metric_names(metrics.size());
   for (size_t i = 0; i < metrics.size(); ++i) {
     metric_names[i] = metrics[i].name;
   }
 
   switch (format) {
-    case OutputFormat::kBinaryProto: {
+    case MetricV1OutputFormat::kBinaryProto: {
       std::vector<uint8_t> metric_result;
       RETURN_IF_ERROR(g_tp->ComputeMetric(metric_names, &metric_result));
       fwrite(metric_result.data(), sizeof(uint8_t), metric_result.size(),
              stdout);
       break;
     }
-    case OutputFormat::kJson: {
+    case MetricV1OutputFormat::kJson: {
       std::string out;
       RETURN_IF_ERROR(g_tp->ComputeMetricText(
           metric_names, TraceProcessor::MetricResultFormat::kJson, &out));
@@ -422,7 +416,7 @@ base::Status RunMetrics(const std::vector<MetricNameAndPath>& metrics,
       fwrite(out.c_str(), sizeof(char), out.size(), stdout);
       break;
     }
-    case OutputFormat::kTextProto: {
+    case MetricV1OutputFormat::kTextProto: {
       std::string out;
       RETURN_IF_ERROR(g_tp->ComputeMetricText(
           metric_names, TraceProcessor::MetricResultFormat::kProtoText, &out));
@@ -430,7 +424,7 @@ base::Status RunMetrics(const std::vector<MetricNameAndPath>& metrics,
       fwrite(out.c_str(), sizeof(char), out.size(), stdout);
       break;
     }
-    case OutputFormat::kNone:
+    case MetricV1OutputFormat::kNone:
       break;
   }
 
@@ -507,7 +501,7 @@ base::StatusOr<QueryResult> ExtractQueryResult(Iterator* it, bool has_more) {
   QueryResult result;
 
   for (uint32_t c = 0; c < it->ColumnCount(); c++) {
-    fprintf(stderr, "column %d = %s\n", c, it->GetColumnName(c).c_str());
+    fprintf(stderr, "column %u = %s\n", c, it->GetColumnName(c).c_str());
     result.column_names.push_back(it->GetColumnName(c));
   }
 
@@ -590,7 +584,7 @@ base::Status RunQueriesAndPrintResult(const std::string& sql_query,
   if (prev_with_output > 0) {
     return base::ErrStatus(
         "Result rows were returned for multiples queries. Ensure that only the "
-        "final statement is a SELECT statment or use `suppress_query_output` "
+        "final statement is a SELECT statement or use `suppress_query_output` "
         "to prevent function invocations causing this "
         "error (see "
         "https://perfetto.dev/docs/contributing/"
@@ -699,36 +693,49 @@ metatrace::MetatraceCategories ParseMetatraceCategories(std::string s) {
 }
 
 struct CommandLineOptions {
-  std::string perf_file_path;
+  std::string trace_file_path;
+
+  bool enable_httpd = false;
+  std::string port_number;
+  bool enable_stdiod = false;
+  bool launch_shell = false;
+
+  bool force_full_sort = false;
+  bool no_ftrace_raw = false;
+
   std::string query_file_path;
   std::string query_string;
-  std::string pre_metrics_path;
-  std::string sqlite_file_path;
-  std::string sql_module_path;
-  std::string metric_names;
-  std::string metric_output;
-  std::string trace_file_path;
-  std::string port_number;
-  std::string override_stdlib_path;
-  std::vector<std::string> override_sql_module_paths;
-  std::vector<std::string> raw_metric_extensions;
-  bool launch_shell = false;
-  bool enable_httpd = false;
-  bool enable_stdiod = false;
-  bool wide = false;
-  bool force_full_sort = false;
+  std::vector<std::string> sql_package_paths;
+  std::vector<std::string> override_sql_package_paths;
+
+  bool summary = false;
+  std::string summary_metrics_v2;
+  std::string summary_metadata_query;
+  std::vector<std::string> summary_specs;
+  std::string summary_output;
+
   std::string metatrace_path;
   size_t metatrace_buffer_capacity = 0;
   metatrace::MetatraceCategories metatrace_categories =
       static_cast<metatrace::MetatraceCategories>(
           metatrace::MetatraceCategories::QUERY_TIMELINE |
           metatrace::MetatraceCategories::API_TIMELINE);
+
   bool dev = false;
+  std::vector<std::string> dev_flags;
   bool extra_checks = false;
-  bool no_ftrace_raw = false;
+  std::string export_file_path;
+  std::string perf_file_path;
+  bool wide = false;
   bool analyze_trace_proto_content = false;
   bool crop_track_events = false;
-  std::vector<std::string> dev_flags;
+  std::string register_files_dir;
+  std::string override_stdlib_path;
+
+  std::string pre_metrics_v1_path;
+  std::string metric_v1_names;
+  std::string metric_v1_output;
+  std::vector<std::string> raw_metric_v1_extensions;
 };
 
 void PrintUsage(char** argv) {
@@ -736,36 +743,19 @@ void PrintUsage(char** argv) {
 Interactive trace processor shell.
 Usage: %s [FLAGS] trace_file.pb
 
-Options:
+General purpose:
  -h, --help                           Prints this guide.
  -v, --version                        Prints the version of trace processor.
- -d, --debug                          Enable virtual table debugging.
- -W, --wide                           Prints interactive output with double
-                                      column width.
- -p, --perf-file FILE                 Writes the time taken to ingest the trace
-                                      and execute the queries to the given file.
-                                      Only valid with -q or --run-metrics and
-                                      the file will only be written if the
-                                      execution is successful.
- -q, --query-file FILE                Read and execute an SQL query from a file.
-                                      If used with --run-metrics, the query is
-                                      executed after the selected metrics and
-                                      the metrics output is suppressed.
- -Q, --query-string QUERY             Execute the SQL query QUERY.
-                                      If used with --run-metrics, the query is
-                                      executed after the selected metrics and
-                                      the metrics output is suppressed.
+
+Behavioural:
  -D, --httpd                          Enables the HTTP RPC server.
  --http-port PORT                     Specify what port to run HTTP RPC server.
  --stdiod                             Enables the stdio RPC server.
- -i, --interactive                    Starts interactive mode even after a query
-                                      file is specified with -q or
-                                      --run-metrics.
- -e, --export FILE                    Export the contents of trace processor
-                                      into an SQLite database after running any
-                                      metrics or queries specified.
+ -i, --interactive                    Starts interactive mode even after
+                                      executing some other commands (-q, -Q,
+                                      --run-metrics, --summary).
 
-Feature flags:
+Parsing:
  --full-sort                          Forces the trace processor into performing
                                       a full sort ignoring any windowing
                                       logic.
@@ -774,10 +764,68 @@ Feature flags:
                                       reduces the memory usage of trace
                                       processor when loading traces containing
                                       ftrace events.
- --analyze-trace-proto-content        Enables trace proto content analysis in
-                                      trace processor.
- --crop-track-events                  Ignores track event outside of the
-                                      range of interest in trace processor.
+
+PerfettoSQL:
+ -q, --query-file FILE                Read and execute an SQL query from a file.
+                                      If used with --run-metrics, the query is
+                                      executed after the selected metrics and
+                                      the metrics output is suppressed.
+ -Q, --query-string QUERY             Execute the SQL query QUERY.
+                                      If used with --run-metrics, the query is
+                                      executed after the selected metrics and
+                                      the metrics output is suppressed.
+ --add-sql-package PACKAGE_PATH       Files from the directory will be treated
+                                      as a new SQL package and can be used for
+                                      INCLUDE PERFETTO MODULE statements. The
+                                      name of the directory is the package name.
+ --override-sql-package PACKAGE_PATH  Will override trace processor package with
+                                      passed contents. The outer directory will
+                                      specify the package name.
+
+Trace summarization:
+  --summary                           Enables the trace summarization features of
+                                      trace processor. Required for any flags
+                                      starting with --summary-* to be meaningful.
+                                      --summary-format can be used to control the
+                                      output format.
+  --summary-metrics-v2 ID1,ID2,ID3    Specifies that the given v2 metrics (as
+                                      defined by a comma separated set of ids)
+                                      should be computed and returned as part of
+                                      the trace summary. The spec for every metric
+                                      must exist in one of the files passed to
+                                      --summary-spec.
+  --summary-metadata-query ID         Specifies that the given query id should be
+                                      used to populate the `metadata` field of the
+                                      trace summary. The spec for the query must
+                                      exist in one of the files passed to
+                                      --summary-spec.
+  --summary-spec SUMMARY_PATH         Parses the spec at the specified path and
+                                      makes it available to all summarization
+                                      operators (--summary-metrics-v2). Spec
+                                      files must be instances of the
+                                      perfetto.protos.TraceSummarySpec proto.
+                                      If the file extension is `.textproto` then
+                                      the spec file will be parsed as a
+                                      textproto. If the file extension is `.pb`
+                                      then it will be parsed as a binary
+                                      protobuf. Otherwise, heureustics will be
+                                      used to determine the format.
+  --summary-format [text,binary]      Controls the serialization format of trace
+                                      summarization proto
+                                      (perfetto.protos.TraceSummary). If
+                                      `binary`, then the output is a binary
+                                      protobuf. If unspecified or `text` then
+                                      the output is a textproto.
+
+Metatracing:
+ -m, --metatrace FILE                 Enables metatracing of trace processor
+                                      writing the resulting trace into FILE.
+ --metatrace-buffer-capacity N        Sets metatrace event buffer to capture
+                                      last N events.
+ --metatrace-categories CATEGORIES    A comma-separated list of metatrace
+                                      categories to enable.
+
+Advanced:
  --dev                                Enables features which are reserved for
                                       local development use only and
                                       *should not* be enabled on production
@@ -789,21 +837,44 @@ Feature flags:
  --extra-checks                       Enables additional checks which can catch
                                       more SQL errors, but which incur
                                       additional runtime overhead.
-
-Standard library:
- --add-sql-module MODULE_PATH         Files from the directory will be treated
-                                      as a new SQL module and can be used for
-                                      IMPORT. The name of the directory is the
-                                      module name.
- --override-sql-module MODULE_PATH    Will override trace processor module with
-                                      passed contents. The outer directory will
-                                      specify the module name.
+ -e, --export FILE                    Export the contents of trace processor
+                                      into an SQLite database after running any
+                                      metrics or queries specified.
+ -p, --perf-file FILE                 Writes the time taken to ingest the trace
+                                      and execute the queries to the given file.
+                                      Only valid with -q or --run-metrics and
+                                      the file will only be written if the
+                                      execution is successful.
+ -W, --wide                           Prints interactive output with double
+                                      column width.
+ --analyze-trace-proto-content        Enables trace proto content analysis in
+                                      trace processor.
+ --crop-track-events                  Ignores track event outside of the
+                                      range of interest in trace processor.
+ --register-files-dir PATH            The contents of all files in this
+                                      directory and subdirectories will be made
+                                      available to the trace processor runtime.
+                                      Some importers can use this data to
+                                      augment trace data (e.g. decode ETM
+                                      instruction streams).
  --override-stdlib=[path_to_stdlib]   Will override trace_processor/stdlib with
                                       passed contents. The outer directory will
                                       be ignored. Only allowed when --dev is
                                       specified.
+ --add-sql-module PACKAGE_PATH        Alias for --add-sql-package, kept for
+                                      backwards compatibility. Prefer
+                                      --add-sql-package.
+ --override-sql-module PACKAGE_PATH   Alias for --override-sql-package, kept for
+                                      backwards compatibility. Prefer
+                                      --override-sql-package.
 
-Metrics:
+Metrics (v1):
+
+  NOTE: the trace-based metrics system has been "soft" deprecated. Specifically,
+  all existing metrics will continue functioning but we will not be building
+  any new features nor developing any metrics there further. Please use the
+  metrics v2 system as part of trace summarization.
+
  --run-metrics x,y,z                  Runs a comma separated list of metrics and
                                       prints the result as a TraceMetrics proto
                                       to stdout. The specified can either be
@@ -821,73 +892,98 @@ Metrics:
                                       DISK_PATH/protos and DISK_PATH/sql
                                       respectively, and mounts them onto
                                       VIRTUAL_PATH.
-
-Metatracing:
- -m, --metatrace FILE                 Enables metatracing of trace processor
-                                      writing the resulting trace into FILE.
- --metatrace-buffer-capacity N        Sets metatrace event buffer to capture
-                                      last N events.
- --metatrace-categories CATEGORIES    A comma-separated list of metatrace
-                                      categories to enable.)",
+)",
                 argv[0]);
 }
 
 CommandLineOptions ParseCommandLineOptions(int argc, char** argv) {
   CommandLineOptions command_line_options;
   enum LongOption {
-    OPT_RUN_METRICS = 1000,
-    OPT_PRE_METRICS,
-    OPT_METRICS_OUTPUT,
+    OPT_HTTP_PORT = 1000,
+    OPT_STDIOD,
+
     OPT_FORCE_FULL_SORT,
-    OPT_HTTP_PORT,
-    OPT_ADD_SQL_MODULE,
-    OPT_METRIC_EXTENSION,
-    OPT_DEV,
-    OPT_EXTRA_CHECKS,
-    OPT_OVERRIDE_STDLIB,
-    OPT_OVERRIDE_SQL_MODULE,
     OPT_NO_FTRACE_RAW,
+
+    OPT_ADD_SQL_PACKAGE,
+    OPT_OVERRIDE_SQL_PACKAGE,
+
+    OPT_SUMMARY,
+    OPT_SUMMARY_METRICS_V2,
+    OPT_SUMMARY_METADATA_QUERY,
+    OPT_SUMMARY_SPEC,
+    OPT_SUMMARY_FORMAT,
+
     OPT_METATRACE_BUFFER_CAPACITY,
     OPT_METATRACE_CATEGORIES,
+
+    OPT_DEV,
+    OPT_DEV_FLAG,
+    OPT_EXTRA_CHECKS,
     OPT_ANALYZE_TRACE_PROTO_CONTENT,
     OPT_CROP_TRACK_EVENTS,
-    OPT_DEV_FLAG,
-    OPT_STDIOD,
+    OPT_REGISTER_FILES_DIR,
+    OPT_OVERRIDE_STDLIB,
+
+    OPT_RUN_METRICS,
+    OPT_PRE_METRICS,
+    OPT_METRICS_OUTPUT,
+    OPT_METRIC_EXTENSION,
   };
 
   static const option long_options[] = {
       {"help", no_argument, nullptr, 'h'},
       {"version", no_argument, nullptr, 'v'},
-      {"wide", no_argument, nullptr, 'W'},
-      {"perf-file", required_argument, nullptr, 'p'},
-      {"query-file", required_argument, nullptr, 'q'},
-      {"query-string", required_argument, nullptr, 'Q'},
+
       {"httpd", no_argument, nullptr, 'D'},
       {"http-port", required_argument, nullptr, OPT_HTTP_PORT},
       {"stdiod", no_argument, nullptr, OPT_STDIOD},
       {"interactive", no_argument, nullptr, 'i'},
-      {"export", required_argument, nullptr, 'e'},
+
+      {"full-sort", no_argument, nullptr, OPT_FORCE_FULL_SORT},
+      {"no-ftrace-raw", no_argument, nullptr, OPT_NO_FTRACE_RAW},
+
+      {"query-file", required_argument, nullptr, 'q'},
+      {"query-string", required_argument, nullptr, 'Q'},
+      {"add-sql-module", required_argument, nullptr, OPT_ADD_SQL_PACKAGE},
+      {"add-sql-package", required_argument, nullptr, OPT_ADD_SQL_PACKAGE},
+      {"override-sql-module", required_argument, nullptr,
+       OPT_OVERRIDE_SQL_PACKAGE},
+      {"override-sql-package", required_argument, nullptr,
+       OPT_OVERRIDE_SQL_PACKAGE},
+
+      {"summary", no_argument, nullptr, OPT_SUMMARY},
+      {"summary-metrics-v2", required_argument, nullptr,
+       OPT_SUMMARY_METRICS_V2},
+      {"summary-metadata-query", required_argument, nullptr,
+       OPT_SUMMARY_METADATA_QUERY},
+      {"summary-spec", required_argument, nullptr, OPT_SUMMARY_SPEC},
+      {"summary-format", required_argument, nullptr, OPT_SUMMARY_FORMAT},
+
       {"metatrace", required_argument, nullptr, 'm'},
       {"metatrace-buffer-capacity", required_argument, nullptr,
        OPT_METATRACE_BUFFER_CAPACITY},
       {"metatrace-categories", required_argument, nullptr,
        OPT_METATRACE_CATEGORIES},
-      {"full-sort", no_argument, nullptr, OPT_FORCE_FULL_SORT},
-      {"no-ftrace-raw", no_argument, nullptr, OPT_NO_FTRACE_RAW},
+
+      {"dev", no_argument, nullptr, OPT_DEV},
+      {"dev-flag", required_argument, nullptr, OPT_DEV_FLAG},
+      {"extra-checks", no_argument, nullptr, OPT_EXTRA_CHECKS},
+      {"export", required_argument, nullptr, 'e'},
+      {"perf-file", required_argument, nullptr, 'p'},
+      {"wide", no_argument, nullptr, 'W'},
       {"analyze-trace-proto-content", no_argument, nullptr,
        OPT_ANALYZE_TRACE_PROTO_CONTENT},
       {"crop-track-events", no_argument, nullptr, OPT_CROP_TRACK_EVENTS},
-      {"dev", no_argument, nullptr, OPT_DEV},
-      {"extra-checks", no_argument, nullptr, OPT_EXTRA_CHECKS},
-      {"add-sql-module", required_argument, nullptr, OPT_ADD_SQL_MODULE},
-      {"override-sql-module", required_argument, nullptr,
-       OPT_OVERRIDE_SQL_MODULE},
+      {"register-files-dir", required_argument, nullptr,
+       OPT_REGISTER_FILES_DIR},
       {"override-stdlib", required_argument, nullptr, OPT_OVERRIDE_STDLIB},
+
       {"run-metrics", required_argument, nullptr, OPT_RUN_METRICS},
       {"pre-metrics", required_argument, nullptr, OPT_PRE_METRICS},
       {"metrics-output", required_argument, nullptr, OPT_METRICS_OUTPUT},
       {"metric-extension", required_argument, nullptr, OPT_METRIC_EXTENSION},
-      {"dev-flag", required_argument, nullptr, OPT_DEV_FLAG},
+
       {nullptr, 0, nullptr, 0}};
 
   bool explicit_interactive = false;
@@ -950,7 +1046,7 @@ CommandLineOptions ParseCommandLineOptions(int argc, char** argv) {
     }
 
     if (option == 'e') {
-      command_line_options.sqlite_file_path = optarg;
+      command_line_options.export_file_path = optarg;
       continue;
     }
 
@@ -1001,13 +1097,13 @@ CommandLineOptions ParseCommandLineOptions(int argc, char** argv) {
       continue;
     }
 
-    if (option == OPT_ADD_SQL_MODULE) {
-      command_line_options.sql_module_path = optarg;
+    if (option == OPT_ADD_SQL_PACKAGE) {
+      command_line_options.sql_package_paths.emplace_back(optarg);
       continue;
     }
 
-    if (option == OPT_OVERRIDE_SQL_MODULE) {
-      command_line_options.override_sql_module_paths.push_back(optarg);
+    if (option == OPT_OVERRIDE_SQL_PACKAGE) {
+      command_line_options.override_sql_package_paths.emplace_back(optarg);
       continue;
     }
 
@@ -1017,27 +1113,57 @@ CommandLineOptions ParseCommandLineOptions(int argc, char** argv) {
     }
 
     if (option == OPT_RUN_METRICS) {
-      command_line_options.metric_names = optarg;
+      command_line_options.metric_v1_names = optarg;
       continue;
     }
 
     if (option == OPT_PRE_METRICS) {
-      command_line_options.pre_metrics_path = optarg;
+      command_line_options.pre_metrics_v1_path = optarg;
       continue;
     }
 
     if (option == OPT_METRICS_OUTPUT) {
-      command_line_options.metric_output = optarg;
+      command_line_options.metric_v1_output = optarg;
       continue;
     }
 
     if (option == OPT_METRIC_EXTENSION) {
-      command_line_options.raw_metric_extensions.push_back(optarg);
+      command_line_options.raw_metric_v1_extensions.emplace_back(optarg);
       continue;
     }
 
     if (option == OPT_DEV_FLAG) {
-      command_line_options.dev_flags.push_back(optarg);
+      command_line_options.dev_flags.emplace_back(optarg);
+      continue;
+    }
+
+    if (option == OPT_REGISTER_FILES_DIR) {
+      command_line_options.register_files_dir = optarg;
+      continue;
+    }
+
+    if (option == OPT_SUMMARY) {
+      command_line_options.summary = true;
+      continue;
+    }
+
+    if (option == OPT_SUMMARY_METRICS_V2) {
+      command_line_options.summary_metrics_v2 = optarg;
+      continue;
+    }
+
+    if (option == OPT_SUMMARY_METADATA_QUERY) {
+      command_line_options.summary_metadata_query = optarg;
+      continue;
+    }
+
+    if (option == OPT_SUMMARY_SPEC) {
+      command_line_options.summary_specs.emplace_back(optarg);
+      continue;
+    }
+
+    if (option == OPT_SUMMARY_FORMAT) {
+      command_line_options.summary_output = optarg;
       continue;
     }
 
@@ -1046,16 +1172,22 @@ CommandLineOptions ParseCommandLineOptions(int argc, char** argv) {
   }
 
   command_line_options.launch_shell =
-      explicit_interactive || (command_line_options.pre_metrics_path.empty() &&
-                               command_line_options.metric_names.empty() &&
+      explicit_interactive || (command_line_options.metric_v1_names.empty() &&
                                command_line_options.query_file_path.empty() &&
                                command_line_options.query_string.empty() &&
-                               command_line_options.sqlite_file_path.empty());
+                               command_line_options.export_file_path.empty() &&
+                               !command_line_options.summary);
 
   // Only allow non-interactive queries to emit perf data.
   if (!command_line_options.perf_file_path.empty() &&
       command_line_options.launch_shell) {
     PrintUsage(argv);
+    exit(1);
+  }
+
+  if (command_line_options.summary &&
+      !command_line_options.metric_v1_names.empty()) {
+    PERFETTO_ELOG("Cannot specify both metrics v1 and trace summarization");
     exit(1);
   }
 
@@ -1136,25 +1268,18 @@ base::Status LoadTrace(const std::string& trace_file_path, double* size_mb) {
 }
 
 base::Status RunQueries(const std::string& queries, bool expect_output) {
-  base::Status status;
   if (expect_output) {
-    status = RunQueriesAndPrintResult(queries, stdout);
-  } else {
-    status = RunQueriesWithoutOutput(queries);
+    return RunQueriesAndPrintResult(queries, stdout);
   }
-  if (!status.ok()) {
-    return base::ErrStatus("%s", status.c_message());
-  }
-  return base::OkStatus();
+  return RunQueriesWithoutOutput(queries);
 }
 
 base::Status RunQueriesFromFile(const std::string& query_file_path,
                                 bool expect_output) {
   std::string queries;
-  if (!base::ReadFile(query_file_path.c_str(), &queries)) {
+  if (!base::ReadFile(query_file_path, &queries)) {
     return base::ErrStatus("Unable to read file %s", query_file_path.c_str());
   }
-
   return RunQueries(queries, expect_output);
 }
 
@@ -1221,7 +1346,7 @@ base::Status ParseMetricExtensionPaths(
   return CheckForDuplicateMetricExtension(metric_extensions);
 }
 
-base::Status IncludeSqlModule(std::string root, bool allow_override) {
+base::Status IncludeSqlPackage(std::string root, bool allow_override) {
   // Remove trailing slash
   if (root.back() == '/')
     root = root.substr(0, root.length() - 1);
@@ -1229,14 +1354,14 @@ base::Status IncludeSqlModule(std::string root, bool allow_override) {
   if (!base::FileExists(root))
     return base::ErrStatus("Directory %s does not exist.", root.c_str());
 
-  // Get module name
+  // Get package name
   size_t last_slash = root.rfind('/');
   if ((last_slash == std::string::npos) ||
-      (root.find(".") != std::string::npos))
-    return base::ErrStatus("Module path must point to the directory: %s",
+      (root.find('.') != std::string::npos))
+    return base::ErrStatus("Package path must point to the directory: %s",
                            root.c_str());
 
-  std::string module_name = root.substr(last_slash + 1);
+  std::string package_name = root.substr(last_slash + 1);
 
   std::vector<std::string> paths;
   RETURN_IF_ERROR(base::ListFilesRecursive(root, paths));
@@ -1251,18 +1376,16 @@ base::Status IncludeSqlModule(std::string root, bool allow_override) {
       return base::ErrStatus("Cannot read file %s", filename.c_str());
 
     std::string import_key =
-        module_name + "." + sql_modules::GetIncludeKey(path);
-    modules.Insert(module_name, {})
+        package_name + "." + sql_modules::GetIncludeKey(path);
+    modules.Insert(package_name, {})
         .first->push_back({import_key, file_contents});
   }
   for (auto module_it = modules.GetIterator(); module_it; ++module_it) {
-    auto status = g_tp->RegisterSqlPackage({/*name=*/module_it.key(),
-                                            /*files=*/module_it.value(),
-                                            /*allow_override=*/allow_override});
-    if (!status.ok())
-      return status;
+    RETURN_IF_ERROR(
+        g_tp->RegisterSqlPackage({/*name=*/module_it.key(),
+                                  /*files=*/module_it.value(),
+                                  /*allow_override=*/allow_override}));
   }
-
   return base::OkStatus();
 }
 
@@ -1334,10 +1457,8 @@ base::Status LoadMetricExtensionProtos(const std::string& proto_root,
   ExtendPoolWithBinaryDescriptor(
       pool, serialized_filedescset.data(),
       static_cast<int>(serialized_filedescset.size()), {});
-  RETURN_IF_ERROR(g_tp->ExtendMetricsProto(serialized_filedescset.data(),
-                                           serialized_filedescset.size()));
-
-  return base::OkStatus();
+  return g_tp->ExtendMetricsProto(serialized_filedescset.data(),
+                                  serialized_filedescset.size());
 }
 
 base::Status LoadMetricExtensionSql(const std::string& sql_root,
@@ -1361,7 +1482,6 @@ base::Status LoadMetricExtensionSql(const std::string& sql_root,
     RETURN_IF_ERROR(
         g_tp->RegisterMetric(mount_path + file_path, file_contents));
   }
-
   return base::OkStatus();
 }
 
@@ -1446,14 +1566,15 @@ base::Status LoadMetrics(const std::string& raw_metric_names,
   return base::OkStatus();
 }
 
-OutputFormat ParseOutputFormat(const CommandLineOptions& options) {
+MetricV1OutputFormat ParseMetricV1OutputFormat(
+    const CommandLineOptions& options) {
   if (!options.query_file_path.empty())
-    return OutputFormat::kNone;
-  if (options.metric_output == "binary")
-    return OutputFormat::kBinaryProto;
-  if (options.metric_output == "json")
-    return OutputFormat::kJson;
-  return OutputFormat::kTextProto;
+    return MetricV1OutputFormat::kNone;
+  if (options.metric_v1_output == "binary")
+    return MetricV1OutputFormat::kBinaryProto;
+  if (options.metric_v1_output == "json")
+    return MetricV1OutputFormat::kJson;
+  return MetricV1OutputFormat::kTextProto;
 }
 
 base::Status LoadMetricsAndExtensionsSql(
@@ -1476,24 +1597,25 @@ base::Status LoadMetricsAndExtensionsSql(
 }
 
 void PrintShellUsage() {
-  PERFETTO_ELOG(
-      "Available commands:\n"
-      ".quit, .q         Exit the shell.\n"
-      ".help             This text.\n"
-      ".dump FILE        Export the trace as a sqlite database.\n"
-      ".read FILE        Executes the queries in the FILE.\n"
-      ".reset            Destroys all tables/view created by the user.\n"
-      ".load-metrics-sql Reloads SQL from extension and custom metric paths\n"
-      "                  specified in command line args.\n"
-      ".run-metrics      Runs metrics specified in command line args\n"
-      "                  and prints the result.\n"
-      ".width WIDTH      Changes the column width of interactive query\n"
-      "                  output.");
+  PERFETTO_ELOG(R"(
+Available commands:
+.quit, .q         Exit the shell.
+.help             This text.
+.dump FILE        Export the trace as a sqlite database.
+.read FILE        Executes the queries in the FILE.
+.reset            Destroys all tables/view created by the user.
+.load-metrics-sql Reloads SQL from extension and custom metric paths
+                  specified in command line args.
+.run-metrics      Runs metrics specified in command line args
+                  and prints the result.
+.width WIDTH      Changes the column width of interactive query
+                  output.
+)");
 }
 
 struct InteractiveOptions {
   uint32_t column_width;
-  OutputFormat metric_format;
+  MetricV1OutputFormat metric_v1_format;
   std::vector<MetricExtension> extensions;
   std::vector<MetricNameAndPath> metrics;
   const google::protobuf::DescriptorPool* pool;
@@ -1517,7 +1639,8 @@ base::Status StartInteractiveShell(const InteractiveOptions& options) {
       sscanf(line.get() + 1, "%31s %1023s", command, arg);
       if (strcmp(command, "quit") == 0 || strcmp(command, "q") == 0) {
         break;
-      } else if (strcmp(command, "help") == 0) {
+      }
+      if (strcmp(command, "help") == 0) {
         PrintShellUsage();
       } else if (strcmp(command, "dump") == 0 && strlen(arg)) {
         if (!ExportTraceToDatabase(arg).ok())
@@ -1549,7 +1672,7 @@ base::Status StartInteractiveShell(const InteractiveOptions& options) {
         }
 
         base::Status status =
-            RunMetrics(options.metrics, options.metric_format);
+            RunMetrics(options.metrics, options.metric_v1_format);
         if (!status.ok()) {
           fprintf(stderr, "%s\n", status.c_message());
         }
@@ -1571,9 +1694,7 @@ base::Status MaybeWriteMetatrace(const std::string& metatrace_path) {
     return base::OkStatus();
   }
   std::vector<uint8_t> serialized;
-  base::Status status = g_tp->DisableAndReadMetatrace(&serialized);
-  if (!status.ok())
-    return status;
+  RETURN_IF_ERROR(g_tp->DisableAndReadMetatrace(&serialized));
 
   auto file = base::OpenFile(metatrace_path, O_CREAT | O_RDWR | O_TRUNC, 0600);
   if (!file)
@@ -1585,7 +1706,7 @@ base::Status MaybeWriteMetatrace(const std::string& metatrace_path) {
   return base::OkStatus();
 }
 
-base::Status MaybeUpdateSqlModules(const CommandLineOptions& options) {
+base::Status MaybeUpdateSqlPackages(const CommandLineOptions& options) {
   if (!options.override_stdlib_path.empty()) {
     if (!options.dev)
       return base::ErrStatus("Overriding stdlib requires --dev flag");
@@ -1596,22 +1717,72 @@ base::Status MaybeUpdateSqlModules(const CommandLineOptions& options) {
                              status.c_message());
   }
 
-  if (!options.override_sql_module_paths.empty()) {
-    for (const auto& override_sql_module_path :
-         options.override_sql_module_paths) {
-      auto status = IncludeSqlModule(override_sql_module_path, true);
+  if (!options.override_sql_package_paths.empty()) {
+    for (const auto& override_sql_package_path :
+         options.override_sql_package_paths) {
+      auto status = IncludeSqlPackage(override_sql_package_path, true);
       if (!status.ok())
-        return base::ErrStatus("Couldn't override stdlib module: %s",
+        return base::ErrStatus("Couldn't override stdlib package: %s",
                                status.c_message());
     }
   }
 
-  if (!options.sql_module_path.empty()) {
-    auto status = IncludeSqlModule(options.sql_module_path, false);
-    if (!status.ok())
-      return base::ErrStatus("Couldn't add SQL module: %s", status.c_message());
+  if (!options.sql_package_paths.empty()) {
+    for (const auto& add_sql_package_path : options.sql_package_paths) {
+      auto status = IncludeSqlPackage(add_sql_package_path, false);
+      if (!status.ok())
+        return base::ErrStatus("Couldn't add SQL package: %s",
+                               status.c_message());
+    }
   }
   return base::OkStatus();
+}
+
+base::Status RegisterAllFilesInFolder(const std::string& path,
+                                      TraceProcessor& tp) {
+  std::vector<std::string> files;
+  RETURN_IF_ERROR(base::ListFilesRecursive(path, files));
+  for (const std::string& file : files) {
+    std::string file_full_path = path + "/" + file;
+    base::ScopedMmap mmap = base::ReadMmapWholeFile(file_full_path.c_str());
+    if (!mmap.IsValid()) {
+      return base::ErrStatus("Failed to mmap file: %s", file_full_path.c_str());
+    }
+    RETURN_IF_ERROR(tp.RegisterFileContent(
+        file_full_path, TraceBlobView(TraceBlob::FromMmap(std::move(mmap)))));
+  }
+  return base::OkStatus();
+}
+
+TraceSummarySpecBytes::Format GuessSummarySpecFormat(
+    const std::string& path,
+    const std::string& content) {
+  if (base::EndsWith(path, ".pb")) {
+    return TraceSummarySpecBytes::Format::kBinaryProto;
+  }
+  if (base::EndsWith(path, ".textproto")) {
+    return TraceSummarySpecBytes::Format::kTextProto;
+  }
+  std::string_view content_str(content.c_str(),
+                               std::min<size_t>(content.size(), 128));
+  auto fn = [](const char c) { return std::isspace(c) || std::isprint(c); };
+  if (std::all_of(content_str.begin(), content_str.end(), fn)) {
+    return TraceSummarySpecBytes::Format::kTextProto;
+  }
+  return TraceSummarySpecBytes::Format::kBinaryProto;
+}
+
+TraceSummaryOutputSpec::Format GetSummaryOutputFormat(
+    const CommandLineOptions& options) {
+  if (options.summary_output == "text" || options.summary_output == "") {
+    return TraceSummaryOutputSpec::Format::kTextProto;
+  }
+  if (options.summary_output == "binary") {
+    return TraceSummaryOutputSpec::Format::kBinaryProto;
+  }
+  PERFETTO_ELOG("Unknown summary output format %s",
+                options.summary_output.c_str());
+  exit(1);
 }
 
 base::Status TraceProcessorMain(int argc, char** argv) {
@@ -1630,7 +1801,7 @@ base::Status TraceProcessorMain(int argc, char** argv) {
 
   std::vector<MetricExtension> metric_extensions;
   RETURN_IF_ERROR(ParseMetricExtensionPaths(
-      options.dev, options.raw_metric_extensions, metric_extensions));
+      options.dev, options.raw_metric_v1_extensions, metric_extensions));
 
   for (const auto& extension : metric_extensions) {
     config.skip_builtin_metric_paths.push_back(extension.virtual_path());
@@ -1655,12 +1826,7 @@ base::Status TraceProcessorMain(int argc, char** argv) {
   std::unique_ptr<TraceProcessor> tp = TraceProcessor::CreateInstance(config);
   g_tp = tp.get();
 
-  {
-    base::Status status = MaybeUpdateSqlModules(options);
-    if (!status.ok()) {
-      return status;
-    }
-  }
+  RETURN_IF_ERROR(MaybeUpdateSqlPackages(options));
 
   // Enable metatracing as soon as possible.
   if (!options.metatrace_path.empty()) {
@@ -1668,6 +1834,10 @@ base::Status TraceProcessorMain(int argc, char** argv) {
     metatrace_config.override_buffer_size = options.metatrace_buffer_capacity;
     metatrace_config.categories = options.metatrace_categories;
     tp->EnableMetatrace(metatrace_config);
+  }
+
+  if (!options.register_files_dir.empty()) {
+    RETURN_IF_ERROR(RegisterAllFilesInFolder(options.register_files_dir, *tp));
   }
 
   // Descriptor pool used for printing output as textproto. Building on top of
@@ -1707,16 +1877,61 @@ base::Status TraceProcessorMain(int argc, char** argv) {
 #endif
 
   base::TimeNanos t_query_start = base::GetWallTimeNs();
-  if (!options.pre_metrics_path.empty()) {
-    RETURN_IF_ERROR(RunQueriesFromFile(options.pre_metrics_path, false));
+  if (!options.pre_metrics_v1_path.empty()) {
+    RETURN_IF_ERROR(RunQueriesFromFile(options.pre_metrics_v1_path, false));
   }
 
+  // Trace summarization
+  if (options.summary) {
+    PERFETTO_CHECK(options.metric_v1_names.empty());
+
+    std::vector<std::string> spec_content;
+    spec_content.reserve(options.summary_specs.size());
+    for (const auto& s : options.summary_specs) {
+      spec_content.emplace_back();
+      if (!base::ReadFile(s, &spec_content.back())) {
+        return base::ErrStatus("Unable to read summary spec file %s",
+                               s.c_str());
+      }
+    }
+
+    std::vector<TraceSummarySpecBytes> specs;
+    specs.reserve(options.summary_specs.size());
+    for (uint32_t i = 0; i < options.summary_specs.size(); ++i) {
+      specs.emplace_back(TraceSummarySpecBytes{
+          reinterpret_cast<const uint8_t*>(spec_content[i].data()),
+          spec_content[i].size(),
+          GuessSummarySpecFormat(options.summary_specs[i], spec_content[i]),
+      });
+    }
+
+    TraceSummaryComputationSpec computation_config;
+    computation_config.v2_metric_ids =
+        base::SplitString(options.summary_metrics_v2, ",");
+    computation_config.metadata_query_id =
+        options.summary_metadata_query.empty()
+            ? std::nullopt
+            : std::make_optional(options.summary_metadata_query);
+
+    TraceSummaryOutputSpec output_spec;
+    output_spec.format = GetSummaryOutputFormat(options);
+
+    std::vector<uint8_t> output;
+    RETURN_IF_ERROR(
+        g_tp->Summarize(computation_config, specs, &output, output_spec));
+    if (options.query_file_path.empty()) {
+      fwrite(output.data(), sizeof(char), output.size(), stdout);
+    }
+  }
+
+  // v1 metrics.
   std::vector<MetricNameAndPath> metrics;
-  if (!options.metric_names.empty()) {
-    RETURN_IF_ERROR(LoadMetrics(options.metric_names, pool, metrics));
+  if (!options.metric_v1_names.empty()) {
+    PERFETTO_CHECK(!options.summary);
+    RETURN_IF_ERROR(LoadMetrics(options.metric_v1_names, pool, metrics));
   }
 
-  OutputFormat metric_format = ParseOutputFormat(options);
+  MetricV1OutputFormat metric_format = ParseMetricV1OutputFormat(options);
   if (!metrics.empty()) {
     RETURN_IF_ERROR(RunMetrics(metrics, metric_format));
   }
@@ -1741,8 +1956,8 @@ base::Status TraceProcessorMain(int argc, char** argv) {
 
   base::TimeNanos t_query = base::GetWallTimeNs() - t_query_start;
 
-  if (!options.sqlite_file_path.empty()) {
-    RETURN_IF_ERROR(ExportTraceToDatabase(options.sqlite_file_path));
+  if (!options.export_file_path.empty()) {
+    RETURN_IF_ERROR(ExportTraceToDatabase(options.export_file_path));
   }
 
   if (options.enable_httpd) {
@@ -1788,8 +2003,7 @@ base::Status TraceProcessorMain(int argc, char** argv) {
 
 }  // namespace
 
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor
 
 int main(int argc, char** argv) {
   auto status = perfetto::trace_processor::TraceProcessorMain(argc, argv);

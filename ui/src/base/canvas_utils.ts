@@ -92,85 +92,46 @@ export function drawIncompleteSlice(
   ctx.fillStyle = fillStyle;
 }
 
-export function drawTrackHoverTooltip(
+/**
+ * Clip a canvas using a rect-like object.
+ *
+ * @param ctx - The canvas context to clip.
+ * @param rect - The position and dimensions of the rect to clip.
+ */
+export function canvasClip(
   ctx: CanvasRenderingContext2D,
-  pos: Point2D,
-  trackSize: Size2D,
-  text: string,
-  text2?: string,
-) {
-  ctx.font = '10px Roboto Condensed';
-  ctx.textBaseline = 'middle';
-  ctx.textAlign = 'left';
+  rect: Point2D & Size2D,
+): void;
 
-  // TODO(hjd): Avoid measuring text all the time (just use monospace?)
-  const textMetrics = ctx.measureText(text);
-  const text2Metrics = ctx.measureText(text2 ?? '');
-
-  // Padding on each side of the box containing the tooltip:
-  const paddingPx = 4;
-
-  // Figure out the width of the tool tip box:
-  let width = Math.max(textMetrics.width, text2Metrics.width);
-  width += paddingPx * 2;
-
-  // and the height:
-  let height = 0;
-  height += textMetrics.fontBoundingBoxAscent;
-  height += textMetrics.fontBoundingBoxDescent;
-  if (text2 !== undefined) {
-    height += text2Metrics.fontBoundingBoxAscent;
-    height += text2Metrics.fontBoundingBoxDescent;
-  }
-  height += paddingPx * 2;
-
-  let x = pos.x;
-  let y = pos.y;
-
-  // Move box to the top right of the mouse:
-  x += 10;
-  y -= 10;
-
-  // Ensure the box is on screen:
-  const endPx = trackSize.width;
-  if (x + width > endPx) {
-    x -= x + width - endPx;
-  }
-  if (y < 0) {
-    y = 0;
-  }
-  if (y + height > trackSize.height) {
-    y -= y + height - trackSize.height;
-  }
-
-  // Draw everything:
-  ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
-  ctx.fillRect(x, y, width, height);
-
-  ctx.fillStyle = 'hsl(200, 50%, 40%)';
-  ctx.fillText(
-    text,
-    x + paddingPx,
-    y + paddingPx + textMetrics.fontBoundingBoxAscent,
-  );
-  if (text2 !== undefined) {
-    const yOffsetPx =
-      textMetrics.fontBoundingBoxAscent +
-      textMetrics.fontBoundingBoxDescent +
-      text2Metrics.fontBoundingBoxAscent;
-    ctx.fillText(text2, x + paddingPx, y + paddingPx + yOffsetPx);
-  }
-}
-
+/**
+ * Clip a canvas using a separate x, y, width, height values.
+ *
+ * @param ctx - The canvas context to clip.
+ */
 export function canvasClip(
   ctx: CanvasRenderingContext2D,
   x: number,
   y: number,
   w: number,
   h: number,
+): void;
+
+// This function can either take individual x, y, w, h parameters to define the
+// rect, or x can be a rect-like object.
+export function canvasClip(
+  ctx: CanvasRenderingContext2D,
+  x: number | (Point2D & Size2D),
+  y?: number,
+  w?: number,
+  h?: number,
 ): void {
   ctx.beginPath();
-  ctx.rect(x, y, w, h);
+  if (typeof x === 'number') {
+    // TypeScript ensures y, w, and h are defined here
+    ctx.rect(x, y!, w!, h!);
+  } else {
+    ctx.rect(x.x, x.y, x.width, x.height);
+  }
   ctx.clip();
 }
 

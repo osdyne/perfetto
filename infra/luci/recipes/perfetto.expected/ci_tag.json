@@ -12,7 +12,7 @@
       "/path/to/tmp/json",
       "ensure-directory",
       "--mode",
-      "0777",
+      "0o777",
       "[CACHE]/builder/perfetto"
     ],
     "infra_step": true,
@@ -62,7 +62,8 @@
       "git",
       "fetch",
       "--tags",
-      "https://android.googlesource.com/platform/external/perfetto",
+      "--force",
+      "https://chromium.googlesource.com/external/github.com/google/perfetto",
       "refs/tags/v13.0"
     ],
     "cwd": "[CACHE]/builder/perfetto",
@@ -295,6 +296,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -330,10 +332,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -405,6 +410,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -440,10 +446,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -515,6 +524,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -550,10 +560,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -625,6 +638,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -660,10 +674,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -735,6 +752,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -770,10 +788,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -845,6 +866,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -880,10 +902,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1048,6 +1073,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1083,10 +1109,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1158,6 +1187,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1193,10 +1223,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1268,6 +1301,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1303,10 +1337,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1378,6 +1415,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1413,10 +1451,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1488,6 +1529,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1523,10 +1565,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1598,6 +1643,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1633,10 +1679,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1801,6 +1850,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1836,10 +1886,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1911,6 +1964,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -1946,10 +2000,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -2021,6 +2078,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -2056,10 +2114,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -2131,6 +2192,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -2166,10 +2228,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -2241,6 +2306,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -2276,10 +2342,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -2351,6 +2420,7 @@
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"
@@ -2386,10 +2456,13 @@
       "git_revision:",
       "-tag",
       "git_tag:v13.0",
+      "-metadata",
+      "build_id:8945511751514863184",
       "-json-output",
       "/path/to/tmp/json"
     ],
     "cwd": "[CACHE]/builder/perfetto",
+    "infra_step": true,
     "luci_context": {
       "realm": {
         "name": "perfetto:ci"

@@ -14,15 +14,15 @@
 -- limitations under the License.
 
 -- Contains ARM Statistical Profiling Extension records
-CREATE PERFETTO VIEW linux_perf_spe_record(
+CREATE PERFETTO VIEW linux_perf_spe_record (
   -- Timestap when the operation was sampled
-  ts LONG,
+  ts TIMESTAMP,
   -- Thread the operation executed in
-  utid INT,
+  utid JOINID(thread.id),
   -- Exception level the instruction was executed in
   exception_level STRING,
   -- Instruction virtual address
-  instruction_frame_id INT,
+  instruction_frame_id LONG,
   -- Type of operation sampled
   operation STRING,
   -- The virtual address accessed by the operation (0 if no memory access was
@@ -33,13 +33,13 @@ CREATE PERFETTO VIEW linux_perf_spe_record(
   data_physical_address LONG,
   -- Cycle count from the operation being dispatched for issue to the operation
   -- being complete.
-  total_latency INT,
+  total_latency LONG,
   -- Cycle count from the operation being dispatched for issue to the operation
   -- being issued for execution.
-  issue_latency INT,
+  issue_latency LONG,
   -- Cycle count from a virtual address being passed to the MMU for translation
   -- to the result of the translation being available.
-  translation_latency INT,
+  translation_latency LONG,
   -- Where the data returned for a load operation was sourced
   data_source STRING,
   -- Operation generated an exception
@@ -102,24 +102,104 @@ SELECT
   issue_latency,
   translation_latency,
   data_source,
-  (events_bitmask & (1 << 0)) <> 0 AS exception_gen,
-  (events_bitmask & (1 << 1)) <> 0 AS retired,
-  (events_bitmask & (1 << 2)) <> 0 AS l1d_access,
-  (events_bitmask & (1 << 3)) <> 0 AS l1d_refill,
-  (events_bitmask & (1 << 4)) <> 0 AS tlb_access,
-  (events_bitmask & (1 << 5)) <> 0 AS tlb_refill,
-  (events_bitmask & (1 << 6)) <> 0 AS not_taken,
-  (events_bitmask & (1 << 7)) <> 0 AS mispred,
-  (events_bitmask & (1 << 8)) <> 0 AS llc_access,
-  (events_bitmask & (1 << 9)) <> 0 AS llc_refill,
-  (events_bitmask & (1 << 10)) <> 0 AS remote_access,
-  (events_bitmask & (1 << 11)) <> 0 AS alignment,
-  (events_bitmask & (1 << 17)) <> 0 AS tme_transaction,
-  (events_bitmask & (1 << 17)) <> 0 AS sve_partial_pred,
-  (events_bitmask & (1 << 18)) <> 0 AS sve_empty_pred,
-  (events_bitmask & (1 << 19)) <> 0 AS l2d_access,
-  (events_bitmask & (1 << 20)) <> 0 AS l2d_hit,
-  (events_bitmask & (1 << 21)) <> 0 AS cache_data_modified,
-  (events_bitmask & (1 << 22)) <> 0 AS recenty_fetched,
-  (events_bitmask & (1 << 23)) <> 0 AS data_snooped
+  (
+    events_bitmask & (
+      1 << 0
+    )
+  ) != 0 AS exception_gen,
+  (
+    events_bitmask & (
+      1 << 1
+    )
+  ) != 0 AS retired,
+  (
+    events_bitmask & (
+      1 << 2
+    )
+  ) != 0 AS l1d_access,
+  (
+    events_bitmask & (
+      1 << 3
+    )
+  ) != 0 AS l1d_refill,
+  (
+    events_bitmask & (
+      1 << 4
+    )
+  ) != 0 AS tlb_access,
+  (
+    events_bitmask & (
+      1 << 5
+    )
+  ) != 0 AS tlb_refill,
+  (
+    events_bitmask & (
+      1 << 6
+    )
+  ) != 0 AS not_taken,
+  (
+    events_bitmask & (
+      1 << 7
+    )
+  ) != 0 AS mispred,
+  (
+    events_bitmask & (
+      1 << 8
+    )
+  ) != 0 AS llc_access,
+  (
+    events_bitmask & (
+      1 << 9
+    )
+  ) != 0 AS llc_refill,
+  (
+    events_bitmask & (
+      1 << 10
+    )
+  ) != 0 AS remote_access,
+  (
+    events_bitmask & (
+      1 << 11
+    )
+  ) != 0 AS alignment,
+  (
+    events_bitmask & (
+      1 << 17
+    )
+  ) != 0 AS tme_transaction,
+  (
+    events_bitmask & (
+      1 << 17
+    )
+  ) != 0 AS sve_partial_pred,
+  (
+    events_bitmask & (
+      1 << 18
+    )
+  ) != 0 AS sve_empty_pred,
+  (
+    events_bitmask & (
+      1 << 19
+    )
+  ) != 0 AS l2d_access,
+  (
+    events_bitmask & (
+      1 << 20
+    )
+  ) != 0 AS l2d_hit,
+  (
+    events_bitmask & (
+      1 << 21
+    )
+  ) != 0 AS cache_data_modified,
+  (
+    events_bitmask & (
+      1 << 22
+    )
+  ) != 0 AS recenty_fetched,
+  (
+    events_bitmask & (
+      1 << 23
+    )
+  ) != 0 AS data_snooped
 FROM __intrinsic_spe_record;

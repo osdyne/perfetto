@@ -23,6 +23,7 @@
 #include <map>
 #include <numeric>
 #include <optional>
+#include <string>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -109,31 +110,25 @@ base::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
   // Assert that the packet is parsed using the right instance of reader.
   PERFETTO_DCHECK(decoder.has_machine_id() == !!context_->machine_id());
 
-  const uint32_t seq_id = decoder.trusted_packet_sequence_id();
-  auto* state = GetIncrementalStateForPacketSequence(seq_id);
+  uint32_t seq_id = decoder.trusted_packet_sequence_id();
+  auto [scoped_state, inserted] = sequence_state_.Insert(seq_id, {});
+  if (decoder.has_trusted_packet_sequence_id()) {
+    if (!inserted && decoder.previous_packet_dropped()) {
+      ++scoped_state->previous_packet_dropped_count;
+    }
+  }
 
   if (decoder.first_packet_on_sequence()) {
     HandleFirstPacketOnSequence(seq_id);
   }
 
   uint32_t sequence_flags = decoder.sequence_flags();
-
   if (decoder.incremental_state_cleared() ||
       sequence_flags &
           protos::pbzero::TracePacket::SEQ_INCREMENTAL_STATE_CLEARED) {
     HandleIncrementalStateCleared(decoder);
   } else if (decoder.previous_packet_dropped()) {
     HandlePreviousPacketDropped(decoder);
-  }
-
-  uint32_t sequence_id = decoder.trusted_packet_sequence_id();
-  if (sequence_id) {
-    auto [data_loss, inserted] =
-        packet_sequence_data_loss_.Insert(sequence_id, 0);
-
-    if (!inserted && decoder.previous_packet_dropped()) {
-      *data_loss += 1;
-    }
   }
 
   // It is important that we parse defaults before parsing other fields such as
@@ -149,7 +144,7 @@ base::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
   }
 
   if (decoder.has_clock_snapshot()) {
-    return ParseClockSnapshot(decoder.clock_snapshot(), sequence_id);
+    return ParseClockSnapshot(decoder.clock_snapshot(), seq_id);
   }
 
   if (decoder.has_trace_stats()) {
@@ -171,6 +166,7 @@ base::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
     return ParseExtensionDescriptor(decoder.extension_descriptor());
   }
 
+  auto* state = GetIncrementalStateForPacketSequence(seq_id);
   if (decoder.sequence_flags() &
       protos::pbzero::TracePacket::SEQ_NEEDS_INCREMENTAL_STATE) {
     if (!seq_id) {
@@ -179,6 +175,7 @@ base::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
           "TraceWriter's sequence_id is zero (the service is "
           "probably too old)");
     }
+    scoped_state->needs_incremental_state_total++;
 
     if (!state->IsIncrementalStateValid()) {
       if (context_->content_analyzer) {
@@ -189,10 +186,29 @@ base::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
                                 invalid_incremental_state_key_id_);
         PacketAnalyzer::Get(context_)->ProcessPacket(packet, annotation);
       }
+      scoped_state->needs_incremental_state_skipped++;
       context_->storage->IncrementStats(stats::tokenizer_skipped_packets);
       return base::OkStatus();
     }
   }
+
+  if (context_->content_analyzer && !decoder.has_track_event()) {
+    PacketAnalyzer::Get(context_)->ProcessPacket(packet, {});
+  }
+
+  if (decoder.has_trace_config()) {
+    ParseTraceConfig(decoder.trace_config());
+  }
+
+  return TimestampTokenizeAndPushToSorter(std::move(packet));
+}
+
+base::Status ProtoTraceReader::TimestampTokenizeAndPushToSorter(
+    TraceBlobView packet) {
+  protos::pbzero::TracePacket::Decoder decoder(packet.data(), packet.length());
+
+  uint32_t seq_id = decoder.trusted_packet_sequence_id();
+  auto* state = GetIncrementalStateForPacketSequence(seq_id);
 
   protos::pbzero::TracePacketDefaults::Decoder* defaults =
       state->current_generation()->GetTracePacketDefaults();
@@ -234,6 +250,19 @@ base::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
         converted_clock_id =
             ClockTracker::SequenceToGlobalClock(seq_id, timestamp_clock_id);
       }
+      // If the clock tracker is missing a path to trace time for this clock
+      // then try to save this packet for processing later when a path exists.
+      if (!context_->clock_tracker->HasPathToTraceTime(converted_clock_id)) {
+        // We need to switch to full sorting mode to ensure that packets with
+        // missing timestamp are handled correctly. Don't save the packet unless
+        // switching to full sorting mode succeeded.
+        if (!received_eof_ && context_->sorter->SetSortingMode(
+                                  TraceSorter::SortingMode::kFullSort)) {
+          eof_deferred_packets_.push_back(std::move(packet));
+          return base::OkStatus();
+        }
+        // Fall-through and let ToTraceTime fail below.
+      }
       auto trace_ts =
           context_->clock_tracker->ToTraceTime(converted_clock_id, timestamp);
       if (!trace_ts.ok()) {
@@ -249,10 +278,6 @@ base::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
     timestamp = std::max(latest_timestamp_, context_->sorter->max_timestamp());
   }
   latest_timestamp_ = std::max(timestamp, latest_timestamp_);
-
-  if (context_->content_analyzer && !decoder.has_track_event()) {
-    PacketAnalyzer::Get(context_)->ProcessPacket(packet, {});
-  }
 
   auto& modules = context_->modules_by_field;
   for (uint32_t field_id = 1; field_id < modules.size(); ++field_id) {
@@ -273,10 +298,6 @@ base::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
     }
   }
 
-  if (decoder.has_trace_config()) {
-    ParseTraceConfig(decoder.trace_config());
-  }
-
   // Use parent data and length because we want to parse this again
   // later to get the exact type of the packet.
   context_->sorter->PushTracePacket(timestamp, state->current_generation(),
@@ -286,13 +307,20 @@ base::Status ProtoTraceReader::ParsePacket(TraceBlobView packet) {
 }
 
 void ProtoTraceReader::ParseTraceConfig(protozero::ConstBytes blob) {
-  protos::pbzero::TraceConfig::Decoder trace_config(blob);
-  if (trace_config.write_into_file() && !trace_config.flush_period_ms()) {
-    PERFETTO_ELOG(
-        "It is strongly recommended to have flush_period_ms set when "
-        "write_into_file is turned on. This trace will be loaded fully "
-        "into memory before sorting which increases the likelihood of "
-        "OOMs.");
+  using Config = protos::pbzero::TraceConfig;
+  Config::Decoder trace_config(blob);
+  if (trace_config.write_into_file()) {
+    if (!trace_config.flush_period_ms()) {
+      context_->storage->IncrementStats(stats::config_write_into_file_no_flush);
+    }
+    int i = 0;
+    for (auto it = trace_config.buffers(); it; ++it, ++i) {
+      Config::BufferConfig::Decoder buf(*it);
+      if (buf.fill_policy() == Config::BufferConfig::FillPolicy::DISCARD) {
+        context_->storage->IncrementIndexedStats(
+            stats::config_write_into_file_discard, i);
+      }
+    }
   }
 }
 
@@ -390,7 +418,7 @@ base::Status ProtoTraceReader::ParseClockSnapshot(ConstBytes blob,
       if (!seq_id) {
         return base::ErrStatus(
             "ClockSnapshot packet is specifying a sequence-scoped clock id "
-            "(%" PRIu64 ") but the TracePacket sequence_id is zero",
+            "(%" PRId64 ") but the TracePacket sequence_id is zero",
             clock_id);
       }
       clock_id = ClockTracker::SequenceToGlobalClock(seq_id, clk.clock_id());
@@ -631,6 +659,14 @@ base::Status ProtoTraceReader::ParseServiceEvent(int64_t ts, ConstBytes blob) {
               context_->storage->InternString(base::StringView(formatted))));
     }
   }
+  if (tse.has_clone_started()) {
+    context_->storage->SetStats(stats::traced_clone_started_timestamp_ns, ts);
+  }
+  if (tse.has_buffer_cloned()) {
+    context_->storage->SetIndexedStats(
+        stats::traced_buf_clone_done_timestamp_ns,
+        static_cast<int>(tse.buffer_cloned()), ts);
+  }
   return base::OkStatus();
 }
 
@@ -735,25 +771,38 @@ void ProtoTraceReader::ParseTraceStats(ConstBytes blob) {
         static_cast<int64_t>(buf.trace_writer_packet_loss()));
   }
 
-  base::FlatHashMap<int32_t, int64_t> data_loss_per_buffer;
-
+  struct BufStats {
+    uint32_t packet_loss = 0;
+    uint32_t incremental_sequences_dropped = 0;
+  };
+  base::FlatHashMap<int32_t, BufStats> stats_per_buffer;
   for (auto it = evt.writer_stats(); it; ++it) {
-    protos::pbzero::TraceStats::WriterStats::Decoder writer(*it);
-    auto* data_loss = packet_sequence_data_loss_.Find(
-        static_cast<uint32_t>(writer.sequence_id()));
-    if (data_loss) {
-      data_loss_per_buffer[static_cast<int32_t>(writer.buffer())] +=
-          static_cast<int64_t>(*data_loss);
+    protos::pbzero::TraceStats::WriterStats::Decoder w(*it);
+    auto seq_id = static_cast<uint32_t>(w.sequence_id());
+    if (auto* s = sequence_state_.Find(seq_id)) {
+      auto& stats = stats_per_buffer[static_cast<int32_t>(w.buffer())];
+      stats.packet_loss += s->previous_packet_dropped_count;
+      stats.incremental_sequences_dropped +=
+          s->needs_incremental_state_skipped > 0 &&
+          s->needs_incremental_state_skipped ==
+              s->needs_incremental_state_total;
     }
   }
 
-  for (auto it = data_loss_per_buffer.GetIterator(); it; ++it) {
+  for (auto it = stats_per_buffer.GetIterator(); it; ++it) {
+    auto& v = it.value();
     storage->SetIndexedStats(stats::traced_buf_sequence_packet_loss, it.key(),
-                             it.value());
+                             v.packet_loss);
+    storage->SetIndexedStats(stats::traced_buf_incremental_sequences_dropped,
+                             it.key(), v.incremental_sequences_dropped);
   }
 }
 
 base::Status ProtoTraceReader::NotifyEndOfFile() {
+  received_eof_ = true;
+  for (auto& packet : eof_deferred_packets_) {
+    RETURN_IF_ERROR(TimestampTokenizeAndPushToSorter(std::move(packet)));
+  }
   return base::OkStatus();
 }
 

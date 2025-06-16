@@ -31,7 +31,7 @@
 #include "perfetto/ext/base/status_or.h"
 #include "src/trace_processor/containers/implicit_segment_forest.h"
 #include "src/trace_processor/sqlite/bindings/sqlite_result.h"
-#include "src/trace_processor/sqlite/module_lifecycle_manager.h"
+#include "src/trace_processor/sqlite/module_state_manager.h"
 #include "src/trace_processor/sqlite/sql_source.h"
 #include "src/trace_processor/sqlite/sqlite_utils.h"
 
@@ -102,8 +102,7 @@ int CounterMipmapOperator::Create(sqlite3* db,
   }
   do {
     int64_t ts = sqlite3_column_int64(res->stmt.sqlite_stmt(), 0);
-    auto value =
-        static_cast<float>(sqlite3_column_double(res->stmt.sqlite_stmt(), 1));
+    auto value = sqlite3_column_double(res->stmt.sqlite_stmt(), 1);
     state->timestamps.push_back(ts);
     state->forest.Push(Counter{value, value});
   } while (res->stmt.Step());
@@ -113,7 +112,7 @@ int CounterMipmapOperator::Create(sqlite3* db,
   }
 
   std::unique_ptr<Vtab> vtab_res = std::make_unique<Vtab>();
-  vtab_res->state = ctx->manager.OnCreate(argv, std::move(state));
+  vtab_res->state = ctx->OnCreate(argc, argv, std::move(state));
   *vtab = vtab_res.release();
   return SQLITE_OK;
 }
@@ -136,7 +135,7 @@ int CounterMipmapOperator::Connect(sqlite3* db,
   }
   auto* ctx = GetContext(raw_ctx);
   std::unique_ptr<Vtab> res = std::make_unique<Vtab>();
-  res->state = ctx->manager.OnConnect(argv);
+  res->state = ctx->OnConnect(argc, argv);
   *vtab = res.release();
   return SQLITE_OK;
 }
@@ -184,15 +183,12 @@ int CounterMipmapOperator::Filter(sqlite3_vtab_cursor* cursor,
   int64_t start_ts = sqlite3_value_int64(argv[0]);
   int64_t end_ts = sqlite3_value_int64(argv[1]);
   int64_t step_ts = sqlite3_value_int64(argv[2]);
-  if (start_ts == end_ts) {
-    return sqlite::utils::SetError(t, "counter_mipmap: empty range provided");
-  }
 
   c->index = 0;
   c->counters.clear();
 
   // If there is a counter value before the start of this window, include it in
-  // the aggregation as well becaue it contributes to what should be rendered
+  // the aggregation as well because it contributes to what should be rendered
   // here.
   auto ts_lb = std::lower_bound(state->timestamps.begin(),
                                 state->timestamps.end(), start_ts);
@@ -239,10 +235,10 @@ int CounterMipmapOperator::Column(sqlite3_vtab_cursor* cursor,
   const auto& res = c->counters[c->index];
   switch (N) {
     case ColumnIndex::kMinValue:
-      sqlite::result::Double(ctx, static_cast<double>(res.min_max_counter.min));
+      sqlite::result::Double(ctx, res.min_max_counter.min);
       return SQLITE_OK;
     case ColumnIndex::kMaxValue:
-      sqlite::result::Double(ctx, static_cast<double>(res.min_max_counter.max));
+      sqlite::result::Double(ctx, res.min_max_counter.max);
       return SQLITE_OK;
     case ColumnIndex::kLastTs:
       sqlite::result::Long(ctx, res.last_ts);
@@ -250,7 +246,7 @@ int CounterMipmapOperator::Column(sqlite3_vtab_cursor* cursor,
     case ColumnIndex::kLastValue:
       PERFETTO_DCHECK(
           std::equal_to<>()(res.last_counter.min, res.last_counter.max));
-      sqlite::result::Double(ctx, static_cast<double>(res.last_counter.min));
+      sqlite::result::Double(ctx, res.last_counter.min);
       return SQLITE_OK;
     default:
       return sqlite::utils::SetError(t, "Bad column");

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 import {time, duration} from '../base/time';
-import {SliceSqlId} from '../trace_processor/sql_utils/core_types';
+import {SliceSqlId} from '../components/sql_utils/core_types';
 
 export interface Flow {
   id: number;
@@ -31,6 +31,7 @@ export interface Flow {
 
 export interface FlowPoint {
   trackId: number;
+  trackUri?: string;
 
   sliceName: string;
   sliceCategory: string;
@@ -53,3 +54,18 @@ export interface FlowPoint {
 }
 
 export type FlowDirection = 'Forward' | 'Backward';
+
+export const ALL_CATEGORIES = '_all_';
+
+export function getFlowCategories(flow: Flow): string[] {
+  const categories: string[] = [];
+  // v1 flows have their own categories
+  if (flow.category) {
+    categories.push(...flow.category.split(','));
+    return categories;
+  }
+  const beginCats = flow.begin.sliceCategory.split(',');
+  const endCats = flow.end.sliceCategory.split(',');
+  categories.push(...new Set([...beginCats, ...endCats]));
+  return categories;
+}

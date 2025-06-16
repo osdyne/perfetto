@@ -17,41 +17,49 @@
 #include "src/trace_processor/importers/proto/winscope/shell_transitions_parser.h"
 #include "src/trace_processor/importers/proto/winscope/shell_transitions_tracker.h"
 
+#include "perfetto/ext/base/base64.h"
 #include "protos/perfetto/trace/android/shell_transition.pbzero.h"
 #include "src/trace_processor/importers/common/args_tracker.h"
 #include "src/trace_processor/importers/proto/args_parser.h"
-#include "src/trace_processor/importers/proto/winscope/winscope.descriptor.h"
 #include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
+#include "src/trace_processor/util/winscope_proto_mapping.h"
 
 namespace perfetto {
 namespace trace_processor {
 
 ShellTransitionsParser::ShellTransitionsParser(TraceProcessorContext* context)
-    : context_(context), args_parser_{pool_} {
-  pool_.AddFromFileDescriptorSet(kWinscopeDescriptor.data(),
-                                 kWinscopeDescriptor.size());
-}
+    : context_(context), args_parser_{*context->descriptor_pool_} {}
 
 void ShellTransitionsParser::ParseTransition(protozero::ConstBytes blob) {
   protos::pbzero::ShellTransition::Decoder transition(blob);
 
-  auto row_id =
-      ShellTransitionsTracker::GetOrCreate(context_)->InternTransition(
-          transition.id());
+  // Store the raw proto and its ID in a separate table to handle
+  // transitions received over multiple packets for Winscope trace search.
+  tables::WindowManagerShellTransitionProtosTable::Row row;
+  row.transition_id = transition.id();
+  row.base64_proto_id = context_->storage->mutable_string_pool()
+                            ->InternString(base::StringView(
+                                base::Base64Encode(blob.data, blob.size)))
+                            .raw_id();
+  context_->storage->mutable_window_manager_shell_transition_protos_table()
+      ->Insert(row);
 
-  auto* window_manager_shell_transitions_table =
-      context_->storage->mutable_window_manager_shell_transitions_table();
-  auto row = window_manager_shell_transitions_table->FindById(row_id).value();
+  // Track transition args as the come in through different packets
+  auto transition_tracker = ShellTransitionsTracker::GetOrCreate(context_);
 
   if (transition.has_dispatch_time_ns()) {
-    row.set_ts(transition.dispatch_time_ns());
+    transition_tracker->SetTimestamp(transition.id(),
+                                     transition.dispatch_time_ns());
   }
 
-  auto inserter = context_->args_tracker->AddArgsTo(row_id);
+  auto inserter = transition_tracker->AddArgsTo(transition.id());
   ArgsParser writer(/*timestamp=*/0, inserter, *context_->storage.get());
   base::Status status = args_parser_.ParseMessage(
-      blob, kShellTransitionsProtoName, nullptr /* parse all fields */, writer);
+      blob,
+      *util::winscope_proto_mapping::GetProtoName(
+          tables::WindowManagerShellTransitionProtosTable::Name()),
+      nullptr /* parse all fields */, writer);
 
   if (!status.ok()) {
     context_->storage->IncrementStats(
@@ -72,6 +80,10 @@ void ShellTransitionsParser::ParseHandlerMappings(protozero::ConstBytes blob) {
     row.handler_id = mapping.id();
     row.handler_name = context_->storage->InternString(
         base::StringView(mapping.name().ToStdString()));
+    row.base64_proto_id = context_->storage->mutable_string_pool()
+                              ->InternString(base::StringView(
+                                  base::Base64Encode(blob.data, blob.size)))
+                              .raw_id();
     shell_handlers_table->Insert(row);
   }
 }

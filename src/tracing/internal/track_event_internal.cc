@@ -424,7 +424,7 @@ void TrackEventInternal::ResetIncrementalState(
     }
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_MAC)
-    // Emit a MacOS point-of-interest signpost to synchonize Mac profiler time
+    // Emit a MacOS point-of-interest signpost to synchronize Mac profiler time
     // with boot time.
     // TODO(leszeks): Consider allowing synchronization against other clocks
     // than boot time.
@@ -468,9 +468,11 @@ void TrackEventInternal::ResetIncrementalState(
   // trace points won't explicitly reference it. We also write the process
   // descriptor from every thread that writes trace events to ensure it gets
   // emitted at least once.
+  incr_state->seen_tracks.insert(default_track.uuid);
   WriteTrackDescriptor(default_track, trace_writer, incr_state, tls_state,
                        sequence_timestamp);
 
+  incr_state->seen_tracks.insert(ProcessTrack::Current().uuid);
   WriteTrackDescriptor(ProcessTrack::Current(), trace_writer, incr_state,
                        tls_state, sequence_timestamp);
 

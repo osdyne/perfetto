@@ -58,6 +58,7 @@ export const ROUTE_SCHEMA = z
     enablePlugins: z.string().optional().catch(undefined),
 
     // Deep link support
+    table: z.string().optional().catch(undefined),
     ts: z.string().optional().catch(undefined),
     dur: z.string().optional().catch(undefined),
     tid: z.string().optional().catch(undefined),
@@ -66,6 +67,9 @@ export const ROUTE_SCHEMA = z
     visStart: z.string().optional().catch(undefined),
     visEnd: z.string().optional().catch(undefined),
   })
+
+  // Allow arbitrary values to pass through, these may be forwarded to plugins.
+  .catchall(z.union([z.number(), z.string(), z.boolean()]))
   // default({}) ensures at compile-time that every entry is either optional or
   // has a default value.
   .default({});

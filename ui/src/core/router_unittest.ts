@@ -14,48 +14,6 @@
 
 import {Router} from './router';
 
-const mockComponent = {
-  view() {},
-};
-
-describe('Router#resolve', () => {
-  beforeEach(() => {
-    window.location.hash = '';
-  });
-
-  test('Default route must be defined', () => {
-    expect(() => new Router({'/a': mockComponent})).toThrow();
-  });
-
-  test('Resolves empty route to default component', () => {
-    const router = new Router({'/': mockComponent});
-    window.location.hash = '';
-    expect(router.resolve().tag).toBe(mockComponent);
-  });
-
-  test('Resolves subpage route to component of main page', () => {
-    const nonDefaultComponent = {view() {}};
-    const router = new Router({
-      '/': mockComponent,
-      '/a': nonDefaultComponent,
-    });
-    window.location.hash = '#!/a/subpage';
-    expect(router.resolve().tag).toBe(nonDefaultComponent);
-    expect(router.resolve().attrs.subpage).toBe('/subpage');
-  });
-
-  test('Pass empty subpage if not found in URL', () => {
-    const nonDefaultComponent = {view() {}};
-    const router = new Router({
-      '/': mockComponent,
-      '/a': nonDefaultComponent,
-    });
-    window.location.hash = '#!/a';
-    expect(router.resolve().tag).toBe(nonDefaultComponent);
-    expect(router.resolve().attrs.subpage).toBe('');
-  });
-});
-
 describe('Router.parseUrl', () => {
   // Can parse arguments from the search string.
   test('Search parsing', () => {

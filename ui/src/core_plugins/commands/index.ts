@@ -14,18 +14,17 @@
 
 import {Time, time} from '../../base/time';
 import {exists} from '../../base/utils';
-import {Actions} from '../../common/actions';
-import {globals} from '../../frontend/globals';
 import {openInOldUIWithSizeCheck} from '../../frontend/legacy_trace_viewer';
 import {Trace} from '../../public/trace';
 import {App} from '../../public/app';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {PerfettoPlugin} from '../../public/plugin';
 import {
   isLegacyTrace,
   openFileWithLegacyTraceViewer,
 } from '../../frontend/legacy_trace_viewer';
 import {AppImpl} from '../../core/app_impl';
-import {addQueryResultsTab} from '../../public/lib/query_table/query_result_tab';
+import {addQueryResultsTab} from '../../components/query_table/query_result_tab';
+import {featureFlags} from '../../core/feature_flags';
 
 const SQL_STATS = `
 with first as (select started as ts from sqlstats limit 1)
@@ -93,28 +92,37 @@ group by
 order by total_self_size desc
 limit 100;`;
 
-class CoreCommandsPlugin implements PerfettoPlugin {
-  onActivate(ctx: App) {
-    ctx.commands.registerCommand({
-      id: 'perfetto.CoreCommands#ToggleLeftSidebar',
-      name: 'Toggle left sidebar',
-      callback: () => {
-        if (globals.state.sidebarVisible) {
-          globals.dispatch(
-            Actions.setSidebar({
-              visible: false,
-            }),
-          );
-        } else {
-          globals.dispatch(
-            Actions.setSidebar({
-              visible: true,
-            }),
-          );
-        }
-      },
-      defaultHotkey: '!Mod+B',
-    });
+const SHOW_OPEN_WITH_LEGACY_UI_BUTTON = featureFlags.register({
+  id: 'showOpenWithLegacyUiButton',
+  name: 'Show "Open with legacy UI" button',
+  description: 'Show "Open with legacy UI" button in the sidebar',
+  defaultValue: false,
+});
+
+function getOrPromptForTimestamp(tsRaw: unknown): time | undefined {
+  if (exists(tsRaw)) {
+    if (typeof tsRaw !== 'bigint') {
+      throw Error(`${tsRaw} is not a bigint`);
+    }
+    return Time.fromRaw(tsRaw);
+  }
+  // No args passed, probably run from the command palette.
+  return promptForTimestamp('Enter a timestamp');
+}
+
+export default class implements PerfettoPlugin {
+  static readonly id = 'perfetto.CoreCommands';
+  static onActivate(ctx: App) {
+    if (ctx.sidebar.enabled) {
+      ctx.commands.registerCommand({
+        id: 'perfetto.CoreCommands#ToggleLeftSidebar',
+        name: 'Toggle left sidebar',
+        callback: () => {
+          ctx.sidebar.toggleVisibility();
+        },
+        defaultHotkey: '!Mod+B',
+      });
+    }
 
     const input = document.createElement('input');
     input.classList.add('trace_file');
@@ -135,25 +143,26 @@ class CoreCommandsPlugin implements PerfettoPlugin {
     });
     // ctx.sidebar.addMenuItem({
     //   commandId: OPEN_TRACE_COMMAND_ID,
-    //   group: 'navigation',
+    //   section: 'navigation',
     //   icon: 'folder_open',
     // });
 
-    // const OPEN_LEGACY_TRACE_COMMAND_ID =
-    //   'perfetto.CoreCommands#openTraceInLegacyUi';
+    // const OPEN_LEGACY_COMMAND_ID = 'perfetto.CoreCommands#openTraceInLegacyUi';
     // ctx.commands.registerCommand({
-    //   id: OPEN_LEGACY_TRACE_COMMAND_ID,
+    //   id: OPEN_LEGACY_COMMAND_ID,
     //   name: 'Open with legacy UI',
     //   callback: () => {
     //     input.dataset['useCatapultLegacyUi'] = '1';
     //     input.click();
     //   },
     // });
-    // ctx.sidebar.addMenuItem({
-    //   commandId: OPEN_LEGACY_TRACE_COMMAND_ID,
-    //   group: 'navigation',
-    //   icon: 'filter_none',
-    // });
+    // if (SHOW_OPEN_WITH_LEGACY_UI_BUTTON.get()) {
+    //   ctx.sidebar.addMenuItem({
+    //     commandId: OPEN_LEGACY_COMMAND_ID,
+    //     section: 'navigation',
+    //     icon: 'filter_none',
+    //   });
+    // }
   }
 
   async onTraceLoad(ctx: Trace): Promise<void> {
@@ -252,17 +261,22 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'perfetto.CoreCommands#PanToTimestamp',
       name: 'Pan to timestamp',
       callback: (tsRaw: unknown) => {
-        if (exists(tsRaw)) {
-          if (typeof tsRaw !== 'bigint') {
-            throw Error(`${tsRaw} is not a bigint`);
-          }
-          ctx.timeline.panToTimestamp(Time.fromRaw(tsRaw));
-        } else {
-          // No args passed, probably run from the command palette.
-          const ts = promptForTimestamp('Enter a timestamp');
-          if (exists(ts)) {
-            ctx.timeline.panToTimestamp(Time.fromRaw(ts));
-          }
+        const ts = getOrPromptForTimestamp(tsRaw);
+        if (ts !== undefined) {
+          ctx.timeline.panToTimestamp(ts);
+        }
+      },
+    });
+
+    ctx.commands.registerCommand({
+      id: 'perfetto.CoreCommands#MarkTimestamp',
+      name: 'Mark timestamp',
+      callback: (tsRaw: unknown) => {
+        const ts = getOrPromptForTimestamp(tsRaw);
+        if (ts !== undefined) {
+          ctx.notes.addNote({
+            timestamp: ts,
+          });
         }
       },
     });
@@ -279,7 +293,7 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'createNewEmptyWorkspace',
       name: 'Create new empty workspace',
       callback: async () => {
-        const workspaces = AppImpl.instance.trace?.workspaces;
+        const workspaces = ctx.workspaces;
         if (workspaces === undefined) return; // No trace loaded.
         const name = await ctx.omnibox.prompt('Give it a name...');
         if (name === undefined || name === '') return;
@@ -291,17 +305,12 @@ class CoreCommandsPlugin implements PerfettoPlugin {
       id: 'switchWorkspace',
       name: 'Switch workspace',
       callback: async () => {
-        const workspaces = AppImpl.instance.trace?.workspaces;
+        const workspaces = ctx.workspaces;
         if (workspaces === undefined) return; // No trace loaded.
-        const options = workspaces.all.map((ws) => {
-          return {key: ws.id, displayName: ws.title};
+        const workspace = await ctx.omnibox.prompt('Choose a workspace...', {
+          values: workspaces.all,
+          getName: (ws) => ws.title,
         });
-        const workspaceId = await ctx.omnibox.prompt(
-          'Choose a workspace...',
-          options,
-        );
-        if (workspaceId === undefined) return;
-        const workspace = workspaces.all.find((ws) => ws.id === workspaceId);
         if (workspace) {
           workspaces.switchWorkspace(workspace);
         }
@@ -336,21 +345,18 @@ function onInputElementFileSelectionChanged(e: Event) {
     return;
   }
 
-  globals.logging.logEvent('Trace Actions', 'Open trace from file');
+  AppImpl.instance.analytics.logEvent('Trace Actions', 'Open trace from file');
   AppImpl.instance.openTraceFromFile(file);
 }
 
 async function openWithLegacyUi(file: File) {
   // Switch back to the old catapult UI.
-  globals.logging.logEvent('Trace Actions', 'Open trace in Legacy UI');
+  AppImpl.instance.analytics.logEvent(
+    'Trace Actions',
+    'Open trace in Legacy UI',
+  );
   if (await isLegacyTrace(file)) {
-    openFileWithLegacyTraceViewer(file);
-    return;
+    return await openFileWithLegacyTraceViewer(file);
   }
-  openInOldUIWithSizeCheck(file);
+  return await openInOldUIWithSizeCheck(file);
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'perfetto.CoreCommands',
-  plugin: CoreCommandsPlugin,
-};

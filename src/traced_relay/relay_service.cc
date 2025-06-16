@@ -22,13 +22,15 @@
 #include "perfetto/base/build_config.h"
 #include "perfetto/base/logging.h"
 #include "perfetto/base/task_runner.h"
+#include "perfetto/ext/base/android_utils.h"
+#include "perfetto/ext/base/clock_snapshots.h"
 #include "perfetto/ext/base/file_utils.h"
 #include "perfetto/ext/base/hash.h"
 #include "perfetto/ext/base/string_utils.h"
 #include "perfetto/ext/base/unix_socket.h"
 #include "perfetto/ext/base/utils.h"
+#include "perfetto/ext/base/version.h"
 #include "perfetto/ext/ipc/client.h"
-#include "perfetto/tracing/core/clock_snapshots.h"
 #include "perfetto/tracing/core/forward_decls.h"
 #include "protos/perfetto/ipc/wire_protocol.gen.h"
 #include "src/ipc/buffered_frame_deserializer.h"
@@ -40,9 +42,21 @@
     PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/syscall.h>
 #include <sys/utsname.h>
+#include <time.h>
 #include <unistd.h>
+#endif
+
+// Non-QNX include statements
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) ||           \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
+#include <sys/syscall.h>
+#endif
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+#include <sys/neutrino.h>
+#include <sys/syspage.h>
 #endif
 
 using ::perfetto::protos::gen::IPCFrame;
@@ -67,6 +81,46 @@ std::string GenerateSetPeerIdentityRequest(int32_t pid,
   set_peer_identity->set_machine_id_hint(machine_id_hint);
 
   return ipc::BufferedFrameDeserializer::Serialize(ipc_frame);
+}
+
+void SetSystemInfo(protos::gen::InitRelayRequest* request) {
+  base::SystemInfo sys_info = base::GetSystemInfo();
+
+  auto* info = request->mutable_system_info();
+  info->set_tracing_service_version(base::GetVersionString());
+
+  if (sys_info.timezone_off_mins.has_value())
+    info->set_timezone_off_mins(*sys_info.timezone_off_mins);
+
+  if (sys_info.utsname_info.has_value()) {
+    auto* utsname_info = info->mutable_utsname();
+    utsname_info->set_sysname(sys_info.utsname_info->sysname);
+    utsname_info->set_version(sys_info.utsname_info->version);
+    utsname_info->set_machine(sys_info.utsname_info->machine);
+    utsname_info->set_release(sys_info.utsname_info->release);
+  }
+
+  if (sys_info.page_size.has_value())
+    info->set_page_size(*sys_info.page_size);
+  if (sys_info.num_cpus.has_value())
+    info->set_num_cpus(*sys_info.num_cpus);
+
+  if (!sys_info.android_build_fingerprint.empty())
+    info->set_android_build_fingerprint(sys_info.android_build_fingerprint);
+  if (!sys_info.android_device_manufacturer.empty())
+    info->set_android_device_manufacturer(sys_info.android_device_manufacturer);
+  if (sys_info.android_sdk_version.has_value())
+    info->set_android_sdk_version(*sys_info.android_sdk_version);
+  if (!sys_info.android_soc_model.empty())
+    info->set_android_soc_model(sys_info.android_soc_model);
+  if (!sys_info.android_guest_soc_model.empty())
+    info->set_android_guest_soc_model(sys_info.android_guest_soc_model);
+  if (!sys_info.android_hardware_revision.empty())
+    info->set_android_hardware_revision(sys_info.android_hardware_revision);
+  if (!sys_info.android_storage_model.empty())
+    info->set_android_storage_model(sys_info.android_storage_model);
+  if (!sys_info.android_ram_model.empty())
+    info->set_android_ram_model(sys_info.android_ram_model);
 }
 
 }  // Anonymous namespace.
@@ -121,12 +175,21 @@ void RelayClient::OnConnect(base::UnixSocket* self, bool connected) {
 }
 
 void RelayClient::OnServiceConnected() {
+  InitRelayRequest();
   phase_ = Phase::PING;
   SendSyncClockRequest();
 }
 
 void RelayClient::OnServiceDisconnected() {
   NotifyError();
+}
+
+void RelayClient::InitRelayRequest() {
+  protos::gen::InitRelayRequest request;
+
+  SetSystemInfo(&request);
+
+  relay_ipc_client_->InitRelay(request);
 }
 
 void RelayClient::SendSyncClockRequest() {
@@ -143,7 +206,7 @@ void RelayClient::SendSyncClockRequest() {
       break;
   }
 
-  ClockSnapshotVector snapshot_data = CaptureClockSnapshots();
+  base::ClockSnapshotVector snapshot_data = base::CaptureClockSnapshots();
   for (auto& clock : snapshot_data) {
     auto* clock_proto = request.add_clocks();
     clock_proto->set_clock_id(clock.clock_id);
@@ -184,7 +247,7 @@ RelayService::RelayService(base::TaskRunner* task_runner)
     : task_runner_(task_runner), machine_id_hint_(GetMachineIdHint()) {}
 
 void RelayService::Start(const char* listening_socket_name,
-                         const char* client_socket_name) {
+                         std::string client_socket_name) {
   auto sock_family = base::GetSockFamily(listening_socket_name);
   listening_socket_ =
       base::UnixSocket::Listen(listening_socket_name, this, task_runner_,
@@ -203,7 +266,7 @@ void RelayService::Start(const char* listening_socket_name,
 }
 
 void RelayService::Start(base::ScopedSocketHandle server_socket_handle,
-                         const char* client_socket_name) {
+                         std::string client_socket_name) {
   // Called when the service is started by Android init, where
   // |server_socket_handle| is a unix socket.
   listening_socket_ = base::UnixSocket::Listen(
@@ -241,7 +304,7 @@ void RelayService::OnNewIncomingConnection(
   // connecting producer (while instead we are just forging it). The host traced
   // will only accept only one SetPeerIdentity request pre-queued here.
   int32_t pid = base::kInvalidPid;
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
   pid = server_conn->peer_pid_linux();
 #endif
@@ -327,20 +390,46 @@ std::string RelayService::GetMachineIdHint(
     PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
   auto get_pseudo_boot_id = []() -> std::string {
     base::Hasher hasher;
-    const char* dev_path = "/dev";
     // Generate a pseudo-unique identifier for the current machine.
     // Source 1: system boot timestamp from the creation time of /dev inode.
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
     // Mac or iOS, just use stat(2).
-    struct stat stat_buf {};
+    const char* dev_path = "/dev";
+    struct stat stat_buf{};
     int rc = PERFETTO_EINTR(stat(dev_path, &stat_buf));
     if (rc == -1)
       return std::string();
     hasher.Update(reinterpret_cast<const char*>(&stat_buf.st_birthtimespec),
                   sizeof(stat_buf.st_birthtimespec));
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+    // QNX doesn't support the file birthtime flag in the stat structure.
+    // In order to still calculate the system boot time in epoch seconds
+    // we get the current epoch seconds and subtract the amount of time
+    // since boot. This is a more generic approach that could be used in
+    // general for POSIX operating systems (even though is not as accurate).
+    timespec system_boottime;
+    uint64_t timesinceboot_secs;
+
+    // Get current epoch time
+    int rc = clock_gettime(CLOCK_REALTIME, &system_boottime);
+    if (rc == 0)
+      return std::string();
+
+    // Get seconds since system boot
+    timesinceboot_secs = ClockCycles() / SYSPAGE_ENTRY(qtime)->cycles_per_sec;
+
+    // Calculate system boot time in epoch seconds
+    if (timesinceboot_secs > static_cast<uint64_t>(system_boottime.tv_sec))
+      return std::string();
+
+    system_boottime.tv_sec -= timesinceboot_secs;
+
+    hasher.Update(reinterpret_cast<const char*>(&system_boottime),
+                  sizeof(system_boottime));
 #else
     // Android or Linux, use statx(2)
-    struct statx stat_buf {};
+    const char* dev_path = "/dev";
+    struct statx stat_buf{};
     auto rc = PERFETTO_EINTR(syscall(__NR_statx, /*dirfd=*/-1, dev_path,
                                      /*flags=*/0, STATX_BTIME, &stat_buf));
     if (rc == -1)

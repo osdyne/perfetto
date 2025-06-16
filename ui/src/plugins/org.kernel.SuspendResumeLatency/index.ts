@@ -13,31 +13,21 @@
 // limitations under the License.
 
 import {NUM, STR_NULL} from '../../trace_processor/query_result';
-import {AsyncSliceTrack} from '../../core_plugins/async_slices/async_slice_track';
-import {NewTrackArgs} from '../../frontend/track';
-import {PerfettoPlugin, PluginDescriptor} from '../../public/plugin';
+import {createTraceProcessorSliceTrack} from '../dev.perfetto.TraceProcessorTrack/trace_processor_slice_track';
+import {PerfettoPlugin} from '../../public/plugin';
 import {Trace} from '../../public/trace';
 import {TrackNode} from '../../public/workspace';
 import {SLICE_TRACK_KIND} from '../../public/track_kinds';
 import {SuspendResumeDetailsPanel} from './suspend_resume_details';
-import {Slice} from '../../public/track';
-import {OnSliceClickArgs} from '../../frontend/base_slice_track';
+import ThreadPlugin from '../dev.perfetto.Thread';
+import TraceProcessorTrackPlugin from '../dev.perfetto.TraceProcessorTrack';
 
-// SuspendResumeSliceTrack exists so as to override the `onSliceClick` function
-// in AsyncSliceTrack.
-// TODO(stevegolton): Remove this?
-class SuspendResumeSliceTrack extends AsyncSliceTrack {
-  constructor(args: NewTrackArgs, maxDepth: number, trackIds: number[]) {
-    super(args, maxDepth, trackIds);
-  }
+export default class implements PerfettoPlugin {
+  static readonly id = 'org.kernel.SuspendResumeLatency';
+  static readonly dependencies = [ThreadPlugin, TraceProcessorTrackPlugin];
 
-  onSliceClick(args: OnSliceClickArgs<Slice>) {
-    this.trace.selection.selectTrackEvent(this.uri, args.slice.id);
-  }
-}
-
-class SuspendResumeLatency implements PerfettoPlugin {
   async onTraceLoad(ctx: Trace): Promise<void> {
+    const threads = ctx.plugins.getPlugin(ThreadPlugin).getThreadMap();
     const {engine} = ctx;
     const rawGlobalAsyncTracks = await engine.query(`
       with global_tracks_grouped as (
@@ -80,8 +70,13 @@ class SuspendResumeLatency implements PerfettoPlugin {
         trackIds,
         kind: SLICE_TRACK_KIND,
       },
-      track: new SuspendResumeSliceTrack({uri, trace: ctx}, maxDepth, trackIds),
-      detailsPanel: () => new SuspendResumeDetailsPanel(ctx),
+      track: createTraceProcessorSliceTrack({
+        trace: ctx,
+        uri,
+        maxDepth,
+        trackIds,
+        detailsPanel: () => new SuspendResumeDetailsPanel(ctx, threads),
+      }),
     });
 
     // Display the track in the UI.
@@ -89,8 +84,3 @@ class SuspendResumeLatency implements PerfettoPlugin {
     ctx.workspace.addChildInOrder(track);
   }
 }
-
-export const plugin: PluginDescriptor = {
-  pluginId: 'org.kernel.SuspendResumeLatency',
-  plugin: SuspendResumeLatency,
-};

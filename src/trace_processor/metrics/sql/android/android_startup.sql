@@ -113,13 +113,8 @@ DROP VIEW IF EXISTS startup_view;
 CREATE PERFETTO VIEW startup_view AS
 SELECT
   AndroidStartupMetric_Startup(
-    'startup_id',launches.startup_id,
-    'startup_type', (
-      SELECT lp.startup_type
-      FROM android_startup_processes lp
-      WHERE lp.startup_id =launches.startup_id
-      LIMIT 1
-    ),
+    'startup_id', launches.startup_id,
+    'startup_type', launches.startup_type,
     'cpu_count', (
       SELECT COUNT(DISTINCT cpu) from sched
     ),
@@ -241,6 +236,8 @@ SELECT
       dur_sum_slice_proto_for_launch(launches.startup_id, 'inflate'),
       'time_get_resources',
       dur_sum_slice_proto_for_launch(launches.startup_id, 'ResourcesManager#getResources'),
+      'time_class_initialization',
+      dur_sum_slice_proto_for_launch(launches.startup_id, 'L*/*;'),
       'time_dex_open',
       dur_sum_slice_proto_for_launch(launches.startup_id, 'OpenDexFilesFromOat*'),
       'time_verify_class',
@@ -292,6 +289,10 @@ SELECT
         SELECT IIF(COUNT(1) = 0, NULL, COUNT(1))
         FROM ANDROID_SLICES_FOR_STARTUP_AND_SLICE_NAME(launches.startup_id, 'JIT compiling*')
         WHERE thread_name = 'Jit thread pool'
+      ),
+      'class_initialization_count', (
+        SELECT IIF(COUNT(1) = 0, NULL, COUNT(1))
+        FROM ANDROID_SLICES_FOR_STARTUP_AND_SLICE_NAME(launches.startup_id, 'L*/*;')
       ),
       'other_processes_spawned_count', (
         SELECT COUNT(1)

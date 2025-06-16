@@ -17,21 +17,21 @@ INCLUDE PERFETTO MODULE counters.intervals;
 
 -- Counter information for each idle state change for each CPU. Finds each time
 -- region where a CPU idle state is constant.
-CREATE PERFETTO TABLE cpu_idle_counters(
+CREATE PERFETTO TABLE cpu_idle_counters (
   -- Counter id.
-  id INT,
+  id LONG,
   -- Joinable with 'counter_track.id'.
-  track_id INT,
+  track_id JOINID(track.id),
   -- Starting timestamp of the counter.
-  ts LONG,
+  ts TIMESTAMP,
   -- Duration in which the counter is contant and idle state doesn't change.
-  dur INT,
+  dur DURATION,
   -- Idle state of the CPU that corresponds to this counter. An idle state of -1
   -- is defined to be active state for the CPU, and the larger the integer, the
   -- deeper the idle state of the CPU. NULL if not found or undefined.
-  idle INT,
+  idle LONG,
   -- CPU that corresponds to this counter.
-  cpu INT
+  cpu LONG
 ) AS
 SELECT
   count_w_dur.id,
@@ -45,4 +45,5 @@ FROM counter_leading_intervals!((
   FROM counter c
   JOIN cpu_counter_track cct ON cct.id = c.track_id AND cct.name = 'cpuidle'
 )) AS count_w_dur
-JOIN cpu_counter_track AS cct ON track_id = cct.id;
+JOIN cpu_counter_track AS cct
+  ON track_id = cct.id;

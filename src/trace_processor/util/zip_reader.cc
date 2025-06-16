@@ -60,7 +60,9 @@ enum GeneralPurposeBitFlag : uint32_t {
   k8kSlidingDictionary = 1u << 1,
   kShannonFaro = 1u << 2,
   kDataDescriptor = 1u << 3,
-  kUnknown = ~((1u << 4) - 1),
+  kLangageEncoding = 1u << 11,
+  kUnknown = ~(kEncrypted | k8kSlidingDictionary | kShannonFaro |
+               kDataDescriptor | kLangageEncoding),
 };
 
 // Compression flags.
@@ -432,7 +434,7 @@ base::Status ZipFile::DoDecompressionChecks() const {
 int64_t ZipFile::GetDatetime() const {
   // Date: 7 bits year, 4 bits month, 5 bits day.
   // Time: 5 bits hour, 6 bits minute, 5 bits second.
-  struct tm mdt {};
+  struct tm mdt{};
   // As per man 3 mktime, `tm_year` is relative to 1900 not Epoch. Go figure.
   mdt.tm_year = 1980 + (hdr_.mdate >> (16 - 7)) - 1900;
 

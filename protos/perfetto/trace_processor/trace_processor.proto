@@ -20,6 +20,7 @@ package perfetto.protos;
 
 import "protos/perfetto/common/descriptor.proto";
 import "protos/perfetto/trace_processor/metatrace_categories.proto";
+import "protos/perfetto/perfetto_sql/structured_query.proto";
 
 // This file defines the schema for {,un}marshalling arguments and return values
 // when interfacing to the trace processor binary interface.
@@ -60,7 +61,8 @@ enum TraceProcessorApiVersion {
   // 12. Changed UI to be more aggresive about version matching.
   //     Added version_code.
   // 13. Added TPM_REGISTER_SQL_MODULE method.
-  TRACE_PROCESSOR_CURRENT_API_VERSION = 13;
+  // 14. Added parsing mode option to RESET method.
+  TRACE_PROCESSOR_CURRENT_API_VERSION = 14;
 }
 
 // At lowest level, the wire-format of the RPC protocol is a linear sequence of
@@ -105,6 +107,7 @@ message TraceProcessorRpc {
     TPM_GET_STATUS = 10;
     TPM_RESET_TRACE_PROCESSOR = 11;
     TPM_REGISTER_SQL_PACKAGE = 13;
+    TPM_ANALYZE_STRUCTURED_QUERY = 14;
   }
 
   oneof type {
@@ -138,6 +141,8 @@ message TraceProcessorRpc {
     ResetTraceProcessorArgs reset_trace_processor_args = 107;
     // For TPM_REGISTER_SQL_PACKAGE.
     RegisterSqlPackageArgs register_sql_package_args = 108;
+    // For TPM_ANALYZE_STRUCTURED_QUERY.
+    AnalyzeStructuredQueryArgs analyze_structured_query_args = 109;
 
     // TraceProcessorMethod response args.
     // For TPM_APPEND_TRACE_DATA.
@@ -154,6 +159,10 @@ message TraceProcessorRpc {
     StatusResult status = 210;
     // For TPM_REGISTER_SQL_PACKAGE.
     RegisterSqlPackageResult register_sql_package_result = 211;
+    // For TPM_FINALIZE_TRACE_DATA.
+    FinalizeDataResult finalize_data_result = 212;
+    // For TPM_ANALYZE_STRUCTURED_QUERY.
+    AnalyzeStructuredQueryResult analyze_structured_query_result = 213;
   }
 
   // Previously: RawQueryArgs for TPM_QUERY_RAW_DEPRECATED
@@ -330,11 +339,17 @@ message ResetTraceProcessorArgs {
     NO_DROP = 0;
     TRACK_EVENT_RANGE_OF_INTEREST = 1;
   }
+  enum ParsingMode {
+    DEFAULT = 0;
+    TOKENIZE_ONLY = 1;
+    TOKENIZE_AND_SORT = 2;
+  }
   // Mirror of the corresponding perfetto::trace_processor::Config fields.
   optional DropTrackEventDataBefore drop_track_event_data_before = 1;
   optional bool ingest_ftrace_in_raw_table = 2;
   optional bool analyze_trace_proto_content = 3;
   optional bool ftrace_drop_until_all_cpus_valid = 4;
+  optional ParsingMode parsing_mode = 5;
 }
 
 message RegisterSqlPackageArgs {
@@ -349,4 +364,23 @@ message RegisterSqlPackageArgs {
 
 message RegisterSqlPackageResult {
   optional string error = 1;
+}
+
+message FinalizeDataResult {
+  optional string error = 1;
+}
+
+message AnalyzeStructuredQueryArgs {
+  repeated PerfettoSqlStructuredQuery queries = 1;
+}
+
+message AnalyzeStructuredQueryResult {
+  message StructuredQueryResult {
+    optional string sql = 1;
+    optional string textproto = 4;
+    repeated string modules = 2;
+    repeated string preambles = 3;
+  }
+  optional string error = 1;
+  repeated StructuredQueryResult results = 2;
 }

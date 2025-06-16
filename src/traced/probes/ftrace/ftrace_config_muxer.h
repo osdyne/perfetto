@@ -21,6 +21,7 @@
 #include <optional>
 #include <set>
 
+#include "perfetto/ext/base/flat_hash_map.h"
 #include "src/kernel_utils/syscall_table.h"
 #include "src/traced/probes/ftrace/atrace_wrapper.h"
 #include "src/traced/probes/ftrace/compact_sched.h"
@@ -29,7 +30,12 @@
 #include "src/traced/probes/ftrace/ftrace_procfs.h"
 #include "src/traced/probes/ftrace/proto_translation_table.h"
 
+#include "protos/perfetto/trace/ftrace/generic.pbzero.h"
+
 namespace perfetto {
+
+constexpr std::string_view kKprobeGroup = "perfetto_kprobes";
+constexpr std::string_view kKretprobeGroup = "perfetto_kretprobes";
 
 namespace protos {
 namespace pbzero {
@@ -52,7 +58,11 @@ struct FtraceDataSourceConfig {
       std::vector<std::string> atrace_categories_sdk_optout_in,
       bool symbolize_ksyms_in,
       uint32_t buffer_percent_in,
-      base::FlatSet<int64_t> syscalls_returning_fd_in)
+      base::FlatSet<int64_t> syscalls_returning_fd_in,
+      base::FlatHashMap<uint32_t, protos::pbzero::KprobeEvent::KprobeType>
+          kprobes_in,
+      bool debug_ftrace_abi_in,
+      bool write_generic_evt_descriptors_in)
       : event_filter(std::move(event_filter_in)),
         syscall_filter(std::move(syscall_filter_in)),
         compact_sched(compact_sched_in),
@@ -63,7 +73,11 @@ struct FtraceDataSourceConfig {
             std::move(atrace_categories_sdk_optout_in)),
         symbolize_ksyms(symbolize_ksyms_in),
         buffer_percent(buffer_percent_in),
-        syscalls_returning_fd(std::move(syscalls_returning_fd_in)) {}
+        syscalls_returning_fd(std::move(syscalls_returning_fd_in)),
+        kprobes(std::move(kprobes_in)),
+        debug_ftrace_abi(debug_ftrace_abi_in),
+        write_generic_evt_descriptors(write_generic_evt_descriptors_in) {}
+
   // The event filter allows to quickly check if a certain ftrace event with id
   // x is enabled for this data source.
   EventFilter event_filter;
@@ -90,8 +104,18 @@ struct FtraceDataSourceConfig {
   // FtraceConfig.drain_buffer_percent for poll-based reads. Zero if unset.
   const uint32_t buffer_percent;
 
-  // List of syscalls monitored to return a new filedescriptor upon success
+  // Niche: syscall numbers to scan for new file descriptors.
   base::FlatSet<int64_t> syscalls_returning_fd;
+
+  // Keyed by ftrace event id.
+  base::FlatHashMap<uint32_t, protos::pbzero::KprobeEvent::KprobeType> kprobes;
+
+  // For development/debugging, serialise raw ring buffer pages if on a
+  // debuggable android build.
+  const bool debug_ftrace_abi;
+
+  // If true, use the newer format for generic events.
+  const bool write_generic_evt_descriptors;
 };
 
 // Ftrace is a bunch of globally modifiable persistent state.
@@ -119,6 +143,9 @@ class FtraceConfigMuxer {
       bool secondary_instance = false);
   virtual ~FtraceConfigMuxer();
 
+  FtraceConfigMuxer(const FtraceConfigMuxer&) = delete;
+  FtraceConfigMuxer& operator=(const FtraceConfigMuxer&) = delete;
+
   // Ask FtraceConfigMuxer to adjust ftrace procfs settings to
   // match the requested config. Returns true on success and false on failure.
   // This is best effort. FtraceConfigMuxer may not be able to adjust the
@@ -141,7 +168,7 @@ class FtraceConfigMuxer {
 
   // Resets the current tracer to "nop" (the default). This cannot be handled
   // by |RemoveConfig| because it requires all ftrace readers to be released
-  // beforehand, which is the reponsibility of ftrace_controller.
+  // beforehand, which is the responsibility of ftrace_controller.
   bool ResetCurrentTracer();
 
   // Returns the current per-cpu buffer size, as configured by this muxer
@@ -198,10 +225,9 @@ class FtraceConfigMuxer {
     // Categories for which the perfetto SDK track_event should be enabled.
     std::vector<std::string> atrace_categories_prefer_sdk;
     bool saved_tracing_on;  // Backup for the original tracing_on.
+    // Set of kprobes that we've installed, to be cleaned up when tracing stops.
+    base::FlatSet<GroupAndName> installed_kprobes;
   };
-
-  FtraceConfigMuxer(const FtraceConfigMuxer&) = delete;
-  FtraceConfigMuxer& operator=(const FtraceConfigMuxer&) = delete;
 
   void SetupClock(const FtraceConfig& request);
   void SetupBufferSize(const FtraceConfig& request);
@@ -220,6 +246,11 @@ class FtraceConfigMuxer {
   // atrace category -> Will add events in that category.
   std::set<GroupAndName> GetFtraceEvents(const FtraceConfig& request,
                                          const ProtoTranslationTable*);
+
+  void EnableFtraceEvent(const Event*,
+                         const GroupAndName& group_and_name,
+                         EventFilter* filter,
+                         FtraceSetupErrors* errors);
 
   // Returns true if the event filter has at least one event from group.
   bool FilterHasGroup(const EventFilter& filter, const std::string& group);

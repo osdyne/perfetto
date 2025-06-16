@@ -23,6 +23,9 @@ SELECT TraceMetadata(
   'android_build_fingerprint', (
     SELECT str_value FROM metadata WHERE name = 'android_build_fingerprint'
   ),
+  'android_device_manufacturer', (
+    SELECT str_value FROM metadata WHERE name = 'android_device_manufacturer'
+  ),
   'statsd_triggering_subscription_id', (
     SELECT int_value FROM metadata
     WHERE name = 'statsd_triggering_subscription_id'
@@ -40,6 +43,10 @@ SELECT TraceMetadata(
     FROM track JOIN slice ON track.id = slice.track_id
     WHERE track.name = 'Trace Triggers'
   ),
+  'trace_causal_trigger', (
+      SELECT str_value FROM metadata
+      WHERE name = 'trace_trigger'
+  ),
   'trace_config_pbtxt', (
     SELECT str_value FROM metadata
     WHERE name = 'trace_config_pbtxt'
@@ -54,6 +61,14 @@ SELECT TraceMetadata(
   'android_sdk_version', (
     SELECT int_value FROM metadata
     WHERE name = 'android_sdk_version'
+  ),
+  'android_profile_boot_classpath', (
+    SELECT int_value FROM metadata
+    WHERE name = 'android_profile_boot_classpath'
+  ),
+  'android_profile_system_server', (
+    SELECT int_value FROM metadata
+    WHERE name = 'android_profile_system_server'
   ),
   'suspend_count', (
     SELECT COUNT() FROM android_suspend_state WHERE power_state = 'suspended'

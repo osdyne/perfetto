@@ -15,21 +15,29 @@
  */
 #include "src/trace_processor/sorter/trace_sorter.h"
 
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
 #include <map>
+#include <memory>
+#include <optional>
 #include <random>
+#include <tuple>
+#include <utility>
 #include <vector>
 
-#include "perfetto/trace_processor/basic_types.h"
+#include "perfetto/ext/base/string_view.h"
 #include "perfetto/trace_processor/trace_blob.h"
 #include "perfetto/trace_processor/trace_blob_view.h"
 #include "src/trace_processor/importers/common/parser_types.h"
 #include "src/trace_processor/importers/proto/packet_sequence_state_generation.h"
 #include "src/trace_processor/importers/proto/proto_trace_parser_impl.h"
+#include "src/trace_processor/storage/stats.h"
+#include "src/trace_processor/storage/trace_storage.h"
 #include "src/trace_processor/types/trace_processor_context.h"
 #include "test/gtest_and_gmock.h"
 
-namespace perfetto {
-namespace trace_processor {
+namespace perfetto::trace_processor {
 namespace {
 
 using ::testing::_;
@@ -76,7 +84,7 @@ class MockTraceParser : public ProtoTraceParserImpl {
 
 class MockTraceStorage : public TraceStorage {
  public:
-  MockTraceStorage() : TraceStorage() {}
+  MockTraceStorage() = default;
 
   MOCK_METHOD(StringId, InternString, (base::StringView view), (override));
 };
@@ -169,7 +177,7 @@ TEST_F(TraceSorterTest, IncrementalExtraction) {
   context_.sorter->NotifyReadBufferEvent();
 
   // Now that we've seen two flushes, we should be ready to start extracting
-  // data on the next OnReadBufer call (after two flushes as usual).
+  // data on the next OnReadBuffer call (after two flushes as usual).
   context_.sorter->NotifyFlushEvent();
   context_.sorter->NotifyReadBufferEvent();
 
@@ -241,31 +249,24 @@ TEST_F(TraceSorterTest, OutOfOrder) {
   context_.sorter->PushTracePacket(1150, state, std::move(view_3));
   context_.sorter->NotifyReadBufferEvent();
 
-  // The third packet should still be pushed through.
+  // Third packet should not be pushed through.
   context_.sorter->NotifyFlushEvent();
   context_.sorter->NotifyFlushEvent();
-  EXPECT_CALL(*parser_, MOCK_ParseTracePacket(1150, test_buffer_.data(), 3));
   context_.sorter->NotifyReadBufferEvent();
 
-  // But we should also increment the stat that this was out of order.
-  ASSERT_EQ(
-      context_.storage->stats()[stats::sorter_push_event_out_of_order].value,
-      1);
+  // We should also increment the stat that this was out of order.
+  const auto& stats = context_.storage->stats();
+  ASSERT_EQ(stats[stats::sorter_push_event_out_of_order].value, 1);
 
-  // Push the fourth packet also out of order but after third.
+  // Third packet should not be pushed through.
   context_.sorter->NotifyFlushEvent();
   context_.sorter->NotifyFlushEvent();
   context_.sorter->PushTracePacket(1170, state, std::move(view_4));
   context_.sorter->NotifyReadBufferEvent();
-
-  // The fourt packet should still be pushed through.
-  EXPECT_CALL(*parser_, MOCK_ParseTracePacket(1170, test_buffer_.data(), 4));
   context_.sorter->ExtractEventsForced();
 
-  // But we should also increment the stat that this was out of order.
-  ASSERT_EQ(
-      context_.storage->stats()[stats::sorter_push_event_out_of_order].value,
-      2);
+  // We should also increment the stat that this was out of order.
+  ASSERT_EQ(stats[stats::sorter_push_event_out_of_order].value, 2);
 }
 
 // Simulates a random stream of ftrace events happening on random CPUs.
@@ -421,6 +422,59 @@ TEST_F(TraceSorterTest, MultiMachineSorting) {
   EXPECT_TRUE(expectations.empty());
 }
 
+TEST_F(TraceSorterTest, SetSortingMode) {
+  CreateSorter(false);
+
+  auto state = PacketSequenceStateGeneration::CreateFirst(&context_);
+
+  TraceBlobView view_1 = test_buffer_.slice_off(0, 1);
+  TraceBlobView view_2 = test_buffer_.slice_off(0, 2);
+
+  EXPECT_CALL(*parser_, MOCK_ParseTracePacket(1000, view_1.data(), 1));
+  context_.sorter->PushTracePacket(1000, state, std::move(view_1));
+
+  // Changing to full sorting mode should succeed as no events have been
+  // extracted yet.
+  EXPECT_TRUE(
+      context_.sorter->SetSortingMode(TraceSorter::SortingMode::kFullSort));
+
+  EXPECT_CALL(*parser_, MOCK_ParseTracePacket(2000, view_2.data(), 2));
+  context_.sorter->PushTracePacket(2000, state, std::move(view_2));
+
+  // Changing back to default sorting mode is not allowed.
+  EXPECT_FALSE(
+      context_.sorter->SetSortingMode(TraceSorter::SortingMode::kDefault));
+
+  // Setting sorting mode to the current mode should succeed.
+  EXPECT_TRUE(
+      context_.sorter->SetSortingMode(TraceSorter::SortingMode::kFullSort));
+
+  context_.sorter->ExtractEventsForced();
+
+  // Setting sorting mode to the current mode should still succeed.
+  EXPECT_TRUE(
+      context_.sorter->SetSortingMode(TraceSorter::SortingMode::kFullSort));
+}
+
+TEST_F(TraceSorterTest, SetSortingModeAfterExtraction) {
+  CreateSorter(false);
+
+  auto state = PacketSequenceStateGeneration::CreateFirst(&context_);
+
+  TraceBlobView view_1 = test_buffer_.slice_off(0, 1);
+  TraceBlobView view_2 = test_buffer_.slice_off(0, 2);
+
+  EXPECT_CALL(*parser_, MOCK_ParseTracePacket(1000, view_1.data(), 1));
+  context_.sorter->PushTracePacket(1000, state, std::move(view_1));
+  EXPECT_CALL(*parser_, MOCK_ParseTracePacket(2000, view_2.data(), 2));
+  context_.sorter->PushTracePacket(2000, state, std::move(view_2));
+  context_.sorter->ExtractEventsForced();
+
+  // Changing to full sorting mode should fail as some events have already been
+  // extracted.
+  EXPECT_FALSE(
+      context_.sorter->SetSortingMode(TraceSorter::SortingMode::kFullSort));
+}
+
 }  // namespace
-}  // namespace trace_processor
-}  // namespace perfetto
+}  // namespace perfetto::trace_processor

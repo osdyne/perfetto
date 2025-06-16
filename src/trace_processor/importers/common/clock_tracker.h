@@ -217,7 +217,7 @@ class ClockTracker {
     PERFETTO_DCHECK(!IsSequenceClock(clock_id));
     if (trace_time_clock_id_used_for_conversion_ &&
         trace_time_clock_id_ != clock_id) {
-      PERFETTO_ELOG("Not updating trace time clock from %" PRIu64 " to %" PRIu64
+      PERFETTO_ELOG("Not updating trace time clock from %" PRId64 " to %" PRId64
                     " because the old clock was already used for timestamp "
                     "conversion - ClockSnapshot too late in trace?",
                     trace_time_clock_id_, clock_id);
@@ -226,6 +226,13 @@ class ClockTracker {
     trace_time_clock_id_ = clock_id;
     context_->metadata_tracker->SetMetadata(
         metadata::trace_time_clock_id, Variadic::Integer(trace_time_clock_id_));
+  }
+
+  bool HasPathToTraceTime(ClockId clock_id) {
+    if (clock_id == trace_time_clock_id_) {
+      return true;
+    }
+    return FindPath(clock_id, trace_time_clock_id_).valid();
   }
 
   void set_cache_lookups_disabled_for_testing(bool v) {

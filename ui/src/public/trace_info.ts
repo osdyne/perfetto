@@ -13,11 +13,9 @@
 // limitations under the License.
 
 import {time} from '../base/time';
-import {TraceSource} from './trace_source';
+import {Cpu} from '../base/multi_machine_trace';
 
 export interface TraceInfo {
-  readonly source: TraceSource;
-
   readonly traceTitle: string; // File name and size of the current trace.
   readonly traceUrl: string; // URL of the Trace.
 
@@ -38,10 +36,7 @@ export interface TraceInfo {
   readonly traceTzOffset: time;
 
   // The list of CPUs in the trace
-  readonly cpus: number[];
-
-  // The number of gpus in the trace
-  readonly gpuCount: number;
+  readonly cpus: Cpu[];
 
   // The number of import/analysis errors present in the `stats` table.
   readonly importErrors: number;
@@ -62,4 +57,12 @@ export interface TraceInfo {
 
   // Wheteher the current trace has been successfully stored into cache storage.
   readonly cached: boolean;
+
+  // Returns true if the current trace can be downloaded via getTraceFile().
+  // The trace isn't downloadable in the following cases:
+  // - It comes from a source (e.g. HTTP+RPC) that doesn't support re-download
+  //   due to technical limitations.
+  // - Download is disabled because the trace was pushed via postMessage and
+  //   the caller has asked to disable downloads.
+  readonly downloadable: boolean;
 }

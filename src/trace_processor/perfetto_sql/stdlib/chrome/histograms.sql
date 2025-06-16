@@ -4,40 +4,43 @@
 
 -- A helper view on top of the histogram events emitted by Chrome.
 -- Requires "disabled-by-default-histogram_samples" Chrome category.
-CREATE PERFETTO TABLE chrome_histograms(
+CREATE PERFETTO TABLE chrome_histograms (
   -- The name of the histogram.
   name STRING,
   -- The value of the histogram sample.
-  value INT,
+  value LONG,
   -- Alias of |slice.ts|.
-  ts INT,
+  ts TIMESTAMP,
   -- Thread name.
   thread_name STRING,
   -- Utid of the thread.
-  utid INT,
+  utid LONG,
   -- Tid of the thread.
-  tid INT,
+  tid LONG,
   -- Process name.
   process_name STRING,
   -- Upid of the process.
-  upid INT,
+  upid LONG,
   -- Pid of the process.
-  pid INT
+  pid LONG
 ) AS
 SELECT
-  extract_arg(slice.arg_set_id, "chrome_histogram_sample.name") as name,
-  extract_arg(slice.arg_set_id, "chrome_histogram_sample.sample") as value,
+  extract_arg(slice.arg_set_id, "chrome_histogram_sample.name") AS name,
+  extract_arg(slice.arg_set_id, "chrome_histogram_sample.sample") AS value,
   ts,
-  thread.name as thread_name,
-  thread.utid as utid,
-  thread.tid as tid,
-  process.name as process_name,
-  process.upid as upid,
-  process.pid as pid
+  thread.name AS thread_name,
+  thread.utid AS utid,
+  thread.tid AS tid,
+  process.name AS process_name,
+  process.upid AS upid,
+  process.pid AS pid
 FROM slice
-JOIN thread_track ON thread_track.id = slice.track_id
-JOIN thread USING (utid)
-JOIN process USING (upid)
+JOIN thread_track
+  ON thread_track.id = slice.track_id
+JOIN thread
+  USING (utid)
+JOIN process
+  USING (upid)
 WHERE
   slice.name = "HistogramSample"
   AND category = "disabled-by-default-histogram_samples";

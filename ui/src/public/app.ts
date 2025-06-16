@@ -16,6 +16,13 @@ import {RouteArgs} from './route_schema';
 import {CommandManager} from './command';
 import {OmniboxManager} from './omnibox';
 import {SidebarManager} from './sidebar';
+import {Analytics} from './analytics';
+import {PluginManager} from './plugin';
+import {Trace} from './trace';
+import {PageManager} from './page';
+import {FeatureFlagManager} from './feature_flag';
+import {Raf} from './raf';
+import {SettingsManager} from './settings';
 
 /**
  * The API endpoint to interact programmaticaly with the UI before a trace has
@@ -30,6 +37,11 @@ export interface App {
   readonly commands: CommandManager;
   readonly sidebar: SidebarManager;
   readonly omnibox: OmniboxManager;
+  readonly analytics: Analytics;
+  readonly plugins: PluginManager;
+  readonly pages: PageManager;
+  readonly featureFlags: FeatureFlagManager;
+  readonly settings: SettingsManager;
 
   /**
    * The parsed querystring passed when starting the app, before any navigation
@@ -37,9 +49,32 @@ export interface App {
    */
   readonly initialRouteArgs: RouteArgs;
 
-  readonly rootUrl: string;
+  /**
+   * Args in the URL bar that start with this plugin's id.
+   */
+  readonly initialPluginRouteArgs: {[key: string]: number | boolean | string};
 
-  // TODO(primiano): this should be needed in extremely rare cases. We should
-  // probably switch to mithril auto-redraw at some point.
-  scheduleRedraw(): void;
+  /**
+   * Returns the current trace object, if any. The instance being returned is
+   * bound to the same plugin of App.pluginId.
+   */
+  readonly trace?: Trace;
+
+  /**
+   * Used to schedule things.
+   */
+  readonly raf: Raf;
+
+  /**
+   * Navigate to a new page.
+   */
+  navigate(newHash: string): void;
+
+  openTraceFromFile(file: File): void;
+  openTraceFromUrl(url: string): void;
+  openTraceFromBuffer(args: {
+    buffer: ArrayBuffer;
+    title: string;
+    fileName: string;
+  }): void;
 }

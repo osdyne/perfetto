@@ -24,7 +24,8 @@ SELECT
   upid,
   value AS anon_rss_val
 FROM _all_counters_per_process
-WHERE name = 'mem.rss.anon';
+WHERE
+  name = 'mem.rss.anon';
 
 CREATE PERFETTO VIEW _file_rss AS
 SELECT
@@ -33,7 +34,8 @@ SELECT
   upid,
   value AS file_rss_val
 FROM _all_counters_per_process
-WHERE name = 'mem.rss.file';
+WHERE
+  name = 'mem.rss.file';
 
 CREATE PERFETTO VIEW _shmem_rss AS
 SELECT
@@ -42,7 +44,8 @@ SELECT
   upid,
   value AS shmem_rss_val
 FROM _all_counters_per_process
-WHERE name = 'mem.rss.shmem';
+WHERE
+  name = 'mem.rss.shmem';
 
 CREATE PERFETTO VIEW _swap AS
 SELECT
@@ -51,65 +54,64 @@ SELECT
   upid,
   value AS swap_val
 FROM _all_counters_per_process
-WHERE name = 'mem.swap';
+WHERE
+  name = 'mem.swap';
 
 -- Span joins
 
-CREATE VIRTUAL TABLE _anon_swap_sj
-USING SPAN_OUTER_JOIN(
+CREATE VIRTUAL TABLE _anon_swap_sj USING SPAN_OUTER_JOIN (
   _anon_rss PARTITIONED upid,
   _swap PARTITIONED upid);
 
-CREATE VIRTUAL TABLE _anon_swap_file_sj
-USING SPAN_OUTER_JOIN(
+CREATE VIRTUAL TABLE _anon_swap_file_sj USING SPAN_OUTER_JOIN (
   _anon_swap_sj PARTITIONED upid,
   _file_rss PARTITIONED upid
 );
 
-CREATE VIRTUAL TABLE _rss_swap_sj
-USING SPAN_OUTER_JOIN(
+CREATE VIRTUAL TABLE _rss_swap_sj USING SPAN_OUTER_JOIN (
   _anon_swap_file_sj PARTITIONED upid,
   _shmem_rss PARTITIONED upid
 );
 
 CREATE PERFETTO TABLE _memory_rss_and_swap_per_process_table AS
 SELECT
-  ts, dur, upid,
+  ts,
+  dur,
+  upid,
   cast_int!(anon_rss_val) AS anon_rss,
   cast_int!(file_rss_val) AS file_rss,
   cast_int!(shmem_rss_val) AS shmem_rss,
   cast_int!(swap_val) AS swap
 FROM _rss_swap_sj;
 
-
 -- Memory metrics timeline for each process.
-CREATE PERFETTO VIEW memory_rss_and_swap_per_process(
+CREATE PERFETTO VIEW memory_rss_and_swap_per_process (
   -- Timestamp
-  ts INT,
+  ts TIMESTAMP,
   -- Duration
-  dur INT,
+  dur DURATION,
   -- Upid of the process
-  upid INT,
+  upid JOINID(process.id),
   -- Pid of the process
-  pid INT,
+  pid LONG,
   -- Name of the process
   process_name STRING,
   -- Anon RSS counter value
-  anon_rss INT,
+  anon_rss LONG,
   -- File RSS counter value
-  file_rss INT,
+  file_rss LONG,
   -- Shared memory RSS counter value
-  shmem_rss INT,
+  shmem_rss LONG,
   -- Total RSS value. Sum of `anon_rss`, `file_rss` and `shmem_rss`. Returns
   -- value even if one of the values is NULL.
-  rss INT,
+  rss LONG,
   -- Swap counter value
-  swap INT,
+  swap LONG,
   -- Sum or `anon_rss` and `swap`. Returns value even if one of the values is
   -- NULL.
-  anon_rss_and_swap INT,
+  anon_rss_and_swap LONG,
   -- Sum or `rss` and `swap`. Returns value even if one of the values is NULL.
-  rss_and_swap INT
+  rss_and_swap LONG
 ) AS
 SELECT
   ts,
@@ -126,9 +128,10 @@ SELECT
   --  values. But it is possible that you will never swap or never use shmem,
   -- so those values are expected to often be NULLs, which shouldn't propagate
   -- into the values like `anon_and_swap` or `rss`.
-  file_rss + anon_rss + COALESCE(shmem_rss, 0) AS rss,
+  file_rss + anon_rss + coalesce(shmem_rss, 0) AS rss,
   swap,
-  anon_rss + COALESCE(swap, 0) AS anon_rss_and_swap,
-  anon_rss + file_rss  + COALESCE(shmem_rss, 0) + COALESCE(swap, 0) AS rss_and_swap
+  anon_rss + coalesce(swap, 0) AS anon_rss_and_swap,
+  anon_rss + file_rss + coalesce(shmem_rss, 0) + coalesce(swap, 0) AS rss_and_swap
 FROM _memory_rss_and_swap_per_process_table
-JOIN process USING (upid);
+JOIN process
+  USING (upid);

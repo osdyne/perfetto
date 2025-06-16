@@ -16,39 +16,48 @@
 INCLUDE PERFETTO MODULE linux.cpu.idle;
 
 -- Aggregates cpu idle statistics per core.
-CREATE PERFETTO TABLE cpu_idle_stats(
+CREATE PERFETTO TABLE cpu_idle_stats (
   -- CPU core number.
-  cpu INT,
+  cpu LONG,
   -- CPU idle state (C-states).
-  state INT,
+  state LONG,
   -- The count of entering idle state.
-  count INT,
-  -- Total CPU core idle state duration in nanoseconds.
-  dur INT,
-  -- Average CPU core idle state duration in nanoseconds.
-  avg_dur INT,
+  count LONG,
+  -- Total CPU core idle state duration.
+  dur DURATION,
+  -- Average CPU core idle state duration.
+  avg_dur DURATION,
   -- Idle state percentage of non suspend time (C-states + P-states).
-  idle_percent FLOAT
-)
-AS
-WITH grouped AS (
-  SELECT
-    cpu,
-    (idle + 1) AS state,
-    COUNT(idle) AS count,
-    SUM(dur) AS dur,
-    SUM(dur) / COUNT(idle) AS avg_dur
-  FROM cpu_idle_counters c
-  WHERE c.idle >= 0
-  GROUP BY c.cpu, c.idle
-),
-total AS (
-  SELECT cpu, SUM(dur) AS dur
-  FROM cpu_idle_counters
-  GROUP BY cpu
-)
+  idle_percent DOUBLE
+) AS
+WITH
+  grouped AS (
+    SELECT
+      cpu,
+      (
+        idle + 1
+      ) AS state,
+      count(idle) AS count,
+      sum(dur) AS dur,
+      sum(dur) / count(idle) AS avg_dur
+    FROM cpu_idle_counters AS c
+    WHERE
+      c.idle >= 0
+    GROUP BY
+      c.cpu,
+      c.idle
+  ),
+  total AS (
+    SELECT
+      cpu,
+      sum(dur) AS dur
+    FROM cpu_idle_counters
+    GROUP BY
+      cpu
+  )
 SELECT
   g.*,
   g.dur * 100.0 / t.dur AS idle_percent
-FROM grouped g
-JOIN total t USING (cpu);
+FROM grouped AS g
+JOIN total AS t
+  USING (cpu);

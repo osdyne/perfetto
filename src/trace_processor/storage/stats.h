@@ -29,7 +29,6 @@ namespace perfetto::trace_processor::stats {
   F(android_log_format_invalid,           kSingle,  kError,    kTrace,    ""), \
   F(android_log_num_skipped,              kSingle,  kInfo,     kTrace,    ""), \
   F(android_log_num_total,                kSingle,  kInfo,     kTrace,    ""), \
-  F(counter_events_out_of_order,          kSingle,  kError,    kAnalysis, ""), \
   F(deobfuscate_location_parse_error,     kSingle,  kError,    kTrace,    ""), \
   F(energy_breakdown_missing_values,      kSingle,  kError,    kAnalysis, ""), \
   F(energy_descriptor_invalid,            kSingle,  kError,    kAnalysis, ""), \
@@ -67,6 +66,21 @@ namespace perfetto::trace_processor::stats {
        "unreliable. The kernel buffer overwrote events between our reads "     \
        "in userspace. Try re-recording the trace with a bigger buffer "        \
        "(ftrace_config.buffer_size_kb), or with fewer enabled ftrace events."),\
+  F(ftrace_kprobe_hits_begin,             kSingle,  kInfo,     kTrace,         \
+       "The number of kretprobe hits at the beginning of the trace."),         \
+  F(ftrace_kprobe_hits_end,               kSingle,  kInfo,     kTrace,         \
+       "The number of kretprobe hits at the end of the trace."),               \
+  F(ftrace_kprobe_hits_delta,             kSingle,  kInfo,     kTrace,         \
+       "The number of kprobe hits encountered during the collection of the"    \
+       "trace."),                                                              \
+  F(ftrace_kprobe_misses_begin,           kSingle,  kInfo,     kTrace,         \
+       "The number of kretprobe missed events at the beginning of the trace."),\
+  F(ftrace_kprobe_misses_end,             kSingle,  kInfo,     kTrace,         \
+       "The number of kretprobe missed events at the end of the trace."),      \
+  F(ftrace_kprobe_misses_delta,           kSingle,  kDataLoss, kTrace,         \
+       "The number of kretprobe missed events encountered during the "         \
+       "collection of the trace. A value greater than zero is due to the "     \
+       "maxactive parameter for the kretprobe being too small"),               \
   F(ftrace_setup_errors,                  kSingle,  kInfo,     kTrace,         \
        "One or more atrace/ftrace categories were not found or failed to "     \
        "enable. See ftrace_setup_errors in the metadata table for details."),  \
@@ -76,7 +90,12 @@ namespace perfetto::trace_processor::stats {
                                           kSingle,  kError,    kAnalysis, ""), \
   F(fuchsia_non_numeric_counters,         kSingle,  kError,    kAnalysis, ""), \
   F(fuchsia_timestamp_overflow,           kSingle,  kError,    kAnalysis, ""), \
+  F(fuchsia_record_read_error,            kSingle,  kError,    kAnalysis, ""), \
   F(fuchsia_invalid_event,                kSingle,  kError,    kAnalysis, ""), \
+  F(fuchsia_invalid_event_arg_type,       kSingle,  kError,    kAnalysis, ""), \
+  F(fuchsia_invalid_event_arg_name,       kSingle,  kError,    kAnalysis, ""), \
+  F(fuchsia_unknown_event_arg,            kSingle,  kError,    kAnalysis, ""), \
+  F(fuchsia_invalid_string_ref,           kSingle,  kError,    kAnalysis, ""), \
   F(gpu_counters_invalid_spec,            kSingle,  kError,    kAnalysis, ""), \
   F(gpu_counters_missing_spec,            kSingle,  kError,    kAnalysis, ""), \
   F(gpu_render_stage_parser_errors,       kSingle,  kError,    kAnalysis, ""), \
@@ -85,6 +104,21 @@ namespace perfetto::trace_processor::stats {
   F(interned_data_tokenizer_errors,       kSingle,  kInfo,     kAnalysis, ""), \
   F(invalid_clock_snapshots,              kSingle,  kError,    kAnalysis, ""), \
   F(invalid_cpu_times,                    kSingle,  kError,    kAnalysis, ""), \
+  F(kernel_wakelock_reused_id,            kSingle,  kError,    kAnalysis,      \
+       "Duplicated interning ID seen. Should never happen."),                  \
+  F(kernel_wakelock_unknown_id,           kSingle,  kError,    kAnalysis,      \
+       "Interning ID not found. Should never happen."),                        \
+  F(kernel_wakelock_zero_value_reported,  kSingle,  kDataLoss, kTrace,         \
+       "Zero value received from SuspendControlService. Indicates a transient "\
+       "error in SuspendControlService."),                                     \
+  F(kernel_wakelock_non_monotonic_value_reported,                              \
+                                          kSingle,  kDataLoss, kTrace,         \
+       "Decreased value received from SuspendControlService. Indicates a "     \
+       "transient error in SuspendControlService."),                           \
+  F(app_wakelock_parse_error,             kSingle,  kError,    kAnalysis,      \
+       "Parsing packed repeated field. Should never happen."),                 \
+  F(app_wakelock_unknown_id,              kSingle,  kError,    kAnalysis,      \
+       "Interning ID not found. Should never happen."),                        \
   F(meminfo_unknown_keys,                 kSingle,  kError,    kAnalysis, ""), \
   F(mismatched_sched_switch_tids,         kSingle,  kError,    kAnalysis, ""), \
   F(mm_unknown_type,                      kSingle,  kError,    kAnalysis, ""), \
@@ -94,8 +128,6 @@ namespace perfetto::trace_processor::stats {
   F(rss_stat_unknown_keys,                kSingle,  kError,    kAnalysis, ""), \
   F(rss_stat_negative_size,               kSingle,  kInfo,     kAnalysis, ""), \
   F(rss_stat_unknown_thread_for_mm_id,    kSingle,  kInfo,     kAnalysis, ""), \
-  F(sched_switch_out_of_order,            kSingle,  kError,    kAnalysis, ""), \
-  F(slice_out_of_order,                   kSingle,  kError,    kAnalysis, ""), \
   F(filter_input_bytes,                   kSingle,  kInfo,     kTrace,         \
        "Number of bytes pre-TraceFilter. The trace file would have been this " \
        "many bytes big if the TraceConfig didn't specify any TraceFilter. "    \
@@ -136,6 +168,9 @@ namespace perfetto::trace_processor::stats {
        "(filter_input_bytes - filter_output_bytes) because of the synthetic "  \
        "metadata and stats packets generated by the tracing service itself."), \
   F(traced_buf_bytes_written,             kIndexed, kInfo,     kTrace,    ""), \
+  F(traced_buf_clone_done_timestamp_ns,   kIndexed, kInfo,     kTrace,         \
+    "The timestamp when the clone snapshot operation for this buffer "         \
+    "finished"),                                                               \
   F(traced_buf_chunks_discarded,          kIndexed, kInfo,     kTrace,    ""), \
   F(traced_buf_chunks_overwritten,        kIndexed, kInfo,     kTrace,    ""), \
   F(traced_buf_chunks_read,               kIndexed, kInfo,     kTrace,    ""), \
@@ -159,8 +194,23 @@ namespace perfetto::trace_processor::stats {
       "the RING_BUFFER start or after the DISCARD buffer end."),               \
   F(traced_buf_sequence_packet_loss,      kIndexed, kDataLoss, kAnalysis,      \
       "The number of groups of consecutive packets lost in each sequence for " \
-      "this buffer"), \
+      "this buffer"),                                                          \
+  F(traced_buf_incremental_sequences_dropped, kIndexed, kDataLoss, kAnalysis,  \
+      "For a given buffer, indicates the number of sequences where all the "   \
+      "packets on that sequence were dropped due to lack of a valid "          \
+      "incremental state (i.e. interned data). This is usually a strong sign " \
+      "that either: "                                                          \
+      "1) incremental state invalidation is disabled. "                        \
+      "2) the incremental state invalidation interval is too low. "            \
+      "In either case, see "                                                   \
+      "https://perfetto.dev/docs/concepts/buffers"                             \
+      "#incremental-state-in-trace-packets"),                                  \
   F(traced_buf_write_wrap_count,          kIndexed, kInfo,     kTrace,    ""), \
+  F(traced_clone_started_timestamp_ns,    kSingle,  kInfo,     kTrace,         \
+    "The timestamp when the clone snapshot operation for this trace started"), \
+  F(traced_clone_trigger_timestamp_ns,    kSingle,  kInfo,     kTrace,         \
+    "The timestamp when trigger for the clone snapshot operation for this "    \
+    "trace was received"), \
   F(traced_chunks_discarded,              kSingle,  kInfo,     kTrace,    ""), \
   F(traced_data_sources_registered,       kSingle,  kInfo,     kTrace,    ""), \
   F(traced_data_sources_seen,             kSingle,  kInfo,     kTrace,    ""), \
@@ -257,7 +307,6 @@ namespace perfetto::trace_processor::stats {
       "Count of sys_write slices that have a truncated duration to resolve "   \
       "nesting incompatibilities with atrace slices. Real durations "          \
       "can be recovered via the |raw| table."),                                \
-  F(sched_waking_out_of_order,            kSingle,  kError,    kAnalysis, ""), \
   F(compact_sched_switch_skipped,         kSingle,  kInfo,     kAnalysis, ""), \
   F(compact_sched_waking_skipped,         kSingle,  kInfo,     kAnalysis, ""), \
   F(empty_chrome_metadata,                kSingle,  kError,    kTrace,    ""), \
@@ -311,10 +360,13 @@ namespace perfetto::trace_processor::stats {
   F(spe_no_timestamp,                     kSingle,  kInfo,     kTrace,         \
       "SPE record with no timestamp. Will try our best to assign a "           \
       "timestamp."),                                                           \
-  F(spe_record_droped,                    kSingle,  kDataLoss, kTrace,         \
+  F(spe_record_dropped,                   kSingle,  kDataLoss, kTrace,         \
       "SPE record dropped. E.g. Unable to assign it a timestamp."),            \
+  F(etm_no_importer,                      kSingle,  kError,    kAnalysis,      \
+      "Unable to parse ETM data because TraceProcessor was not compiled to  "  \
+      " support it. Make sure you enable the `enable_perfetto_etm_importer` "  \
+      " GN flag."),                                                            \
   F(memory_snapshot_parser_failure,       kSingle,  kError,    kAnalysis, ""), \
-  F(thread_time_in_state_out_of_order,    kSingle,  kError,    kAnalysis, ""), \
   F(thread_time_in_state_unknown_cpu_freq,                                     \
                                           kSingle,  kError,    kAnalysis, ""), \
   F(ftrace_packet_before_tracing_start,   kSingle,  kInfo,     kAnalysis,      \
@@ -424,11 +476,23 @@ namespace perfetto::trace_processor::stats {
       "An invalid Mali GPU MCU state ID was detected."),                       \
   F(pixel_modem_negative_timestamp,       kSingle,  kError,   kAnalysis,       \
       "A negative timestamp was received from a Pixel modem event."),          \
-  F(legacy_v8_cpu_profile_invalid_callsite, kSingle,  kInfo,  kAnalysis,       \
-      "Indicates a callsite in legacy v8 CPU profiling is invalid."),          \
-  F(legacy_v8_cpu_profile_invalid_sample, kSingle,  kError,  kAnalysis,        \
+  F(legacy_v8_cpu_profile_invalid_callsite, kSingle, kError,  kTrace,          \
+      "Indicates a callsite in legacy v8 CPU profiling is invalid. This is "   \
+      "a sign that the trace is malformed."),                                  \
+  F(legacy_v8_cpu_profile_invalid_sample, kSingle,  kError,  kTrace,           \
       "Indicates a sample in legacy v8 CPU profile is invalid. This will "     \
-      "cause CPU samples to be missing in the UI.")
+      "cause CPU samples to be missing in the UI. This is a sign that the "    \
+      "trace is malformed."),                                                  \
+  F(config_write_into_file_no_flush,      kSingle,  kError,  kTrace,           \
+      "The trace was collected with the `write_into_file` option set but "     \
+      "*without* `flush_period_ms` being set. This will cause the trace to "   \
+      "be fully loaded into memory and use significantly more memory than "    \
+      "necessary."),                                                           \
+  F(config_write_into_file_discard,        kIndexed,  kDataLoss,  kTrace,      \
+      "The trace was collected with the `write_into_file` option set but "     \
+      "uses a `DISCARD` buffer. This configuration is strongly discouraged "   \
+      "and can cause mysterious data loss in the trace. Please use "           \
+      "`RING_BUFFER` buffers instead.")
 // clang-format on
 
 enum Type {
@@ -453,9 +517,19 @@ enum Source {
   kAnalysis
 };
 
-// Ignore GCC warning about a missing argument for a variadic macro parameter.
 #if defined(__GNUC__) || defined(__clang__)
+#if defined(__clang__)
+#pragma clang diagnostic push
+// Fix 'error: #pragma system_header ignored in main file' for clang in Google3.
+#pragma clang diagnostic ignored "-Wpragma-system-header-outside-header"
+#endif
+
+// Ignore GCC warning about a missing argument for a variadic macro parameter.
 #pragma GCC system_header
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
 #endif
 
 // Declares an enum of literals (one for each stat). The enum values of each

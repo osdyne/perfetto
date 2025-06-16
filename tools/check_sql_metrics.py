@@ -58,6 +58,7 @@ def check_if_create_table_allowlisted(
           f"Offending file: {filename}\n")
   return errors
 
+
 # Allowlist path are relative to the metrics root.
 CREATE_TABLE_ALLOWLIST = {
     ('/android'
@@ -65,6 +66,8 @@ CREATE_TABLE_ALLOWLIST = {
         'android_cujs', 'relevant_binder_calls_with_names',
         'android_blocking_calls_cuj_calls'
     ],
+    ('/android'
+     '/android_blocking_calls_cuj_per_frame_metric.sql'): ['android_cujs'],
     ('/android'
      '/android_blocking_calls_unagg.sql'): [
         'filtered_processes_with_non_zero_blocking_calls', 'process_info',

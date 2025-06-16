@@ -19,7 +19,6 @@ import {MountOptions, Portal, PortalAttrs} from './portal';
 import {classNames} from '../base/classnames';
 import {findRef, isOrContains, toHTMLElement} from '../base/dom_utils';
 import {assertExists} from '../base/logging';
-import {scheduleFullRedraw} from './raf';
 
 type CustomModifier = Modifier<'sameWidth', {}>;
 type ExtendedModifiers = StrictModifiers | CustomModifier;
@@ -128,19 +127,21 @@ export class Popup implements m.ClassComponent<PopupAttrs> {
       closeOnOutsideClick = true,
     } = attrs;
 
-    this.isOpen = isOpen;
     this.onChange = onChange;
     this.closeOnEscape = closeOnEscape;
     this.closeOnOutsideClick = closeOnOutsideClick;
 
     return [
-      this.renderTrigger(trigger),
+      this.renderTrigger(trigger, isOpen),
       isOpen && this.renderPopup(attrs, children),
     ];
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  private renderTrigger(trigger: m.Vnode<any, any>): m.Children {
+  private renderTrigger(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    trigger: m.Vnode<any, any>,
+    isOpen: boolean,
+  ): m.Children {
     trigger.attrs = {
       ...trigger.attrs,
       ref: Popup.TRIGGER_REF,
@@ -148,7 +149,7 @@ export class Popup implements m.ClassComponent<PopupAttrs> {
         this.togglePopup();
         e.preventDefault();
       },
-      active: this.isOpen,
+      active: isOpen,
     };
     return trigger;
   }
@@ -349,16 +350,13 @@ export class Popup implements m.ClassComponent<PopupAttrs> {
   };
 
   private closePopup() {
-    if (this.isOpen) {
-      this.isOpen = false;
-      this.onChange(this.isOpen);
-      scheduleFullRedraw();
-    }
+    this.isOpen = false;
+    this.onChange(false);
+    m.redraw();
   }
 
   private togglePopup() {
     this.isOpen = !this.isOpen;
     this.onChange(this.isOpen);
-    scheduleFullRedraw();
   }
 }

@@ -115,6 +115,8 @@ void AfterMaybeBlockingSyscall() {}
 #ifndef INCLUDE_PERFETTO_EXT_BASE_ANDROID_UTILS_H_
 #define INCLUDE_PERFETTO_EXT_BASE_ANDROID_UTILS_H_
 
+#include <cstdint>
+#include <optional>
 #include <string>
 
 // gen_amalgamated expanded: #include "perfetto/base/build_config.h"
@@ -131,74 +133,37 @@ std::string GetAndroidProp(const char* name);
 
 #endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 
+struct Utsname {
+  std::string sysname;
+  std::string version;
+  std::string machine;
+  std::string release;
+};
+
+struct SystemInfo {
+  std::optional<int32_t> timezone_off_mins;
+  std::optional<Utsname> utsname_info;
+  std::optional<uint32_t> page_size;
+  std::optional<uint32_t> num_cpus;
+  std::string android_build_fingerprint;
+  std::string android_device_manufacturer;
+  std::optional<uint64_t> android_sdk_version;
+  std::string android_soc_model;
+  std::string android_guest_soc_model;
+  std::string android_hardware_revision;
+  std::string android_storage_model;
+  std::string android_ram_model;
+  std::string android_serial_console;
+};
+
+// Returns the device's system information.
+SystemInfo GetSystemInfo();
+
 }  // namespace base
 }  // namespace perfetto
 
 #endif  // INCLUDE_PERFETTO_EXT_BASE_ANDROID_UTILS_H_
-/*
- * Copyright (C) 2021 The Android Open Source Project
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-// gen_amalgamated expanded: #include "perfetto/ext/base/android_utils.h"
-
-// gen_amalgamated expanded: #include "perfetto/base/build_config.h"
-
-#include <string>
-
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
-#include <sys/system_properties.h>
-#endif
-
-// gen_amalgamated expanded: #include "perfetto/base/compiler.h"
-// gen_amalgamated expanded: #include "perfetto/base/logging.h"
-
-namespace perfetto {
-namespace base {
-
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
-
-std::string GetAndroidProp(const char* name) {
-  std::string ret;
-#if __ANDROID_API__ >= 26
-  const prop_info* pi = __system_property_find(name);
-  if (!pi) {
-    return ret;
-  }
-  __system_property_read_callback(
-      pi,
-      [](void* dst_void, const char*, const char* value, uint32_t) {
-        std::string& dst = *static_cast<std::string*>(dst_void);
-        dst = value;
-      },
-      &ret);
-#else  // __ANDROID_API__ < 26
-  char value_buf[PROP_VALUE_MAX];
-  int len = __system_property_get(name, value_buf);
-  if (len > 0 && static_cast<size_t>(len) < sizeof(value_buf)) {
-    ret = std::string(value_buf, static_cast<size_t>(len));
-  }
-#endif
-  return ret;
-}
-
-#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
-
-}  // namespace base
-}  // namespace perfetto
-// gen_amalgamated begin source: src/base/base64.cc
-// gen_amalgamated begin header: include/perfetto/ext/base/base64.h
+// gen_amalgamated begin header: include/perfetto/ext/base/string_utils.h
 // gen_amalgamated begin header: include/perfetto/ext/base/string_view.h
 // gen_amalgamated begin header: include/perfetto/ext/base/hash.h
 /*
@@ -223,6 +188,7 @@ std::string GetAndroidProp(const char* name) {
 #include <stddef.h>
 #include <stdint.h>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 
@@ -236,7 +202,7 @@ namespace base {
 class Hasher {
  public:
   // Creates an empty hash object
-  Hasher() {}
+  constexpr Hasher() = default;
 
   // Hashes a numeric value.
   template <
@@ -246,14 +212,16 @@ class Hasher {
     Update(reinterpret_cast<const char*>(&data), sizeof(data));
   }
 
+  constexpr void Update(char c) { return Update(&c, 1); }
+
   // Using the loop instead of "Update(str, strlen(str))" to avoid looping twice
-  void Update(const char* str) {
+  constexpr void Update(const char* str) {
     for (const auto* p = str; *p; ++p)
       Update(*p);
   }
 
   // Hashes a byte array.
-  void Update(const char* data, size_t size) {
+  constexpr void Update(const char* data, size_t size) {
     for (size_t i = 0; i < size; i++) {
       result_ ^= static_cast<uint8_t>(data[i]);
       // Note: Arithmetic overflow of unsigned integers is well defined in C++
@@ -263,32 +231,47 @@ class Hasher {
     }
   }
 
-  // Allow hashing anything that has a |data| field, a |size| field,
-  // and has the kHashable trait (e.g., base::StringView).
+  // Allow hashing anything that has `data` and `size` and has the kHashable
+  // trait (e.g., base::StringView).
   template <typename T, typename = std::enable_if_t<T::kHashable>>
-  void Update(const T& t) {
-    Update(t.data(), t.size());
+  constexpr void Update(const T& t) {
+    if constexpr (std::is_member_function_pointer_v<decltype(&T::data)>) {
+      Update(t.data(), t.size());
+    } else {
+      Update(t.data, t.size);
+    }
   }
 
-  void Update(const std::string& s) { Update(s.data(), s.size()); }
+  constexpr void Update(std::string_view s) { Update(s.data(), s.size()); }
 
-  uint64_t digest() const { return result_; }
+  constexpr uint64_t digest() const { return result_; }
 
   // Usage:
   // uint64_t hashed_value = Hash::Combine(33, false, "ABC", 458L, 3u, 'x');
   template <typename... Ts>
-  static uint64_t Combine(Ts&&... args) {
+  static constexpr uint64_t Combine(Ts&&... args) {
     Hasher hasher;
     hasher.UpdateAll(std::forward<Ts>(args)...);
     return hasher.digest();
   }
 
+  // Creates a hasher with `args` already hashed.
+  //
+  // Usage:
+  // Hasher partial = Hash::CreatePartial(33, false, "ABC", 458L);
+  template <typename... Ts>
+  static constexpr Hasher CreatePartial(Ts&&... args) {
+    Hasher hasher;
+    hasher.UpdateAll(std::forward<Ts>(args)...);
+    return hasher;
+  }
+
   // `hasher.UpdateAll(33, false, "ABC")` is shorthand for:
   // `hasher.Update(33); hasher.Update(false); hasher.Update("ABC");`
-  void UpdateAll() {}
+  constexpr void UpdateAll() {}
 
   template <typename T, typename... Ts>
-  void UpdateAll(T&& arg, Ts&&... args) {
+  constexpr void UpdateAll(T&& arg, Ts&&... args) {
     Update(arg);
     UpdateAll(std::forward<Ts>(args)...);
   }
@@ -361,6 +344,7 @@ struct Hash {
 
 #include <algorithm>
 #include <string>
+#include <vector>
 
 // gen_amalgamated expanded: #include "perfetto/base/build_config.h"
 // gen_amalgamated expanded: #include "perfetto/base/logging.h"
@@ -460,6 +444,15 @@ class StringView {
 #endif
   }
 
+  bool CaseInsensitiveOneOf(const std::vector<StringView>& others) const {
+    for (const StringView& other : others) {
+      if (CaseInsensitiveEq(other)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   bool StartsWith(const StringView& other) const {
     if (other.size() == 0)
       return true;
@@ -539,6 +532,454 @@ struct std::hash<::perfetto::base::StringView> {
 };
 
 #endif  // INCLUDE_PERFETTO_EXT_BASE_STRING_VIEW_H_
+/*
+ * Copyright (C) 2018 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef INCLUDE_PERFETTO_EXT_BASE_STRING_UTILS_H_
+#define INCLUDE_PERFETTO_EXT_BASE_STRING_UTILS_H_
+
+#include <stdarg.h>
+#include <stdlib.h>
+#include <string.h>
+
+#include <charconv>
+#include <cinttypes>
+#include <optional>
+#include <string>
+#include <system_error>
+#include <vector>
+
+// gen_amalgamated expanded: #include "perfetto/ext/base/string_view.h"
+
+namespace perfetto {
+namespace base {
+
+inline char Lowercase(char c) {
+  return ('A' <= c && c <= 'Z') ? static_cast<char>(c - ('A' - 'a')) : c;
+}
+
+inline char Uppercase(char c) {
+  return ('a' <= c && c <= 'z') ? static_cast<char>(c + ('A' - 'a')) : c;
+}
+
+inline std::optional<uint32_t> CStringToUInt32(const char* s, int base = 10) {
+  char* endptr = nullptr;
+  auto value = static_cast<uint32_t>(strtoul(s, &endptr, base));
+  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
+}
+
+inline std::optional<int32_t> CStringToInt32(const char* s, int base = 10) {
+  char* endptr = nullptr;
+  auto value = static_cast<int32_t>(strtol(s, &endptr, base));
+  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
+}
+
+// Note: it saturates to 7fffffffffffffff if parsing a hex number >= 0x8000...
+inline std::optional<int64_t> CStringToInt64(const char* s, int base = 10) {
+  char* endptr = nullptr;
+  auto value = static_cast<int64_t>(strtoll(s, &endptr, base));
+  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
+}
+
+inline std::optional<uint64_t> CStringToUInt64(const char* s, int base = 10) {
+  char* endptr = nullptr;
+  auto value = static_cast<uint64_t>(strtoull(s, &endptr, base));
+  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
+}
+
+double StrToD(const char* nptr, char** endptr);
+
+inline std::optional<double> CStringToDouble(const char* s) {
+  char* endptr = nullptr;
+  double value = StrToD(s, &endptr);
+  std::optional<double> result(std::nullopt);
+  if (*s != '\0' && *endptr == '\0')
+    result = value;
+  return result;
+}
+
+inline std::optional<uint32_t> StringToUInt32(const std::string& s,
+                                              int base = 10) {
+  return CStringToUInt32(s.c_str(), base);
+}
+
+inline std::optional<int32_t> StringToInt32(const std::string& s,
+                                            int base = 10) {
+  return CStringToInt32(s.c_str(), base);
+}
+
+inline std::optional<uint64_t> StringToUInt64(const std::string& s,
+                                              int base = 10) {
+  return CStringToUInt64(s.c_str(), base);
+}
+
+inline std::optional<int64_t> StringToInt64(const std::string& s,
+                                            int base = 10) {
+  return CStringToInt64(s.c_str(), base);
+}
+
+inline std::optional<double> StringToDouble(const std::string& s) {
+  return CStringToDouble(s.c_str());
+}
+
+template <typename T>
+inline std::optional<T> StringViewToNumber(const base::StringView& sv,
+                                           int base = 10) {
+  // std::from_chars() does not regonize the leading '+' character and only
+  // recognizes '-' so remove the '+' if it exists to avoid errors and match
+  // the behavior of the other string conversion utilities above.
+  size_t start_offset = !sv.empty() && sv.at(0) == '+' ? 1 : 0;
+  T value;
+  auto result =
+      std::from_chars(sv.begin() + start_offset, sv.end(), value, base);
+  if (result.ec == std::errc() && result.ptr == sv.end()) {
+    return value;
+  } else {
+    return std::nullopt;
+  }
+}
+
+inline std::optional<uint32_t> StringViewToUInt32(const base::StringView& sv,
+                                                  int base = 10) {
+  // std::from_chars() does not recognize the leading '-' character for
+  // unsigned conversions, but strtol does. To Mimic the behavior of strtol,
+  // attempt a signed converion if we see a leading '-', and then cast the
+  // result back to unsigned.
+  if (sv.size() > 0 && sv.at(0) == '-') {
+    return static_cast<std::optional<uint32_t> >(
+        StringViewToNumber<int32_t>(sv, base));
+  } else {
+    return StringViewToNumber<uint32_t>(sv, base);
+  }
+}
+
+inline std::optional<int32_t> StringViewToInt32(const base::StringView& sv,
+                                                int base = 10) {
+  return StringViewToNumber<int32_t>(sv, base);
+}
+
+inline std::optional<uint64_t> StringViewToUInt64(const base::StringView& sv,
+                                                  int base = 10) {
+  // std::from_chars() does not recognize the leading '-' character for
+  // unsigned conversions, but strtol does. To Mimic the behavior of strtol,
+  // attempt a signed converion if we see a leading '-', and then cast the
+  // result back to unsigned.
+  if (sv.size() > 0 && sv.at(0) == '-') {
+    return static_cast<std::optional<uint64_t> >(
+        StringViewToNumber<int64_t>(sv, base));
+  } else {
+    return StringViewToNumber<uint64_t>(sv, base);
+  }
+}
+
+inline std::optional<int64_t> StringViewToInt64(const base::StringView& sv,
+                                                int base = 10) {
+  return StringViewToNumber<int64_t>(sv, base);
+}
+
+// TODO: As of Clang 19.0 std::from_chars is unimplemented for type double
+// despite being part of C++17 standard, and already being supported by GCC and
+// MSVC. Enable this once we have double support in Clang.
+// inline std::optional<double> StringViewToDouble(const base::StringView& sv) {
+//   return StringViewToNumber<double>(sv);
+// }
+
+bool StartsWith(const std::string& str, const std::string& prefix);
+bool EndsWith(const std::string& str, const std::string& suffix);
+bool StartsWithAny(const std::string& str,
+                   const std::vector<std::string>& prefixes);
+bool Contains(const std::string& haystack, const std::string& needle);
+bool Contains(const std::string& haystack, char needle);
+size_t Find(const StringView& needle, const StringView& haystack);
+bool CaseInsensitiveEqual(const std::string& first, const std::string& second);
+std::string Join(const std::vector<std::string>& parts,
+                 const std::string& delim);
+std::vector<std::string> SplitString(const std::string& text,
+                                     const std::string& delimiter);
+std::string StripPrefix(const std::string& str, const std::string& prefix);
+std::string StripSuffix(const std::string& str, const std::string& suffix);
+std::string TrimWhitespace(const std::string& str);
+std::string ToLower(const std::string& str);
+std::string ToUpper(const std::string& str);
+std::string StripChars(const std::string& str,
+                       const std::string& chars,
+                       char replacement);
+std::string ToHex(const char* data, size_t size);
+inline std::string ToHex(const std::string& s) {
+  return ToHex(s.c_str(), s.size());
+}
+std::string IntToHexString(uint32_t number);
+std::string Uint64ToHexString(uint64_t number);
+std::string Uint64ToHexStringNoPrefix(uint64_t number);
+std::string ReplaceAll(std::string str,
+                       const std::string& to_replace,
+                       const std::string& replacement);
+
+// Checks if all characters in the input string view `str` are ASCII.
+//
+// If so, the function returns true and `output` is not modified.
+// If `str` contains non-ASCII characters, the function returns false,
+// removes invalid UTF-8 characters from `str`, and stores the result in
+// `output`.
+bool CheckAsciiAndRemoveInvalidUTF8(base::StringView str, std::string& output);
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+bool WideToUTF8(const std::wstring& source, std::string& output);
+bool UTF8ToWide(const std::string& source, std::wstring& output);
+#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+
+// A BSD-style strlcpy without the return value.
+// Copies at most |dst_size|-1 characters. Unlike strncpy, it always \0
+// terminates |dst|, as long as |dst_size| is not 0.
+// Unlike strncpy and like strlcpy it does not zero-pad the rest of |dst|.
+// Returns nothing. The BSD strlcpy returns the size of |src|, which might
+// be > |dst_size|. Anecdotal experience suggests people assume the return value
+// is the number of bytes written in |dst|. That assumption can lead to
+// dangerous bugs.
+// In order to avoid being subtly uncompliant with strlcpy AND avoid misuse,
+// the choice here is to return nothing.
+inline void StringCopy(char* dst, const char* src, size_t dst_size) {
+  for (size_t i = 0; i < dst_size; ++i) {
+    if ((dst[i] = src[i]) == '\0') {
+      return;  // We hit and copied the null terminator.
+    }
+  }
+
+  // We were left off at dst_size. We over copied 1 byte. Null terminate.
+  if (PERFETTO_LIKELY(dst_size > 0))
+    dst[dst_size - 1] = 0;
+}
+
+// Like snprintf() but returns the number of chars *actually* written (without
+// counting the null terminator) NOT "the number of chars which would have been
+// written to the final string if enough  space had been available".
+// This should be used in almost all cases when the caller uses the return value
+// of snprintf(). If the return value is not used, there is no benefit in using
+// this wrapper, as this just calls snprintf() and mangles the return value.
+// It always null-terminates |dst| (even in case of errors), unless
+// |dst_size| == 0.
+// Examples:
+//   SprintfTrunc(x, 4, "123whatever"): returns 3 and writes "123\0".
+//   SprintfTrunc(x, 4, "123"): returns 3 and writes "123\0".
+//   SprintfTrunc(x, 3, "123"): returns 2 and writes "12\0".
+//   SprintfTrunc(x, 2, "123"): returns 1 and writes "1\0".
+//   SprintfTrunc(x, 1, "123"): returns 0 and writes "\0".
+//   SprintfTrunc(x, 0, "123"): returns 0 and writes nothing.
+// NOTE: This means that the caller has no way to tell when truncation happens
+//   vs the edge case of *just* fitting in the buffer.
+size_t SprintfTrunc(char* dst, size_t dst_size, const char* fmt, ...)
+    PERFETTO_PRINTF_FORMAT(3, 4);
+
+// Line number starts from 1
+struct LineWithOffset {
+  base::StringView line;
+  uint32_t line_offset;
+  uint32_t line_num;
+};
+
+// For given string and offset Pfinds a line with character for
+// which offset points, what number is this line (starts from 1), and the offset
+// inside this line. returns std::nullopt if the offset points to
+// line break character or exceeds string length.
+std::optional<LineWithOffset> FindLineWithOffset(base::StringView str,
+                                                 uint32_t offset);
+
+// A helper class to facilitate construction and usage of write-once stack
+// strings.
+// Example usage:
+//   StackString<32> x("format %d %s", 42, string_arg);
+//   TakeString(x.c_str() | x.string_view() | x.ToStdString());
+// Rather than char x[32] + sprintf.
+// Advantages:
+// - Avoids useless zero-fills caused by people doing `char buf[32] {}` (mainly
+//   by fearing unknown snprintf failure modes).
+// - Makes the code more robust in case of snprintf truncations (len() and
+//  string_view() will return the truncated length, unlike snprintf).
+template <size_t N>
+class StackString {
+ public:
+  explicit PERFETTO_PRINTF_FORMAT(/* 1=this */ 2, 3)
+      StackString(const char* fmt, ...) {
+    buf_[0] = '\0';
+    va_list args;
+    va_start(args, fmt);
+    int res = vsnprintf(buf_, sizeof(buf_), fmt, args);
+    va_end(args);
+    buf_[sizeof(buf_) - 1] = '\0';
+    len_ = res < 0 ? 0 : std::min(static_cast<size_t>(res), sizeof(buf_) - 1);
+  }
+
+  StringView string_view() const { return StringView(buf_, len_); }
+  std::string ToStdString() const { return std::string(buf_, len_); }
+  const char* c_str() const { return buf_; }
+  size_t len() const { return len_; }
+  char* mutable_data() { return buf_; }
+
+ private:
+  char buf_[N];
+  size_t len_ = 0;  // Does not include the \0.
+};
+
+}  // namespace base
+}  // namespace perfetto
+
+#endif  // INCLUDE_PERFETTO_EXT_BASE_STRING_UTILS_H_
+/*
+ * Copyright (C) 2021 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// gen_amalgamated expanded: #include "perfetto/ext/base/android_utils.h"
+
+// gen_amalgamated expanded: #include "perfetto/base/build_config.h"
+
+#include <string>
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+#include <sys/system_properties.h>
+#endif
+
+// gen_amalgamated expanded: #include "perfetto/base/compiler.h"
+// gen_amalgamated expanded: #include "perfetto/base/logging.h"
+// gen_amalgamated expanded: #include "perfetto/base/time.h"
+// gen_amalgamated expanded: #include "perfetto/ext/base/string_utils.h"
+
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) &&  \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_NACL) && \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_WASM)
+#include <sys/utsname.h>
+#include <unistd.h>
+#endif
+
+namespace perfetto {
+namespace base {
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+
+std::string GetAndroidProp(const char* name) {
+  std::string ret;
+#if __ANDROID_API__ >= 26
+  const prop_info* pi = __system_property_find(name);
+  if (!pi) {
+    return ret;
+  }
+  __system_property_read_callback(
+      pi,
+      [](void* dst_void, const char*, const char* value, uint32_t) {
+        std::string& dst = *static_cast<std::string*>(dst_void);
+        dst = value;
+      },
+      &ret);
+#else  // __ANDROID_API__ < 26
+  char value_buf[PROP_VALUE_MAX];
+  int len = __system_property_get(name, value_buf);
+  if (len > 0 && static_cast<size_t>(len) < sizeof(value_buf)) {
+    ret = std::string(value_buf, static_cast<size_t>(len));
+  }
+#endif
+  return ret;
+}
+
+#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+
+SystemInfo GetSystemInfo() {
+  SystemInfo info;
+
+  info.timezone_off_mins = GetTimezoneOffsetMins();
+
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) &&  \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_NACL) && \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_WASM)
+  struct utsname uname_info;
+  if (uname(&uname_info) == 0) {
+    Utsname utsname_info;
+    utsname_info.sysname = uname_info.sysname;
+    utsname_info.version = uname_info.version;
+    utsname_info.machine = uname_info.machine;
+    utsname_info.release = uname_info.release;
+
+    info.utsname_info = utsname_info;
+  }
+  info.page_size = static_cast<uint32_t>(sysconf(_SC_PAGESIZE));
+  info.num_cpus = static_cast<uint32_t>(sysconf(_SC_NPROCESSORS_CONF));
+#endif  // !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  info.android_build_fingerprint = GetAndroidProp("ro.build.fingerprint");
+  if (info.android_build_fingerprint.empty()) {
+    PERFETTO_ELOG("Unable to read ro.build.fingerprint");
+  }
+
+  info.android_device_manufacturer = GetAndroidProp("ro.product.manufacturer");
+  if (info.android_device_manufacturer.empty()) {
+    PERFETTO_ELOG("Unable to read ro.product.manufacturer");
+  }
+
+  std::string sdk_str_value = GetAndroidProp("ro.build.version.sdk");
+  info.android_sdk_version = StringToUInt64(sdk_str_value);
+  if (!info.android_sdk_version.has_value()) {
+    PERFETTO_ELOG("Unable to read ro.build.version.sdk");
+  }
+
+  info.android_soc_model = GetAndroidProp("ro.soc.model");
+  if (info.android_soc_model.empty()) {
+    PERFETTO_ELOG("Unable to read ro.soc.model");
+  }
+
+  // guest_soc model is not always present
+  info.android_guest_soc_model = GetAndroidProp("ro.boot.guest_soc.model");
+
+  info.android_hardware_revision = GetAndroidProp("ro.boot.hardware.revision");
+  if (info.android_hardware_revision.empty()) {
+    PERFETTO_ELOG("Unable to read ro.boot.hardware.revision");
+  }
+
+  info.android_storage_model = GetAndroidProp("ro.boot.hardware.ufs");
+  if (info.android_storage_model.empty()) {
+    PERFETTO_ELOG("Unable to read ro.boot.hardware.ufs");
+  }
+
+  info.android_ram_model = GetAndroidProp("ro.boot.hardware.ddr");
+  if (info.android_ram_model.empty()) {
+    PERFETTO_ELOG("Unable to read ro.boot.hardware.ddr");
+  }
+
+  info.android_serial_console = GetAndroidProp("init.svc.console");
+  if (info.android_serial_console.empty()) {
+    PERFETTO_ELOG("Unable to read init.svc.console");
+  }
+#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+
+  return info;
+}
+
+}  // namespace base
+}  // namespace perfetto
+// gen_amalgamated begin source: src/base/base64.cc
+// gen_amalgamated begin header: include/perfetto/ext/base/base64.h
 // gen_amalgamated begin header: include/perfetto/ext/base/utils.h
 // gen_amalgamated begin header: include/perfetto/ext/base/sys_types.h
 /*
@@ -1189,240 +1630,6 @@ void UnregisterAllCrashKeysForTesting();
 }  // namespace perfetto
 
 #endif  // INCLUDE_PERFETTO_EXT_BASE_CRASH_KEYS_H_
-// gen_amalgamated begin header: include/perfetto/ext/base/string_utils.h
-/*
- * Copyright (C) 2018 The Android Open Source Project
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-#ifndef INCLUDE_PERFETTO_EXT_BASE_STRING_UTILS_H_
-#define INCLUDE_PERFETTO_EXT_BASE_STRING_UTILS_H_
-
-#include <stdarg.h>
-#include <stdlib.h>
-#include <string.h>
-
-#include <cinttypes>
-#include <optional>
-#include <string>
-#include <vector>
-
-// gen_amalgamated expanded: #include "perfetto/ext/base/string_view.h"
-
-namespace perfetto {
-namespace base {
-
-inline char Lowercase(char c) {
-  return ('A' <= c && c <= 'Z') ? static_cast<char>(c - ('A' - 'a')) : c;
-}
-
-inline char Uppercase(char c) {
-  return ('a' <= c && c <= 'z') ? static_cast<char>(c + ('A' - 'a')) : c;
-}
-
-inline std::optional<uint32_t> CStringToUInt32(const char* s, int base = 10) {
-  char* endptr = nullptr;
-  auto value = static_cast<uint32_t>(strtoul(s, &endptr, base));
-  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
-}
-
-inline std::optional<int32_t> CStringToInt32(const char* s, int base = 10) {
-  char* endptr = nullptr;
-  auto value = static_cast<int32_t>(strtol(s, &endptr, base));
-  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
-}
-
-// Note: it saturates to 7fffffffffffffff if parsing a hex number >= 0x8000...
-inline std::optional<int64_t> CStringToInt64(const char* s, int base = 10) {
-  char* endptr = nullptr;
-  auto value = static_cast<int64_t>(strtoll(s, &endptr, base));
-  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
-}
-
-inline std::optional<uint64_t> CStringToUInt64(const char* s, int base = 10) {
-  char* endptr = nullptr;
-  auto value = static_cast<uint64_t>(strtoull(s, &endptr, base));
-  return (*s && !*endptr) ? std::make_optional(value) : std::nullopt;
-}
-
-double StrToD(const char* nptr, char** endptr);
-
-inline std::optional<double> CStringToDouble(const char* s) {
-  char* endptr = nullptr;
-  double value = StrToD(s, &endptr);
-  std::optional<double> result(std::nullopt);
-  if (*s != '\0' && *endptr == '\0')
-    result = value;
-  return result;
-}
-
-inline std::optional<uint32_t> StringToUInt32(const std::string& s,
-                                              int base = 10) {
-  return CStringToUInt32(s.c_str(), base);
-}
-
-inline std::optional<int32_t> StringToInt32(const std::string& s,
-                                            int base = 10) {
-  return CStringToInt32(s.c_str(), base);
-}
-
-inline std::optional<uint64_t> StringToUInt64(const std::string& s,
-                                              int base = 10) {
-  return CStringToUInt64(s.c_str(), base);
-}
-
-inline std::optional<int64_t> StringToInt64(const std::string& s,
-                                            int base = 10) {
-  return CStringToInt64(s.c_str(), base);
-}
-
-inline std::optional<double> StringToDouble(const std::string& s) {
-  return CStringToDouble(s.c_str());
-}
-
-bool StartsWith(const std::string& str, const std::string& prefix);
-bool EndsWith(const std::string& str, const std::string& suffix);
-bool StartsWithAny(const std::string& str,
-                   const std::vector<std::string>& prefixes);
-bool Contains(const std::string& haystack, const std::string& needle);
-bool Contains(const std::string& haystack, char needle);
-size_t Find(const StringView& needle, const StringView& haystack);
-bool CaseInsensitiveEqual(const std::string& first, const std::string& second);
-std::string Join(const std::vector<std::string>& parts,
-                 const std::string& delim);
-std::vector<std::string> SplitString(const std::string& text,
-                                     const std::string& delimiter);
-std::string StripPrefix(const std::string& str, const std::string& prefix);
-std::string StripSuffix(const std::string& str, const std::string& suffix);
-std::string TrimWhitespace(const std::string& str);
-std::string ToLower(const std::string& str);
-std::string ToUpper(const std::string& str);
-std::string StripChars(const std::string& str,
-                       const std::string& chars,
-                       char replacement);
-std::string ToHex(const char* data, size_t size);
-inline std::string ToHex(const std::string& s) {
-  return ToHex(s.c_str(), s.size());
-}
-std::string IntToHexString(uint32_t number);
-std::string Uint64ToHexString(uint64_t number);
-std::string Uint64ToHexStringNoPrefix(uint64_t number);
-std::string ReplaceAll(std::string str,
-                       const std::string& to_replace,
-                       const std::string& replacement);
-
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
-bool WideToUTF8(const std::wstring& source, std::string& output);
-bool UTF8ToWide(const std::string& source, std::wstring& output);
-#endif // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
-
-// A BSD-style strlcpy without the return value.
-// Copies at most |dst_size|-1 characters. Unlike strncpy, it always \0
-// terminates |dst|, as long as |dst_size| is not 0.
-// Unlike strncpy and like strlcpy it does not zero-pad the rest of |dst|.
-// Returns nothing. The BSD strlcpy returns the size of |src|, which might
-// be > |dst_size|. Anecdotal experience suggests people assume the return value
-// is the number of bytes written in |dst|. That assumption can lead to
-// dangerous bugs.
-// In order to avoid being subtly uncompliant with strlcpy AND avoid misuse,
-// the choice here is to return nothing.
-inline void StringCopy(char* dst, const char* src, size_t dst_size) {
-  for (size_t i = 0; i < dst_size; ++i) {
-    if ((dst[i] = src[i]) == '\0') {
-      return;  // We hit and copied the null terminator.
-    }
-  }
-
-  // We were left off at dst_size. We over copied 1 byte. Null terminate.
-  if (PERFETTO_LIKELY(dst_size > 0))
-    dst[dst_size - 1] = 0;
-}
-
-// Like snprintf() but returns the number of chars *actually* written (without
-// counting the null terminator) NOT "the number of chars which would have been
-// written to the final string if enough  space had been available".
-// This should be used in almost all cases when the caller uses the return value
-// of snprintf(). If the return value is not used, there is no benefit in using
-// this wrapper, as this just calls snprintf() and mangles the return value.
-// It always null-terminates |dst| (even in case of errors), unless
-// |dst_size| == 0.
-// Examples:
-//   SprintfTrunc(x, 4, "123whatever"): returns 3 and writes "123\0".
-//   SprintfTrunc(x, 4, "123"): returns 3 and writes "123\0".
-//   SprintfTrunc(x, 3, "123"): returns 2 and writes "12\0".
-//   SprintfTrunc(x, 2, "123"): returns 1 and writes "1\0".
-//   SprintfTrunc(x, 1, "123"): returns 0 and writes "\0".
-//   SprintfTrunc(x, 0, "123"): returns 0 and writes nothing.
-// NOTE: This means that the caller has no way to tell when truncation happens
-//   vs the edge case of *just* fitting in the buffer.
-size_t SprintfTrunc(char* dst, size_t dst_size, const char* fmt, ...)
-    PERFETTO_PRINTF_FORMAT(3, 4);
-
-// Line number starts from 1
-struct LineWithOffset {
-  base::StringView line;
-  uint32_t line_offset;
-  uint32_t line_num;
-};
-
-// For given string and offset Pfinds a line with character for
-// which offset points, what number is this line (starts from 1), and the offset
-// inside this line. returns std::nullopt if the offset points to
-// line break character or exceeds string length.
-std::optional<LineWithOffset> FindLineWithOffset(base::StringView str,
-                                                 uint32_t offset);
-
-// A helper class to facilitate construction and usage of write-once stack
-// strings.
-// Example usage:
-//   StackString<32> x("format %d %s", 42, string_arg);
-//   TakeString(x.c_str() | x.string_view() | x.ToStdString());
-// Rather than char x[32] + sprintf.
-// Advantages:
-// - Avoids useless zero-fills caused by people doing `char buf[32] {}` (mainly
-//   by fearing unknown snprintf failure modes).
-// - Makes the code more robust in case of snprintf truncations (len() and
-//  string_view() will return the truncated length, unlike snprintf).
-template <size_t N>
-class StackString {
- public:
-  explicit PERFETTO_PRINTF_FORMAT(/* 1=this */ 2, 3)
-      StackString(const char* fmt, ...) {
-    buf_[0] = '\0';
-    va_list args;
-    va_start(args, fmt);
-    int res = vsnprintf(buf_, sizeof(buf_), fmt, args);
-    va_end(args);
-    buf_[sizeof(buf_) - 1] = '\0';
-    len_ = res < 0 ? 0 : std::min(static_cast<size_t>(res), sizeof(buf_) - 1);
-  }
-
-  StringView string_view() const { return StringView(buf_, len_); }
-  std::string ToStdString() const { return std::string(buf_, len_); }
-  const char* c_str() const { return buf_; }
-  size_t len() const { return len_; }
-  char* mutable_data() { return buf_; }
-
- private:
-  char buf_[N];
-  size_t len_ = 0;  // Does not include the \0.
-};
-
-}  // namespace base
-}  // namespace perfetto
-
-#endif  // INCLUDE_PERFETTO_EXT_BASE_STRING_UTILS_H_
 /*
  * Copyright (C) 2021 The Android Open Source Project
  *
@@ -1608,7 +1815,7 @@ void InstallCtrlCHandler(CtrlCHandlerFunction handler) {
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
   // Setup signal handler.
-  struct sigaction sa {};
+  struct sigaction sa{};
 
 // Glibc headers for sa_sigaction trigger this.
 #pragma GCC diagnostic push
@@ -1616,7 +1823,11 @@ void InstallCtrlCHandler(CtrlCHandlerFunction handler) {
 #pragma GCC diagnostic ignored "-Wdisabled-macro-expansion"
 #endif
   sa.sa_handler = [](int) { g_handler(); };
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
   sa.sa_flags = static_cast<decltype(sa.sa_flags)>(SA_RESETHAND | SA_RESTART);
+#else  // POSIX-compliant
+  sa.sa_flags = static_cast<decltype(sa.sa_flags)>(SA_RESETHAND);
+#endif
 #pragma GCC diagnostic pop
   sigaction(SIGINT, &sa, nullptr);
   sigaction(SIGTERM, &sa, nullptr);
@@ -1804,8 +2015,11 @@ class EventFd {
   // the pipe for fallback mode.
   ScopedPlatformHandle event_handle_;
 
-#if !PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) &&   \
-    !PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) && \
+// QNX is specified because it is a non-Linux UNIX platform but it
+// still sets the PERFETTO_OS_LINUX flag to be as compatible as possible
+// with the Linux build.
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) && \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) &&           \
     !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
   // On Mac and other non-Linux UNIX platforms a pipe-based fallback is used.
   // The write end of the wakeup pipe.
@@ -1892,6 +2106,8 @@ class Pipe {
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
 #include <Windows.h>
 #include <synchapi.h>
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+#include <unistd.h>
 #elif PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 #include <sys/eventfd.h>
@@ -1927,7 +2143,7 @@ void EventFd::Clear() {
     PERFETTO_DFATAL("EventFd::Clear()");
 }
 
-#elif PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 
 EventFd::EventFd() {
@@ -2322,7 +2538,7 @@ bool ReadFileDescriptor(int fd, std::string* out) {
   // Do not override existing data in string.
   size_t i = out->size();
 
-  struct stat buf {};
+  struct stat buf{};
   if (fstat(fd, &buf) != -1) {
     if (buf.st_size > 0)
       out->resize(i + static_cast<size_t>(buf.st_size));
@@ -2359,7 +2575,7 @@ bool ReadPlatformHandle(PlatformHandle h, std::string* out) {
       out->resize(i);
       const bool is_eof = res && bytes_read == 0;
       auto err = res ? 0 : GetLastError();
-      // The "Broken pipe" error on Windows is slighly different than Unix:
+      // The "Broken pipe" error on Windows is slightly different than Unix:
       // On Unix: a "broken pipe" error can happen only on the writer side. On
       // the reader there is no broken pipe, just a EOF.
       // On windows: the reader also sees a broken pipe error.
@@ -2555,6 +2771,17 @@ base::Status ListFilesRecursive(const std::string& dir_path,
           strcmp(dirent->d_name, "..") == 0) {
         continue;
       }
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+      struct stat* dirstat;
+      const std::string full_path = cur_dir + dirent->d_name;
+      PERFETTO_CHECK(stat(full_path.c_str(), dirstat) == 0);
+      if (S_ISDIR(dirstat->st_mode)) {
+        dir_queue.push_back(full_path + '/');
+      } else if (S_ISREG(dirstat->st_mode)) {
+        PERFETTO_CHECK(full_path.length() > root_dir_path.length());
+        output.push_back(full_path.substr(root_dir_path.length()));
+      }
+#else
       if (dirent->d_type == DT_DIR) {
         dir_queue.push_back(cur_dir + dirent->d_name + '/');
       } else if (dirent->d_type == DT_REG) {
@@ -2562,6 +2789,7 @@ base::Status ListFilesRecursive(const std::string& dir_path,
         PERFETTO_CHECK(full_path.length() > root_dir_path.length());
         output.push_back(full_path.substr(root_dir_path.length()));
       }
+#endif
     }
 #endif
   }
@@ -2649,7 +2877,7 @@ std::optional<uint64_t> GetFileSize(PlatformHandle fd) {
   static_assert(sizeof(decltype(file_size.QuadPart)) <= sizeof(uint64_t));
   return static_cast<uint64_t>(file_size.QuadPart);
 #else
-  struct stat buf {};
+  struct stat buf{};
   if (fstat(fd, &buf) == -1) {
     return std::nullopt;
   }
@@ -2967,6 +3195,552 @@ int getopt(int argc, char** argv, const char* shortopts) {
 }  // namespace getopt_compat
 }  // namespace base
 }  // namespace perfetto
+// gen_amalgamated begin source: src/base/intrusive_tree.cc
+// gen_amalgamated begin header: src/base/intrusive_tree.h
+/*
+ * Copyright (C) 2025 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef SRC_BASE_INTRUSIVE_TREE_H_
+#define SRC_BASE_INTRUSIVE_TREE_H_
+
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+
+// gen_amalgamated expanded: #include "perfetto/base/logging.h"
+
+// An intrusive tree implementation, inspired from BSD kernel's tree.h
+// Unlike std::set<>, the nodes being inserted into the tree need to explicitly
+// declare a RBNode structure (one for each tree they are part of).
+// The user must specify a TreeTraits for each tree the struct is part of.
+// The traits struct defines the type of the key and how to get to the node
+// entry from the outer object.
+// Usage example:
+// class Person {
+//  public:
+//   struct Traits {
+//     using KeyType = std::string;
+//     static const KeyType& GetKey(const Person& p) { return p->unique_id; }
+//     static constexpr size_t NodeOffset() { return offsetof(Person, node); }
+//   };
+//   std::string unique_id;
+//   std::string name;
+//   std::string surname;
+//   IntrusiveTreeNode node{};
+// }
+//  IntrusiveTree<Person, Person::Traits> tree;
+//  tree.insert(&person1);
+//  ...
+
+namespace perfetto::base {
+
+namespace internal {
+
+enum RBColor : uint8_t {
+  BLACK = 0,
+  RED = 1,
+};
+
+struct RBNode {
+  RBNode* left = nullptr;
+  RBNode* right = nullptr;
+  RBNode* parent = nullptr;
+  RBColor color = RBColor::BLACK;
+};
+
+void RBInsertColor(RBNode** root, RBNode* elm);
+void RBRemove(RBNode** root, RBNode* elm);
+
+// Returns nullptr after reaching the last leaf (the max element).
+const RBNode* RBNext(const RBNode* node);
+
+// KeyCompare tries first to use the CompareKey function in Traits, if present.
+// The signature of that function is int(const KeyType&, const KeyType&).
+// If the comparator function doesn't exist, falls backk on std::less<KeyType>.
+template <
+    class Traits,
+    class = std::enable_if_t<std::is_function_v<typename Traits::CompareKey>,
+                             void> >
+int KeyCompare(const typename Traits::KeyType& k1,
+               const typename Traits::KeyType& k2) {
+  return Traits::CompareKey(k1, k2);
+}
+
+// SFINAE fallback on std::less<KeyType>
+template <class Traits>
+int KeyCompare(const typename Traits::KeyType& k1,
+               const typename Traits::KeyType& k2) {
+  std::less<typename Traits::KeyType> less_cmp;
+  return less_cmp(k1, k2) ? -1 : (less_cmp(k2, k1) ? 1 : 0);
+}
+
+}  // namespace internal
+
+using IntrusiveTreeNode = internal::RBNode;
+
+// T is the class that has one or more IntrusiveTreeNode as fiels.
+// Traits defines the key type, getter and offset between node and T.
+// Traits is separate to allow the same T to be part of different trees (which
+// necessitate a different Traits, at very least for the offset).
+template <typename T, typename Traits>
+class IntrusiveTree {
+ public:
+  using Key = typename Traits::KeyType;
+
+  class Iterator {
+   public:
+    Iterator() = default;
+    explicit Iterator(const internal::RBNode* node) : node_(node) {}
+    ~Iterator() = default;
+    Iterator(const Iterator&) = default;
+    Iterator& operator=(const Iterator&) = default;
+    Iterator(Iterator&&) noexcept = default;
+    Iterator& operator=(Iterator&&) noexcept = default;
+
+    bool operator==(const Iterator& o) const { return node_ == o.node_; }
+    bool operator!=(const Iterator& o) const { return !(*this == o); }
+    const T* operator->() const { return entryof(node_); }
+    const T& operator*() const {
+      PERFETTO_DCHECK(node_ != nullptr);
+      return *operator->();
+    }
+    T* operator->() { return const_cast<T*>(entryof(node_)); }
+    T& operator*() {
+      PERFETTO_DCHECK(node_ != nullptr);
+      return *operator->();
+    }
+    explicit operator bool() const { return node_ != nullptr; }
+
+    Iterator& operator++() {
+      node_ = internal::RBNext(node_);
+      return *this;
+    }
+
+   private:
+    const internal::RBNode* node_ = nullptr;
+  };  // Iterator
+
+  using value_type = T;
+  using const_pointer = const T*;
+  using const_iterator = Iterator;
+
+  std::pair<Iterator, bool> Insert(T& entry) {
+    // The insertion preamble is inlined because it's few instructions and
+    // out-lining it would require std::function indirections for getting the
+    // key and the comparator.
+    int comp = 0;
+    internal::RBNode* tmp = root_;
+    internal::RBNode* parent = nullptr;
+    internal::RBNode* const entry_node = nodeof(&entry);
+    while (tmp) {
+      parent = tmp;
+      comp = key_compare(entry_node, parent);
+      if (comp < 0) {
+        tmp = tmp->left;
+      } else if (comp > 0) {
+        tmp = tmp->right;
+      } else {
+        return {Iterator(tmp), false};  // The key exists already.
+      }
+    }  // while(tmp)
+    entry_node->left = entry_node->right = nullptr;
+    entry_node->parent = parent;
+    entry_node->color = internal::RBColor::RED;
+    if (parent) {
+      if (comp < 0) {
+        PERFETTO_DCHECK(parent->left == nullptr);
+        parent->left = entry_node;
+      } else {
+        PERFETTO_DCHECK(parent->right == nullptr);
+        parent->right = entry_node;
+      }
+    } else {
+      root_ = entry_node;
+    }
+    internal::RBInsertColor(&root_, entry_node);
+    ++size_;
+    return {Iterator(entry_node), true};
+  }
+
+  Iterator Find(const Key& key) const {
+    internal::RBNode* tmp = root_;
+    while (tmp) {
+      int comp =
+          internal::KeyCompare<Traits>(key, Traits::GetKey(*entryof(tmp)));
+      if (comp < 0) {
+        tmp = tmp->left;
+      } else if (comp > 0) {
+        tmp = tmp->right;
+      } else {
+        return Iterator(tmp);
+      }
+    }
+    return Iterator(nullptr);
+  }
+
+  bool Remove(const Key& key) {
+    Iterator it = Find(key);
+    if (!it)
+      return false;
+    internal::RBRemove(&root_, nodeof(std::addressof(*it)));
+    --size_;
+    return true;
+  }
+
+  Iterator Remove(T& entry) { return Remove(Iterator(nodeof(&entry))); }
+
+  Iterator Remove(Iterator it) {
+    Iterator next = it;
+    ++next;
+    internal::RBRemove(&root_, nodeof(std::addressof(*it)));
+    --size_;
+    return next;
+  }
+
+  size_t Size() const { return size_; }
+
+  Iterator begin() const {
+    const internal::RBNode* node = root_;
+    while (node && node->left)
+      node = node->left;
+    return Iterator(node);
+  }
+
+  Iterator end() const { return Iterator(nullptr); }
+
+ private:
+  static constexpr size_t off_ = Traits::NodeOffset();
+  static internal::RBNode* nodeof(T* t) {
+    PERFETTO_DCHECK(t != nullptr);
+    return reinterpret_cast<internal::RBNode*>(reinterpret_cast<uintptr_t>(t) +
+                                               off_);
+  }
+  static const T* entryof(const internal::RBNode* n) {
+    PERFETTO_DCHECK(n != nullptr);
+    return reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(n) - off_);
+  }
+  static int key_compare(const internal::RBNode* node_a,
+                         const internal::RBNode* node_b) {
+    auto* a = entryof(node_a);
+    auto* b = entryof(node_b);
+    return internal::KeyCompare<Traits>(Traits::GetKey(*a), Traits::GetKey(*b));
+  }
+
+  internal::RBNode* root_ = nullptr;
+  size_t size_ = 0;
+};
+
+}  // namespace perfetto::base
+
+#endif  // SRC_BASE_INTRUSIVE_TREE_H_
+/*
+ * Copyright (C) 2025 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+/* Part of this work is inspired by the original OpenBSD's tree.h */
+/* $OpenBSD: tree.h,v 1.31 2023/03/08 04:43:09 guenther Exp $ */
+/*
+ * Copyright 2002 Niels Provos <provos@citi.umich.edu>
+ * All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR
+ * IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES
+ * OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED.
+ * IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT
+ * NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
+ * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
+ * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF
+ * THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+// gen_amalgamated expanded: #include "src/base/intrusive_tree.h"
+
+namespace perfetto::base::internal {
+
+namespace {
+
+void RBSetBlackRed(RBNode* black, RBNode* red) {
+  black->color = RBColor::BLACK;
+  red->color = RBColor::RED;
+}
+
+void RBRotateLeft(RBNode** root, RBNode* elm, RBNode* tmp) {
+  tmp = elm->right;
+  if ((elm->right = tmp->left)) {
+    tmp->left->parent = elm;
+  }
+  // RB_AUGMENT(elm);
+  if ((tmp->parent = elm->parent)) {
+    if (elm == elm->parent->left)
+      elm->parent->left = tmp;
+    else
+      elm->parent->right = tmp;
+  } else
+    *root = tmp;
+  tmp->left = elm;
+  elm->parent = tmp;
+  // RB_AUGMENT(tmp);
+  // if ((tmp->parent))
+  // RB_AUGMENT(tmp->parent);
+}
+
+void RBRotateRight(RBNode** root, RBNode* elm, RBNode* tmp) {
+  tmp = elm->left;
+  if ((elm->left = tmp->right)) {
+    tmp->right->parent = elm;
+  }
+  // RB_AUGMENT(elm);
+  if ((tmp->parent = elm->parent)) {
+    if (elm == elm->parent->left)
+      elm->parent->left = tmp;
+    else
+      elm->parent->right = tmp;
+  } else
+    *root = tmp;
+  tmp->right = elm;
+  elm->parent = tmp;
+  // RB_AUGMENT(tmp);
+  // if ((tmp->parent))
+  // RB_AUGMENT(tmp->parent);
+}
+
+void RBRemoveColor(RBNode** root, RBNode* parent, RBNode* elm) {
+  RBNode* tmp;
+  while ((elm == nullptr || elm->color == RBColor::BLACK) && elm != *root) {
+    if (parent->left == elm) {
+      tmp = parent->right;
+      if (tmp->color == RBColor::RED) {
+        RBSetBlackRed(tmp, parent);
+        RBRotateLeft(root, parent, tmp);
+        tmp = parent->right;
+      }
+      if ((tmp->left == nullptr || tmp->left->color == RBColor::BLACK) &&
+          (tmp->right == nullptr || tmp->right->color == RBColor::BLACK)) {
+        tmp->color = RBColor::RED;
+        elm = parent;
+        parent = elm->parent;
+      } else {
+        if (tmp->right == nullptr || tmp->right->color == RBColor::BLACK) {
+          RBNode* oleft;
+          if ((oleft = tmp->left))
+            oleft->color = RBColor::BLACK;
+          tmp->color = RBColor::RED;
+          RBRotateRight(root, tmp, oleft);
+          tmp = parent->right;
+        }
+        tmp->color = parent->color;
+        parent->color = RBColor::BLACK;
+        if (tmp->right)
+          tmp->right->color = RBColor::BLACK;
+        RBRotateLeft(root, parent, tmp);
+        elm = *root;
+        break;
+      }
+    } else {
+      tmp = parent->left;
+      if (tmp->color == RBColor::RED) {
+        RBSetBlackRed(tmp, parent);
+        RBRotateRight(root, parent, tmp);
+        tmp = parent->left;
+      }
+      if ((tmp->left == nullptr || tmp->left->color == RBColor::BLACK) &&
+          (tmp->right == nullptr || tmp->right->color == RBColor::BLACK)) {
+        tmp->color = RBColor::RED;
+        elm = parent;
+        parent = elm->parent;
+      } else {
+        if (tmp->left == nullptr || tmp->left->color == RBColor::BLACK) {
+          RBNode* oright;
+          if ((oright = tmp->right))
+            oright->color = RBColor::BLACK;
+          tmp->color = RBColor::RED;
+          RBRotateLeft(root, tmp, oright);
+          tmp = parent->left;
+        }
+        tmp->color = parent->color;
+        parent->color = RBColor::BLACK;
+        if (tmp->left)
+          tmp->left->color = RBColor::BLACK;
+        RBRotateRight(root, parent, tmp);
+        elm = *root;
+        break;
+      }
+    }
+  }
+  if (elm)
+    elm->color = RBColor::BLACK;
+}
+
+}  // namespace
+
+void RBInsertColor(RBNode** root, RBNode* elm) {
+  RBNode *parent, *gparent, *tmp;
+  while ((parent = elm->parent) && parent->color == RBColor::RED) {
+    gparent = parent->parent;
+    if (parent == gparent->left) {
+      tmp = gparent->right;
+      if (tmp && tmp->color == RBColor::RED) {
+        tmp->color = RBColor::BLACK;
+        RBSetBlackRed(parent, gparent);
+        elm = gparent;
+        continue;
+      }
+      if (parent->right == elm) {
+        RBRotateLeft(root, parent, tmp);
+        tmp = parent;
+        parent = elm;
+        elm = tmp;
+      }
+      RBSetBlackRed(parent, gparent);
+      RBRotateRight(root, gparent, tmp);
+    } else {
+      tmp = gparent->left;
+      if (tmp && tmp->color == RBColor::RED) {
+        tmp->color = RBColor::BLACK;
+        RBSetBlackRed(parent, gparent);
+        elm = gparent;
+        continue;
+      }
+      if (parent->left == elm) {
+        RBRotateRight(root, parent, tmp);
+        tmp = parent;
+        parent = elm;
+        elm = tmp;
+      }
+      RBSetBlackRed(parent, gparent);
+      RBRotateLeft(root, gparent, tmp);
+    }
+  }
+  (*root)->color = RBColor::BLACK;
+}
+
+void RBRemove(RBNode** root, RBNode* elm) {
+  RBNode* child = elm;
+  RBNode* parent = elm;
+  RBNode* old = elm;
+  RBColor color;
+
+  if (elm->left == nullptr)
+    child = elm->right;
+  else if (elm->right == nullptr)
+    child = elm->left;
+  else {
+    RBNode* left;
+    elm = elm->right;
+    while ((left = elm->left))
+      elm = left;
+    child = elm->right;
+    parent = elm->parent;
+    color = elm->color;
+    if (child)
+      child->parent = parent;
+    if (parent) {
+      if (parent->left == elm) {
+        parent->left = child;
+      } else {
+        parent->right = child;
+      }
+      // RB_AUGMENT(parent);
+    } else {
+      *root = child;
+    }
+    if (elm->parent == old)
+      parent = elm;
+    *elm = *old;
+    if (old->parent) {
+      if (old->parent->left == old) {
+        old->parent->left = elm;
+      } else {
+        old->parent->right = elm;
+      }
+      // RB_AUGMENT(old->parent);
+    } else {
+      *root = elm;
+    }
+    old->left->parent = elm;
+    if (old->right)
+      old->right->parent = elm;
+    if (parent) {
+      left = parent;
+      // do {
+      //   RB_AUGMENT(left);
+      // } while ((left = left->parent));
+    }
+    goto color;
+  }
+  parent = elm->parent;
+  color = elm->color;
+  if (child)
+    child->parent = parent;
+  if (parent) {
+    if (parent->left == elm)
+      parent->left = child;
+    else
+      parent->right = child;
+    // RB_AUGMENT(parent);
+  } else {
+    *root = child;
+  }
+color:
+  if (color == RBColor::BLACK)
+    RBRemoveColor(root, parent, child);
+}
+
+// Returns nullptr after reaching the last leaf (the max element).
+const RBNode* RBNext(const RBNode* node) {
+  if (node->right) {
+    node = node->right;
+    while (node->left)
+      node = node->left;
+  } else {
+    if (node->parent && node == node->parent->left) {
+      node = node->parent;
+    } else {
+      while (node->parent && node == node->parent->right) {
+        node = node->parent;
+      }
+      node = node->parent;
+    }
+  }
+  return node;
+}
+
+}  // namespace perfetto::base::internal
 // gen_amalgamated begin source: src/base/logging.cc
 // gen_amalgamated begin header: src/base/log_ring_buffer.h
 // gen_amalgamated begin header: include/perfetto/ext/base/thread_annotations.h
@@ -3057,7 +3831,7 @@ constexpr size_t kLogRingBufMsgLen = 256;
 // - The Append() method can be called concurrently by several threads, unless
 //   there are > kLogRingBufEntries concurrent threads. Even if that happens,
 //   case some events will contain a mix of strings but the behavior of
-//   futher Append() and Read() is still defined.
+//   further Append() and Read() is still defined.
 // - The Read() method is not thread safe but it's fine in practice. Even if
 //   it's called concurrently with other Append(), it only causes some partial
 //   events to be emitted in output.
@@ -3340,7 +4114,7 @@ void LogMessage(LogLev level,
 
   // When printing on stderr, print also the timestamp. We don't really care
   // about the actual time. We just need some reference clock that can be used
-  // to correlated events across differrent processses (e.g. traced and
+  // to correlated events across different processes (e.g. traced and
   // traced_probes). The wall time % 1000 is good enough.
   uint32_t t_ms = static_cast<uint32_t>(GetWallTimeMs().count());
   uint32_t t_sec = t_ms / 1000;
@@ -4356,6 +5130,10 @@ bool PagedMemory::AdviseDontNeed(void* p, size_t size) {
   // Discarding pages on Windows has more CPU cost than is justified for the
   // possible memory savings.
   return false;
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+  int res = posix_madvise(p, size, POSIX_MADV_DISCARD_NP);
+  PERFETTO_DCHECK(res == 0);
+  return true;
 #else   // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) ||
         // PERFETTO_BUILDFLAG(PERFETTO_OS_NACL)
   // http://man7.org/linux/man-pages/man2/madvise.2.html
@@ -4705,7 +5483,7 @@ class PeriodicTask {
 // gen_amalgamated expanded: #include "perfetto/base/time.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/file_utils.h"
 
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     (PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) && __ANDROID_API__ >= 19)
 #include <sys/timerfd.h>
 #endif
@@ -4725,13 +5503,13 @@ uint32_t GetNextDelayMs(const TimeMillis& now_ms,
 }
 
 ScopedPlatformHandle CreateTimerFd(const PeriodicTask::Args& args) {
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     (PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) && __ANDROID_API__ >= 19)
   ScopedPlatformHandle tfd(
       timerfd_create(CLOCK_BOOTTIME, TFD_CLOEXEC | TFD_NONBLOCK));
   uint32_t phase_ms = GetNextDelayMs(GetBootTimeMs(), args);
 
-  struct itimerspec its {};
+  struct itimerspec its{};
   // The "1 +" is to make sure that we never pass a zero it_value in the
   // unlikely case of phase_ms being 0. That would cause the timer to be
   // considered disarmed by timerfd_settime.
@@ -5368,6 +6146,10 @@ class StringSplitter {
   // cur_token()), false if no more tokens are found.
   bool Next();
 
+  // Returns the next token if found (in which case it will be stored in
+  // cur_token()), nullptr if no more tokens are found.
+  char* NextToken() { return Next() ? cur_token() : nullptr; }
+
   // Returns the current token iff last call to Next() returned true. In this
   // case it guarantees that the returned string is always null terminated.
   // In all other cases (before the 1st call to Next() and after Next() returns
@@ -5376,6 +6158,13 @@ class StringSplitter {
 
   // Returns the length of the current token (excluding the null terminator).
   size_t cur_token_size() const { return cur_size_; }
+
+  // Return the untokenized remainder of the input string that occurs after the
+  // current token.
+  char* remainder() { return next_; }
+
+  // Returns the size of the untokenized input
+  size_t remainder_size() { return static_cast<size_t>(end_ - next_); }
 
  private:
   StringSplitter(const StringSplitter&) = delete;
@@ -5528,8 +6317,8 @@ namespace base {
 
 // Locale-independant as possible version of strtod.
 double StrToD(const char* nptr, char** endptr) {
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
-    PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||   \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) ||           \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
   static auto c_locale = newlocale(LC_ALL, "C", nullptr);
   return strtod_l(nptr, endptr, c_locale);
@@ -5709,6 +6498,83 @@ std::string ReplaceAll(std::string str,
   return str;
 }
 
+bool CheckAsciiAndRemoveInvalidUTF8(base::StringView str, std::string& output) {
+  bool is_ascii = std::all_of(str.begin(), str.end(), [](char c) {
+    return (static_cast<unsigned char>(c) & 0b10000000) == 0b00000000;
+  });
+  if (is_ascii) {
+    return true;
+  }
+
+  // https://www.rfc-editor.org/rfc/rfc3629.txt
+  output.clear();
+  output.reserve(str.size());
+  for (size_t i = 0; i < str.size();) {
+    unsigned char c = static_cast<unsigned char>(str.data()[i]);
+    size_t num_bytes = 0;
+    bool valid_sequence = true;
+
+    if ((c & 0b10000000) == 0b00000000) {
+      num_bytes = 1;
+    } else if ((c & 0b11100000) == 0b11000000) {
+      num_bytes = 2;
+    } else if ((c & 0b11110000) == 0b11100000) {
+      num_bytes = 3;
+    } else if ((c & 0b11111000) == 0b11110000) {
+      num_bytes = 4;
+    } else {
+      valid_sequence = false;
+      // Skip this byte
+      num_bytes = 1;
+    }
+
+    if (valid_sequence) {
+      // Check if enough bytes are available in the string
+      if (i + num_bytes > str.size()) {
+        valid_sequence = false;
+        num_bytes = 1;  // Treat as a single invalid byte for advancement
+      } else {
+        // Check for overlong encodings, surrogates, and out-of-range
+        if (num_bytes == 2 && c < 0b11000010) {  // 0xC2
+          valid_sequence = false;                // Overlong
+        } else if (num_bytes == 3) {
+          unsigned char byte2 = static_cast<unsigned char>(str.data()[i + 1]);
+          if ((c == 0b11100000 && byte2 < 0b10100000) ||   // Overlong E0
+              (c == 0b11101101 && byte2 >= 0b10100000)) {  // Surrogate ED
+            valid_sequence = false;
+          }
+        } else if (num_bytes == 4) {
+          unsigned char byte2 = static_cast<unsigned char>(str.data()[i + 1]);
+          if ((c == 0b11110000 && byte2 < 0b10010000) ||  // Overlong F0
+              (c == 0b11110100 && byte2 > 0b10001111)) {  // Out of range F4
+            valid_sequence = false;
+          }
+        }
+
+        if (valid_sequence && num_bytes > 1) {
+          for (size_t j = 1; j < num_bytes; ++j) {
+            unsigned char continuation_byte =
+                static_cast<unsigned char>(str.data()[i + j]);
+            if ((continuation_byte & 0b11000000) != 0b10000000) {
+              valid_sequence = false;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    if (valid_sequence) {
+      for (size_t j = 0; j < num_bytes; ++j) {
+        output.push_back(str.data()[i + j]);
+      }
+    }
+
+    i += num_bytes;
+  }
+  return false;
+}
+
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
 bool WideToUTF8(const std::wstring& source, std::string& output) {
   if (source.empty() ||
@@ -5726,7 +6592,7 @@ bool WideToUTF8(const std::wstring& source, std::string& output) {
   }
   return true;
 }
-#endif // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
 bool UTF8ToWide(const std::string& source, std::wstring& output) {
@@ -5744,10 +6610,10 @@ bool UTF8ToWide(const std::string& source, std::wstring& output) {
   }
   return true;
 }
-#endif // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
 
 size_t SprintfTrunc(char* dst, size_t dst_size, const char* fmt, ...) {
-  if (PERFETTO_UNLIKELY(dst_size) == 0)
+  if (PERFETTO_UNLIKELY(dst_size == 0))
     return 0;
 
   va_list args;
@@ -5755,7 +6621,7 @@ size_t SprintfTrunc(char* dst, size_t dst_size, const char* fmt, ...) {
   int src_size = vsnprintf(dst, dst_size, fmt, args);
   va_end(args);
 
-  if (PERFETTO_UNLIKELY(src_size) <= 0) {
+  if (PERFETTO_UNLIKELY(src_size <= 0)) {
     dst[0] = '\0';
     return 0;
   }
@@ -5836,6 +6702,191 @@ constexpr size_t StringView::npos;
 #if defined(__GNUC__)
 #pragma GCC diagnostic pop
 #endif
+
+}  // namespace base
+}  // namespace perfetto
+// gen_amalgamated begin source: src/base/string_view_splitter.cc
+// gen_amalgamated begin header: include/perfetto/ext/base/string_view_splitter.h
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef INCLUDE_PERFETTO_EXT_BASE_STRING_VIEW_SPLITTER_H_
+#define INCLUDE_PERFETTO_EXT_BASE_STRING_VIEW_SPLITTER_H_
+
+// gen_amalgamated expanded: #include "perfetto/ext/base/string_view.h"
+
+namespace perfetto {
+namespace base {
+
+// C++ version of strtok(). Splits a StringView without making copies or any
+// heap allocations. Supports the special case of using \0 as a delimiter.
+// The token returned in output are valid as long as the input string is valid.
+class StringViewSplitter {
+ public:
+  // Whether an empty string (two delimiters side-to-side) is a valid token.
+  enum class EmptyTokenMode {
+    DISALLOW_EMPTY_TOKENS,
+    ALLOW_EMPTY_TOKENS,
+
+    DEFAULT = DISALLOW_EMPTY_TOKENS,
+  };
+
+  // Can take ownership of the string if passed via std::move(), e.g.:
+  // StringViewSplitter(std::move(str), '\n');
+  StringViewSplitter(base::StringView,
+                     char delimiter,
+                     EmptyTokenMode empty_token_mode = EmptyTokenMode::DEFAULT);
+
+  // Splits the current token from an outer StringViewSplitter instance. This is
+  // to chain splitters as follows: for (base::StringViewSplitter lines(x,
+  // '\n'); ss.Next();)
+  //   for (base::StringViewSplitter words(&lines, ' '); words.Next();)
+  StringViewSplitter(StringViewSplitter*,
+                     char delimiter,
+                     EmptyTokenMode empty_token_mode = EmptyTokenMode::DEFAULT);
+
+  // Returns true if a token is found (in which case it will be stored in
+  // cur_token()), false if no more tokens are found.
+  bool Next();
+
+  // Returns the next token if, found (in which case it will be stored in
+  // cur_token()), and the empty string if no more tokens are found.
+  base::StringView NextToken() { return Next() ? cur_token() : ""; }
+
+  // Returns the current token iff last call to Next() returned true.
+  // In all other cases (before the 1st call to Next() and after Next() returns
+  // false) returns the empty string.
+  base::StringView cur_token() { return cur_; }
+
+  // Returns the remainder of the current input string that has not yet been
+  // tokenized.
+  base::StringView remainder() { return next_; }
+
+ private:
+  StringViewSplitter(const StringViewSplitter&) = delete;
+  StringViewSplitter& operator=(const StringViewSplitter&) = delete;
+  void Initialize(base::StringView);
+
+  base::StringView str_;
+  base::StringView cur_;
+  base::StringView next_;
+  bool end_of_input_;
+  const char delimiter_;
+  const EmptyTokenMode empty_token_mode_;
+};
+
+}  // namespace base
+}  // namespace perfetto
+
+#endif  // INCLUDE_PERFETTO_EXT_BASE_STRING_VIEW_SPLITTER_H_
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// gen_amalgamated expanded: #include "perfetto/ext/base/string_view_splitter.h"
+
+#include <utility>
+
+// gen_amalgamated expanded: #include "perfetto/base/logging.h"
+
+namespace perfetto {
+namespace base {
+
+StringViewSplitter::StringViewSplitter(base::StringView str,
+                                       char delimiter,
+                                       EmptyTokenMode empty_token_mode)
+    : str_(std::move(str)),
+      delimiter_(delimiter),
+      empty_token_mode_(empty_token_mode) {
+  Initialize(str);
+}
+
+StringViewSplitter::StringViewSplitter(StringViewSplitter* outer,
+                                       char delimiter,
+                                       EmptyTokenMode empty_token_mode)
+    : delimiter_(delimiter), empty_token_mode_(empty_token_mode) {
+  Initialize(outer->cur_token());
+}
+
+void StringViewSplitter::Initialize(base::StringView str) {
+  next_ = str;
+  cur_ = "";
+  end_of_input_ = false;
+}
+
+bool StringViewSplitter::Next() {
+  if (end_of_input_) {
+    cur_ = next_ = "";
+    return false;
+  }
+
+  size_t substr_start = 0;
+  if (empty_token_mode_ == EmptyTokenMode::DISALLOW_EMPTY_TOKENS) {
+    while (substr_start < next_.size() &&
+           next_.at(substr_start) == delimiter_) {
+      substr_start++;
+    }
+  }
+
+  if (substr_start >= next_.size()) {
+    end_of_input_ = true;
+    cur_ = next_ = "";
+    return !cur_.empty() ||
+           empty_token_mode_ == EmptyTokenMode::ALLOW_EMPTY_TOKENS;
+  }
+
+  size_t delimiter_start = next_.find(delimiter_, substr_start);
+  if (delimiter_start == base::StringView::npos) {
+    cur_ = next_.substr(substr_start);
+    next_ = "";
+    end_of_input_ = true;
+    return !cur_.empty() ||
+           empty_token_mode_ == EmptyTokenMode::ALLOW_EMPTY_TOKENS;
+  }
+
+  size_t delimiter_end = delimiter_start + 1;
+
+  if (empty_token_mode_ == EmptyTokenMode::DISALLOW_EMPTY_TOKENS) {
+    while (delimiter_end < next_.size() &&
+           next_.at(delimiter_end) == delimiter_) {
+      delimiter_end++;
+    }
+    if (delimiter_end >= next_.size()) {
+      end_of_input_ = true;
+    }
+  }
+
+  cur_ = next_.substr(substr_start, delimiter_start - substr_start);
+  next_ = next_.substr(delimiter_end);
+
+  return !cur_.empty() ||
+         empty_token_mode_ == EmptyTokenMode::ALLOW_EMPTY_TOKENS;
+}
 
 }  // namespace base
 }  // namespace perfetto
@@ -6171,8 +7222,8 @@ void ThreadChecker::DetachFromThread() {
 #include <string>
 
 // gen_amalgamated expanded: #include "perfetto/base/build_config.h"
-// gen_amalgamated expanded: #include "perfetto/ext/base/string_utils.h"
 // gen_amalgamated expanded: #include "perfetto/base/export.h"
+// gen_amalgamated expanded: #include "perfetto/ext/base/string_utils.h"
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||   \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
@@ -6526,10 +7577,15 @@ void InitializeTime() {}
 std::string GetTimeFmt(const std::string& fmt) {
   time_t raw_time;
   time(&raw_time);
-  struct tm* local_tm;
-  local_tm = localtime(&raw_time);
+  struct tm local_tm;
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+  PERFETTO_CHECK(localtime_s(&local_tm, &raw_time) == 0);
+#else
+  tzset();
+  PERFETTO_CHECK(localtime_r(&raw_time, &local_tm) != nullptr);
+#endif
   char buf[128];
-  PERFETTO_CHECK(strftime(buf, 80, fmt.c_str(), local_tm) > 0);
+  PERFETTO_CHECK(strftime(buf, 80, fmt.c_str(), &local_tm) > 0);
   return buf;
 }
 
@@ -6588,7 +7644,7 @@ std::optional<int32_t> GetTimezoneOffsetMins() {
 #include <mach/vm_page_size.h>
 #endif
 
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 #include <sys/prctl.h>
 
@@ -6782,7 +7838,8 @@ void UnsetEnv(const std::string& key) {
 void Daemonize(std::function<int()> parent_cb) {
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||   \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
-    PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
+    (PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE) &&  \
+     !PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE_TVOS))
   Pipe pipe = Pipe::Create(Pipe::kBothBlock);
   pid_t pid;
   switch (pid = fork()) {
@@ -6887,7 +7944,7 @@ void AlignedFree(void* ptr) {
 }
 
 bool IsSyncMemoryTaggingEnabled() {
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
   // Compute only once per lifetime of the process.
   static bool cached_value = [] {
@@ -6954,13 +8011,14 @@ std::string HexDump(const void* data_void, size_t len, size_t bytes_per_line) {
 #include <string.h>
 #include <array>
 #include <cstdint>
-#include <optional>
 #include <string>
+
+// gen_amalgamated expanded: #include "perfetto/base/export.h"
 
 namespace perfetto {
 namespace base {
 
-class Uuid {
+class PERFETTO_EXPORT_COMPONENT Uuid {
  public:
   explicit Uuid(const std::string& s);
   explicit Uuid(int64_t lsb, int64_t msb);
@@ -7007,85 +8065,6 @@ Uuid Uuidv4();
 }  // namespace perfetto
 
 #endif  // INCLUDE_PERFETTO_EXT_BASE_UUID_H_
-// gen_amalgamated begin header: include/perfetto/ext/base/no_destructor.h
-/*
- * Copyright (C) 2019 The Android Open Source Project
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-#ifndef INCLUDE_PERFETTO_EXT_BASE_NO_DESTRUCTOR_H_
-#define INCLUDE_PERFETTO_EXT_BASE_NO_DESTRUCTOR_H_
-
-#include <new>
-#include <utility>
-
-namespace perfetto {
-namespace base {
-
-// Wrapper that can hold an object of type T, without invoking the contained
-// object's destructor when being destroyed. Useful for creating statics while
-// avoiding static destructors.
-//
-// Stores the object inline, and therefore doesn't incur memory allocation and
-// pointer indirection overheads.
-//
-// Example of use:
-//
-//   const std::string& GetStr() {
-//     static base::NoDestructor<std::string> s("hello");
-//     return s.ref();
-//   }
-//
-template <typename T>
-class NoDestructor {
- public:
-  // Forward arguments to T's constructor. Note that this doesn't cover
-  // construction from initializer lists.
-  template <typename... Args>
-  explicit NoDestructor(Args&&... args) {
-    new (storage_) T(std::forward<Args>(args)...);
-  }
-
-  NoDestructor(const NoDestructor&) = delete;
-  NoDestructor& operator=(const NoDestructor&) = delete;
-  NoDestructor(NoDestructor&&) = delete;
-  NoDestructor& operator=(NoDestructor&&) = delete;
-
-  ~NoDestructor() = default;
-
-  /* To avoid type-punned pointer strict aliasing warnings on GCC6 and below
-   * these need to be split over two lines. If they are collapsed onto one line.
-   *   return reinterpret_cast<const T*>(storage_);
-   * The error fires.
-   */
-  const T& ref() const {
-    auto* const cast = reinterpret_cast<const T*>(storage_);
-    return *cast;
-  }
-  T& ref() {
-    auto* const cast = reinterpret_cast<T*>(storage_);
-    return *cast;
-  }
-
- private:
-  alignas(T) char storage_[sizeof(T)];
-};
-
-}  // namespace base
-}  // namespace perfetto
-
-#endif  // INCLUDE_PERFETTO_EXT_BASE_NO_DESTRUCTOR_H_
 /*
  * Copyright (C) 2019 The Android Open Source Project
  *
@@ -7104,11 +8083,10 @@ class NoDestructor {
 
 // gen_amalgamated expanded: #include "perfetto/ext/base/uuid.h"
 
-#include <mutex>
 #include <random>
 
 // gen_amalgamated expanded: #include "perfetto/base/time.h"
-// gen_amalgamated expanded: #include "perfetto/ext/base/no_destructor.h"
+// gen_amalgamated expanded: #include "perfetto/ext/base/utils.h"
 
 namespace perfetto {
 namespace base {
@@ -7129,33 +8107,34 @@ Uuid Uuidv4() {
   // are started around the same time at boot, within a 1s window, the birthday
   // paradox gives a chance of 90% collisions with 70k traces over a 1e9 space
   // (Number of ns in a 1s window).
-  // &kHexmap >> 14 is used to feed use indirectly ASLR as a source of entropy.
   // We deliberately don't use /dev/urandom as that might block for
-  // unpredictable time if the system is idle.
+  // unpredictable time if the system is idle (and is not portable).
   // The UUID does NOT need to be cryptographically secure, but random enough
   // to avoid collisions across a large number of devices.
-  static std::minstd_rand rng(
-      static_cast<uint32_t>(static_cast<uint64_t>(GetBootTimeNs().count()) ^
-                            static_cast<uint64_t>(GetWallTimeNs().count()) ^
-                            (reinterpret_cast<uintptr_t>(&kHexmap) >> 14)));
-  Uuid uuid;
-  auto& data = *uuid.data();
+  uint64_t boot_ns = static_cast<uint64_t>(GetBootTimeNs().count());
+  uint64_t epoch_ns = static_cast<uint64_t>(GetWallTimeNs().count());
 
-  // std::random is not thread safe and users of this class might mistakenly
-  // assume Uuidv4() is thread_safe because from the outside looks like a
-  // local object.
-  static base::NoDestructor<std::mutex> rand_mutex;
-  std::unique_lock<std::mutex> rand_lock(rand_mutex.ref());
+  // Use code ASLR as entropy source.
+  uint32_t code_ptr =
+      static_cast<uint32_t>(reinterpret_cast<uint64_t>(&Uuidv4) >> 12);
 
-  for (size_t i = 0; i < sizeof(data);) {
-    // Note: the 32-th bit of rng() is always 0 as minstd_rand operates modulo
-    // 2**31. Fill in blocks of 16b rather than 32b to not lose 1b of entropy.
-    const auto rnd_data = static_cast<uint16_t>(rng());
-    memcpy(&data[i], &rnd_data, sizeof(rnd_data));
-    i += sizeof(rnd_data);
-  }
+  // Use stack ASLR as a further entropy source.
+  uint32_t stack_ptr =
+      static_cast<uint32_t>(reinterpret_cast<uint64_t>(&code_ptr) >> 12);
 
-  return uuid;
+  uint32_t entropy[] = {static_cast<uint32_t>(boot_ns >> 32),
+                        static_cast<uint32_t>(boot_ns),
+                        static_cast<uint32_t>(epoch_ns >> 32),
+                        static_cast<uint32_t>(epoch_ns),
+                        code_ptr,
+                        stack_ptr};
+  std::seed_seq entropy_seq(entropy, entropy + ArraySize(entropy));
+
+  auto words = std::array<uint32_t, 4>();
+  entropy_seq.generate(words.begin(), words.end());
+  uint64_t msb = static_cast<uint64_t>(words[0]) << 32u | words[1];
+  uint64_t lsb = static_cast<uint64_t>(words[2]) << 32u | words[3];
+  return Uuid(static_cast<int64_t>(lsb), static_cast<int64_t>(msb));
 }
 
 Uuid::Uuid() {}
@@ -7240,6 +8219,10 @@ TaskRunner::~TaskRunner() = default;
 #ifndef INCLUDE_PERFETTO_EXT_BASE_WAITABLE_EVENT_H_
 #define INCLUDE_PERFETTO_EXT_BASE_WAITABLE_EVENT_H_
 
+// gen_amalgamated expanded: #include "perfetto/base/thread_annotations.h"
+
+#include <stdint.h>
+
 #include <condition_variable>
 #include <mutex>
 
@@ -7263,8 +8246,8 @@ class WaitableEvent {
 
  private:
   std::mutex mutex_;
-  std::condition_variable event_;
-  uint64_t notifications_ = 0;
+  std::condition_variable event_ PERFETTO_GUARDED_BY(mutex_);
+  uint64_t notifications_ PERFETTO_GUARDED_BY(mutex_) = 0;
 };
 
 }  // namespace base
@@ -7295,14 +8278,20 @@ namespace base {
 WaitableEvent::WaitableEvent() = default;
 WaitableEvent::~WaitableEvent() = default;
 
-void WaitableEvent::Wait(uint64_t notifications) {
+void WaitableEvent::Wait(uint64_t notifications)
+    PERFETTO_NO_THREAD_SAFETY_ANALYSIS {
+  // 'std::unique_lock' lock doesn't work well with thread annotations
+  // (see https://github.com/llvm/llvm-project/issues/63239),
+  // so we suppress thread safety static analysis for this method.
   std::unique_lock<std::mutex> lock(mutex_);
-  return event_.wait(lock, [&] { return notifications_ >= notifications; });
+  return event_.wait(lock, [&]() PERFETTO_EXCLUSIVE_LOCKS_REQUIRED(mutex_) {
+    return notifications_ >= notifications;
+  });
 }
 
 void WaitableEvent::Notify() {
-  std::unique_lock<std::mutex> lock(mutex_);
-  notifications_++;
+  std::lock_guard<std::mutex> lock(mutex_);
+  ++notifications_;
   event_.notify_all();
 }
 
@@ -7549,7 +8538,7 @@ Watchdog::~Watchdog() {
   // wakeup from the poll() and see |enabled_| == false.
   // This code path is used only in tests. In production code the watchdog is
   // a singleton and is never destroyed.
-  struct itimerspec ts {};
+  struct itimerspec ts{};
   ts.it_value.tv_sec = 0;
   ts.it_value.tv_nsec = 1;
   timerfd_settime(*timer_fd_, /*flags=*/0, &ts, nullptr);
@@ -7595,9 +8584,9 @@ void Watchdog::RearmTimerFd_Locked() {
     return;
   auto it = std::min_element(timers_.begin(), timers_.end());
 
-  // We use one timerfd to handle all the oustanding |timers_|. Keep it armed
+  // We use one timerfd to handle all the outstanding |timers_|. Keep it armed
   // to the task expiring soonest.
-  struct itimerspec ts {};
+  struct itimerspec ts{};
   if (it != timers_.end()) {
     ts.it_value = ToPosixTimespec(it->deadline);
   }
@@ -7702,15 +8691,16 @@ void Watchdog::ThreadMain() {
     // Check if any of the timers expired.
     int tid_to_kill = 0;
     WatchdogCrashReason crash_reason{};
-    std::unique_lock<std::mutex> guard(mutex_);
-    for (const auto& timer : timers_) {
-      if (now >= timer.deadline) {
-        tid_to_kill = timer.thread_id;
-        crash_reason = timer.crash_reason;
-        break;
+    {
+      std::lock_guard<std::mutex> guard(mutex_);
+      for (const auto& timer : timers_) {
+        if (now >= timer.deadline) {
+          tid_to_kill = timer.thread_id;
+          crash_reason = timer.crash_reason;
+          break;
+        }
       }
     }
-    guard.unlock();
 
     if (tid_to_kill)
       SerializeLogsAndKillThread(tid_to_kill, crash_reason);
@@ -7725,15 +8715,16 @@ void Watchdog::ThreadMain() {
         static_cast<uint64_t>(stat.rss_pages) * base::GetSysPageSize();
 
     bool threshold_exceeded = false;
-    guard.lock();
-    if (CheckMemory_Locked(rss_bytes) && !IsSyncMemoryTaggingEnabled()) {
-      threshold_exceeded = true;
-      crash_reason = WatchdogCrashReason::kMemGuardrail;
-    } else if (CheckCpu_Locked(cpu_time)) {
-      threshold_exceeded = true;
-      crash_reason = WatchdogCrashReason::kCpuGuardrail;
+    {
+      std::lock_guard<std::mutex> guard(mutex_);
+      if (CheckMemory_Locked(rss_bytes) && !IsSyncMemoryTaggingEnabled()) {
+        threshold_exceeded = true;
+        crash_reason = WatchdogCrashReason::kMemGuardrail;
+      } else if (CheckCpu_Locked(cpu_time)) {
+        threshold_exceeded = true;
+        crash_reason = WatchdogCrashReason::kCpuGuardrail;
+      }
     }
-    guard.unlock();
 
     if (threshold_exceeded)
       SerializeLogsAndKillThread(getpid(), crash_reason);
@@ -7877,6 +8868,121 @@ Watchdog::Timer::Timer(Timer&& other) noexcept {
 }  // namespace perfetto
 
 #endif  // PERFETTO_BUILDFLAG(PERFETTO_WATCHDOG)
+// gen_amalgamated begin source: src/base/weak_runner.cc
+// gen_amalgamated begin header: include/perfetto/ext/base/weak_runner.h
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef INCLUDE_PERFETTO_EXT_BASE_WEAK_RUNNER_H_
+#define INCLUDE_PERFETTO_EXT_BASE_WEAK_RUNNER_H_
+
+#include <stdint.h>
+
+#include <functional>
+#include <memory>
+
+namespace perfetto::base {
+
+class TaskRunner;
+
+// This is a wrapper around a `base::TaskRunner*`. It is intended to be used by
+// classes that want to post tasks on themselves. When the object is destroyed,
+// all posted tasks become noops.
+//
+// A class that embeds a WeakRunner can safely capture `this` on the posted
+// tasks.
+class WeakRunner {
+ public:
+  explicit WeakRunner(base::TaskRunner* task_runner);
+  ~WeakRunner();
+  base::TaskRunner* task_runner() const { return task_runner_; }
+
+  // Schedules `f` for immediate execution. `f` will not be executed is `*this`
+  // is destroyed.
+  //
+  // Can be called from any thread, but the caller needs to make sure that
+  // `*this` is alive while `PostTask` is running: this is not obvious when
+  // multiple threads are involved.
+  void PostTask(std::function<void()> f) const;
+
+  // Schedules `f` for execution after |delay_ms|.
+  // Can be called from any thread, but the caller needs to make sure that
+  // `*this` is alive while `PostDelayedTask` is running: this is not obvious
+  // when multiple threads are involved.
+  void PostDelayedTask(std::function<void()> f, uint32_t delay_ms) const;
+
+ private:
+  base::TaskRunner* const task_runner_;
+  std::shared_ptr<bool> destroyed_;
+};
+
+}  // namespace perfetto::base
+
+#endif  // INCLUDE_PERFETTO_EXT_BASE_WEAK_RUNNER_H_
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// gen_amalgamated expanded: #include "perfetto/ext/base/weak_runner.h"
+
+// gen_amalgamated expanded: #include "perfetto/base/task_runner.h"
+
+namespace perfetto::base {
+
+WeakRunner::WeakRunner(base::TaskRunner* task_runner)
+    : task_runner_(task_runner), destroyed_(std::make_shared<bool>(false)) {}
+
+WeakRunner::~WeakRunner() {
+  *destroyed_ = true;
+}
+
+void WeakRunner::PostTask(std::function<void()> f) const {
+  task_runner_->PostTask([destroyed = destroyed_, f = std::move(f)]() {
+    if (*destroyed) {
+      return;
+    }
+    f();
+  });
+}
+
+void WeakRunner::PostDelayedTask(std::function<void()> f,
+                                 uint32_t delay_ms) const {
+  task_runner_->PostDelayedTask(
+      [destroyed = destroyed_, f = std::move(f)]() {
+        if (*destroyed) {
+          return;
+        }
+        f();
+      },
+      delay_ms);
+}
+
+}  // namespace perfetto::base
 // gen_amalgamated begin source: src/base/thread_task_runner.cc
 // gen_amalgamated begin header: include/perfetto/ext/base/thread_task_runner.h
 // gen_amalgamated begin header: include/perfetto/ext/base/unix_task_runner.h
@@ -7901,6 +9007,7 @@ Watchdog::Timer::Timer(Timer&& other) noexcept {
 
 // gen_amalgamated expanded: #include "perfetto/base/build_config.h"
 // gen_amalgamated expanded: #include "perfetto/base/task_runner.h"
+// gen_amalgamated expanded: #include "perfetto/base/thread_annotations.h"
 // gen_amalgamated expanded: #include "perfetto/base/thread_utils.h"
 // gen_amalgamated expanded: #include "perfetto/base/time.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/event_fd.h"
@@ -7969,8 +9076,9 @@ class UnixTaskRunner : public TaskRunner {
 
  private:
   void WakeUp();
-  void UpdateWatchTasksLocked();
-  int GetDelayMsToNextTaskLocked() const;
+  void UpdateWatchTasksLocked() PERFETTO_EXCLUSIVE_LOCKS_REQUIRED(lock_);
+  int GetDelayMsToNextTaskLocked() const
+      PERFETTO_EXCLUSIVE_LOCKS_REQUIRED(lock_);
   void RunImmediateAndDelayedTask();
   void PostFileDescriptorWatches(uint64_t windows_wait_result);
   void RunFileDescriptorWatch(PlatformHandle);
@@ -7987,14 +9095,14 @@ class UnixTaskRunner : public TaskRunner {
   std::vector<struct pollfd> poll_fds_;
 #endif
 
-  // --- Begin lock-protected members ---
-
   std::mutex lock_;
 
-  std::deque<std::function<void()>> immediate_tasks_;
-  std::multimap<TimeMillis, std::function<void()>> delayed_tasks_;
-  bool quit_ = false;
-  TimeMillis advanced_time_for_testing_ = TimeMillis(0);
+  std::deque<std::function<void()>> immediate_tasks_ PERFETTO_GUARDED_BY(lock_);
+  std::multimap<TimeMillis, std::function<void()>> delayed_tasks_
+      PERFETTO_GUARDED_BY(lock_);
+  bool quit_ PERFETTO_GUARDED_BY(lock_) = false;
+  TimeMillis advanced_time_for_testing_ PERFETTO_GUARDED_BY(lock_) =
+      TimeMillis(0);
 
   struct WatchTask {
     std::function<void()> callback;
@@ -8008,10 +9116,8 @@ class UnixTaskRunner : public TaskRunner {
 #endif
   };
 
-  std::map<PlatformHandle, WatchTask> watch_tasks_;
-  bool watch_tasks_changed_ = false;
-
-  // --- End lock-protected members ---
+  std::map<PlatformHandle, WatchTask> watch_tasks_ PERFETTO_GUARDED_BY(lock_);
+  bool watch_tasks_changed_ PERFETTO_GUARDED_BY(lock_) = false;
 };
 
 }  // namespace base
@@ -8132,7 +9238,7 @@ class PERFETTO_EXPORT_COMPONENT ThreadTaskRunner : public TaskRunner {
 // gen_amalgamated expanded: #include "perfetto/ext/base/thread_utils.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/unix_task_runner.h"
 
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 #include <sys/prctl.h>
 #endif
@@ -8300,7 +9406,10 @@ void UnixTaskRunner::WakeUp() {
 void UnixTaskRunner::Run() {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   created_thread_id_.store(GetThreadId(), std::memory_order_relaxed);
-  quit_ = false;
+  {
+    std::lock_guard<std::mutex> lock(lock_);
+    quit_ = false;
+  }
   for (;;) {
     int poll_timeout_ms;
     {
@@ -8582,6 +9691,7 @@ bool UnixTaskRunner::RunsTasksOnCurrentThread() const {
 #include <condition_variable>
 #include <functional>
 #include <initializer_list>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -8959,7 +10069,7 @@ std::string Subprocess::Args::GetCmdString() const {
 #include <thread>
 #include <tuple>
 
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 #include <sys/prctl.h>
 #endif
@@ -8988,7 +10098,7 @@ struct ChildProcessArgs {
 // Don't add any dynamic allocation in this function. This will be invoked
 // under a fork(), potentially in a state where the allocator lock is held.
 void __attribute__((noreturn)) ChildProcess(ChildProcessArgs* args) {
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
   // In no case we want a child process to outlive its parent process. This is
   // relevant for tests, so that a test failure/crash doesn't leave child
@@ -9106,7 +10216,7 @@ void __attribute__((noreturn)) ChildProcess(ChildProcessArgs* args) {
   if (!args->exec_cmd)
     _exit(0);
 
-  // If |args[0]| is a path use execv() (which takes a path), othewise use
+  // If |args[0]| is a path use execv() (which takes a path), otherwise use
   // exevp(), which uses the shell and follows PATH.
   if (strchr(args->exec_cmd, '/')) {
     char** env = args->env.empty() ? environ : args->env.data();
@@ -9193,7 +10303,7 @@ void Subprocess::Start() {
   auto* rusage = s_->rusage.get();
   s_->waitpid_thread = std::thread([pid, exit_status_pipe_wr, rusage] {
     int pid_stat = -1;
-    struct rusage usg {};
+    struct rusage usg{};
     int wait_res = PERFETTO_EINTR(wait4(pid, &pid_stat, 0, &usg));
     PERFETTO_CHECK(wait_res == pid);
 
@@ -9314,7 +10424,7 @@ void Subprocess::TryReadExitStatus() {
   } else if (WIFSIGNALED(pid_stat)) {
     s_->returncode = 128 + WTERMSIG(pid_stat);  // Follow bash convention.
   } else {
-    PERFETTO_FATAL("waitpid() returned an unexpected value (0x%x)", pid_stat);
+    PERFETTO_FATAL("waitpid() returned an unexpected value (%d)", pid_stat);
   }
 }
 
@@ -9779,7 +10889,7 @@ void Field::SerializeAndAppendToInternal(Container* dst) const {
       break;
     }
     default:
-      PERFETTO_FATAL("Unknown field type %u", type_);
+      PERFETTO_FATAL("Unknown field type %d", type_);
   }
   size_t written_size = static_cast<size_t>(wptr - start);
   PERFETTO_DCHECK(written_size > 0 && written_size < pu::kMaxMessageLength);
@@ -10153,10 +11263,6 @@ namespace protozero {
 MessageArena::MessageArena() {
   // The code below assumes that there is always at least one block.
   blocks_.emplace_front();
-  static_assert(
-      std::alignment_of<decltype(blocks_.front().storage[0])>::value >=
-          alignof(Message),
-      "MessageArea's storage is not properly aligned");
 }
 
 MessageArena::~MessageArena() = default;
@@ -10170,7 +11276,7 @@ Message* MessageArena::NewMessage() {
     block = &blocks_.front();
   }
   const auto idx = block->entries++;
-  void* storage = &block->storage[idx];
+  void* storage = block->storage[idx];
   PERFETTO_ASAN_UNPOISON(storage, sizeof(Message));
   return new (storage) Message();
 }
@@ -10603,6 +11709,24 @@ std::vector<uint8_t> ScatteredHeapBuffer::StitchSlices() {
   return buffer;
 }
 
+std::pair<std::unique_ptr<uint8_t[]>, size_t>
+ScatteredHeapBuffer::StitchAsUniquePtr() {
+  size_t stitched_size = 0u;
+  const auto& slices = GetSlices();
+  for (const auto& slice : slices)
+    stitched_size += slice.size() - slice.unused_bytes();
+
+  std::unique_ptr<uint8_t[]> buffer(new uint8_t[stitched_size]);
+  uint8_t* ptr = buffer.get();
+  for (const auto& slice : slices) {
+    auto used_range = slice.GetUsedRange();
+    memcpy(ptr, used_range.begin, used_range.size());
+    ptr += used_range.size();
+  }
+
+  return std::make_pair(std::move(buffer), stitched_size);
+}
+
 std::vector<protozero::ContiguousMemoryRange> ScatteredHeapBuffer::GetRanges() {
   std::vector<protozero::ContiguousMemoryRange> ranges;
   for (const auto& slice : GetSlices())
@@ -10739,11 +11863,13 @@ void ScatteredStreamWriter::WriteBytesSlowPath(const uint8_t* src,
 // TODO(primiano): perf optimization: I suspect that at the end this will always
 // be called with |size| == 4, in which case we might just hardcode it.
 uint8_t* ScatteredStreamWriter::ReserveBytes(size_t size) {
-  if (write_ptr_ + size > cur_range_.end) {
+  PERFETTO_DCHECK(write_ptr_ <= cur_range_.end);
+  if (size > static_cast<size_t>(cur_range_.end - write_ptr_)) {
     // Assume the reservations are always < Delegate::GetNewBuffer().size(),
     // so that one single call to Extend() will definitely give enough headroom.
     Extend();
-    PERFETTO_DCHECK(write_ptr_ + size <= cur_range_.end);
+    PERFETTO_DCHECK(write_ptr_ <= cur_range_.end);
+    PERFETTO_DCHECK(size <= static_cast<size_t>(cur_range_.end - write_ptr_));
   }
   uint8_t* begin = write_ptr_;
   write_ptr_ += size;
@@ -13269,7 +14395,11 @@ ObservableEvents_CloneTriggerHit& ObservableEvents_CloneTriggerHit::operator=(Ob
 bool ObservableEvents_CloneTriggerHit::operator==(const ObservableEvents_CloneTriggerHit& other) const {
   return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
    && ::protozero::internal::gen_helpers::EqualsField(tracing_session_id_, other.tracing_session_id_)
-   && ::protozero::internal::gen_helpers::EqualsField(trigger_name_, other.trigger_name_);
+   && ::protozero::internal::gen_helpers::EqualsField(trigger_name_, other.trigger_name_)
+   && ::protozero::internal::gen_helpers::EqualsField(producer_name_, other.producer_name_)
+   && ::protozero::internal::gen_helpers::EqualsField(producer_uid_, other.producer_uid_)
+   && ::protozero::internal::gen_helpers::EqualsField(boot_time_ns_, other.boot_time_ns_)
+   && ::protozero::internal::gen_helpers::EqualsField(trigger_delay_ms_, other.trigger_delay_ms_);
 }
 
 bool ObservableEvents_CloneTriggerHit::ParseFromArray(const void* raw, size_t size) {
@@ -13287,6 +14417,18 @@ bool ObservableEvents_CloneTriggerHit::ParseFromArray(const void* raw, size_t si
         break;
       case 2 /* trigger_name */:
         ::protozero::internal::gen_helpers::DeserializeString(field, &trigger_name_);
+        break;
+      case 3 /* producer_name */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &producer_name_);
+        break;
+      case 4 /* producer_uid */:
+        field.get(&producer_uid_);
+        break;
+      case 5 /* boot_time_ns */:
+        field.get(&boot_time_ns_);
+        break;
+      case 6 /* trigger_delay_ms */:
+        field.get(&trigger_delay_ms_);
         break;
       default:
         field.SerializeAndAppendTo(&unknown_fields_);
@@ -13317,6 +14459,26 @@ void ObservableEvents_CloneTriggerHit::Serialize(::protozero::Message* msg) cons
   // Field 2: trigger_name
   if (_has_field_[2]) {
     ::protozero::internal::gen_helpers::SerializeString(2, trigger_name_, msg);
+  }
+
+  // Field 3: producer_name
+  if (_has_field_[3]) {
+    ::protozero::internal::gen_helpers::SerializeString(3, producer_name_, msg);
+  }
+
+  // Field 4: producer_uid
+  if (_has_field_[4]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(4, producer_uid_, msg);
+  }
+
+  // Field 5: boot_time_ns
+  if (_has_field_[5]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(5, boot_time_ns_, msg);
+  }
+
+  // Field 6: trigger_delay_ms
+  if (_has_field_[6]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(6, trigger_delay_ms_, msg);
   }
 
   protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
@@ -13703,6 +14865,7 @@ bool PerfEvents_Timebase::operator==(const PerfEvents_Timebase& other) const {
   return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
    && ::protozero::internal::gen_helpers::EqualsField(frequency_, other.frequency_)
    && ::protozero::internal::gen_helpers::EqualsField(period_, other.period_)
+   && ::protozero::internal::gen_helpers::EqualsField(poll_period_ms_, other.poll_period_ms_)
    && ::protozero::internal::gen_helpers::EqualsField(counter_, other.counter_)
    && ::protozero::internal::gen_helpers::EqualsField(tracepoint_, other.tracepoint_)
    && ::protozero::internal::gen_helpers::EqualsField(raw_event_, other.raw_event_)
@@ -13725,6 +14888,9 @@ bool PerfEvents_Timebase::ParseFromArray(const void* raw, size_t size) {
         break;
       case 1 /* period */:
         field.get(&period_);
+        break;
+      case 6 /* poll_period_ms */:
+        field.get(&poll_period_ms_);
         break;
       case 4 /* counter */:
         field.get(&counter_);
@@ -13770,6 +14936,11 @@ void PerfEvents_Timebase::Serialize(::protozero::Message* msg) const {
   // Field 1: period
   if (_has_field_[1]) {
     ::protozero::internal::gen_helpers::SerializeVarInt(1, period_, msg);
+  }
+
+  // Field 6: poll_period_ms
+  if (_has_field_[6]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(6, poll_period_ms_, msg);
   }
 
   // Field 4: counter
@@ -13844,6 +15015,291 @@ namespace gen {
 namespace perfetto {
 namespace protos {
 namespace gen {
+}  // namespace perfetto
+}  // namespace protos
+}  // namespace gen
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+// gen_amalgamated begin source: gen/protos/perfetto/common/system_info.gen.cc
+// gen_amalgamated expanded: #include "perfetto/protozero/gen_field_helpers.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/message.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/packed_repeated_fields.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/proto_decoder.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/scattered_heap_buffer.h"
+// DO NOT EDIT. Autogenerated by Perfetto cppgen_plugin
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfloat-equal"
+#endif
+// gen_amalgamated expanded: #include "protos/perfetto/common/system_info.gen.h"
+
+namespace perfetto {
+namespace protos {
+namespace gen {
+
+SystemInfo::SystemInfo() = default;
+SystemInfo::~SystemInfo() = default;
+SystemInfo::SystemInfo(const SystemInfo&) = default;
+SystemInfo& SystemInfo::operator=(const SystemInfo&) = default;
+SystemInfo::SystemInfo(SystemInfo&&) noexcept = default;
+SystemInfo& SystemInfo::operator=(SystemInfo&&) = default;
+
+bool SystemInfo::operator==(const SystemInfo& other) const {
+  return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
+   && ::protozero::internal::gen_helpers::EqualsField(utsname_, other.utsname_)
+   && ::protozero::internal::gen_helpers::EqualsField(android_build_fingerprint_, other.android_build_fingerprint_)
+   && ::protozero::internal::gen_helpers::EqualsField(android_device_manufacturer_, other.android_device_manufacturer_)
+   && ::protozero::internal::gen_helpers::EqualsField(android_soc_model_, other.android_soc_model_)
+   && ::protozero::internal::gen_helpers::EqualsField(android_guest_soc_model_, other.android_guest_soc_model_)
+   && ::protozero::internal::gen_helpers::EqualsField(android_hardware_revision_, other.android_hardware_revision_)
+   && ::protozero::internal::gen_helpers::EqualsField(android_storage_model_, other.android_storage_model_)
+   && ::protozero::internal::gen_helpers::EqualsField(android_ram_model_, other.android_ram_model_)
+   && ::protozero::internal::gen_helpers::EqualsField(android_serial_console_, other.android_serial_console_)
+   && ::protozero::internal::gen_helpers::EqualsField(tracing_service_version_, other.tracing_service_version_)
+   && ::protozero::internal::gen_helpers::EqualsField(android_sdk_version_, other.android_sdk_version_)
+   && ::protozero::internal::gen_helpers::EqualsField(page_size_, other.page_size_)
+   && ::protozero::internal::gen_helpers::EqualsField(num_cpus_, other.num_cpus_)
+   && ::protozero::internal::gen_helpers::EqualsField(timezone_off_mins_, other.timezone_off_mins_)
+   && ::protozero::internal::gen_helpers::EqualsField(hz_, other.hz_);
+}
+
+bool SystemInfo::ParseFromArray(const void* raw, size_t size) {
+  unknown_fields_.clear();
+  bool packed_error = false;
+
+  ::protozero::ProtoDecoder dec(raw, size);
+  for (auto field = dec.ReadField(); field.valid(); field = dec.ReadField()) {
+    if (field.id() < _has_field_.size()) {
+      _has_field_.set(field.id());
+    }
+    switch (field.id()) {
+      case 1 /* utsname */:
+        (*utsname_).ParseFromArray(field.data(), field.size());
+        break;
+      case 2 /* android_build_fingerprint */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &android_build_fingerprint_);
+        break;
+      case 14 /* android_device_manufacturer */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &android_device_manufacturer_);
+        break;
+      case 9 /* android_soc_model */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &android_soc_model_);
+        break;
+      case 13 /* android_guest_soc_model */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &android_guest_soc_model_);
+        break;
+      case 10 /* android_hardware_revision */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &android_hardware_revision_);
+        break;
+      case 11 /* android_storage_model */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &android_storage_model_);
+        break;
+      case 12 /* android_ram_model */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &android_ram_model_);
+        break;
+      case 15 /* android_serial_console */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &android_serial_console_);
+        break;
+      case 4 /* tracing_service_version */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &tracing_service_version_);
+        break;
+      case 5 /* android_sdk_version */:
+        field.get(&android_sdk_version_);
+        break;
+      case 6 /* page_size */:
+        field.get(&page_size_);
+        break;
+      case 8 /* num_cpus */:
+        field.get(&num_cpus_);
+        break;
+      case 7 /* timezone_off_mins */:
+        field.get(&timezone_off_mins_);
+        break;
+      case 3 /* hz */:
+        field.get(&hz_);
+        break;
+      default:
+        field.SerializeAndAppendTo(&unknown_fields_);
+        break;
+    }
+  }
+  return !packed_error && !dec.bytes_left();
+}
+
+std::string SystemInfo::SerializeAsString() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsString();
+}
+
+std::vector<uint8_t> SystemInfo::SerializeAsArray() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsArray();
+}
+
+void SystemInfo::Serialize(::protozero::Message* msg) const {
+  // Field 1: utsname
+  if (_has_field_[1]) {
+    (*utsname_).Serialize(msg->BeginNestedMessage<::protozero::Message>(1));
+  }
+
+  // Field 2: android_build_fingerprint
+  if (_has_field_[2]) {
+    ::protozero::internal::gen_helpers::SerializeString(2, android_build_fingerprint_, msg);
+  }
+
+  // Field 14: android_device_manufacturer
+  if (_has_field_[14]) {
+    ::protozero::internal::gen_helpers::SerializeString(14, android_device_manufacturer_, msg);
+  }
+
+  // Field 9: android_soc_model
+  if (_has_field_[9]) {
+    ::protozero::internal::gen_helpers::SerializeString(9, android_soc_model_, msg);
+  }
+
+  // Field 13: android_guest_soc_model
+  if (_has_field_[13]) {
+    ::protozero::internal::gen_helpers::SerializeString(13, android_guest_soc_model_, msg);
+  }
+
+  // Field 10: android_hardware_revision
+  if (_has_field_[10]) {
+    ::protozero::internal::gen_helpers::SerializeString(10, android_hardware_revision_, msg);
+  }
+
+  // Field 11: android_storage_model
+  if (_has_field_[11]) {
+    ::protozero::internal::gen_helpers::SerializeString(11, android_storage_model_, msg);
+  }
+
+  // Field 12: android_ram_model
+  if (_has_field_[12]) {
+    ::protozero::internal::gen_helpers::SerializeString(12, android_ram_model_, msg);
+  }
+
+  // Field 15: android_serial_console
+  if (_has_field_[15]) {
+    ::protozero::internal::gen_helpers::SerializeString(15, android_serial_console_, msg);
+  }
+
+  // Field 4: tracing_service_version
+  if (_has_field_[4]) {
+    ::protozero::internal::gen_helpers::SerializeString(4, tracing_service_version_, msg);
+  }
+
+  // Field 5: android_sdk_version
+  if (_has_field_[5]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(5, android_sdk_version_, msg);
+  }
+
+  // Field 6: page_size
+  if (_has_field_[6]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(6, page_size_, msg);
+  }
+
+  // Field 8: num_cpus
+  if (_has_field_[8]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(8, num_cpus_, msg);
+  }
+
+  // Field 7: timezone_off_mins
+  if (_has_field_[7]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(7, timezone_off_mins_, msg);
+  }
+
+  // Field 3: hz
+  if (_has_field_[3]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(3, hz_, msg);
+  }
+
+  protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
+}
+
+
+Utsname::Utsname() = default;
+Utsname::~Utsname() = default;
+Utsname::Utsname(const Utsname&) = default;
+Utsname& Utsname::operator=(const Utsname&) = default;
+Utsname::Utsname(Utsname&&) noexcept = default;
+Utsname& Utsname::operator=(Utsname&&) = default;
+
+bool Utsname::operator==(const Utsname& other) const {
+  return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
+   && ::protozero::internal::gen_helpers::EqualsField(sysname_, other.sysname_)
+   && ::protozero::internal::gen_helpers::EqualsField(version_, other.version_)
+   && ::protozero::internal::gen_helpers::EqualsField(release_, other.release_)
+   && ::protozero::internal::gen_helpers::EqualsField(machine_, other.machine_);
+}
+
+bool Utsname::ParseFromArray(const void* raw, size_t size) {
+  unknown_fields_.clear();
+  bool packed_error = false;
+
+  ::protozero::ProtoDecoder dec(raw, size);
+  for (auto field = dec.ReadField(); field.valid(); field = dec.ReadField()) {
+    if (field.id() < _has_field_.size()) {
+      _has_field_.set(field.id());
+    }
+    switch (field.id()) {
+      case 1 /* sysname */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &sysname_);
+        break;
+      case 2 /* version */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &version_);
+        break;
+      case 3 /* release */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &release_);
+        break;
+      case 4 /* machine */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &machine_);
+        break;
+      default:
+        field.SerializeAndAppendTo(&unknown_fields_);
+        break;
+    }
+  }
+  return !packed_error && !dec.bytes_left();
+}
+
+std::string Utsname::SerializeAsString() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsString();
+}
+
+std::vector<uint8_t> Utsname::SerializeAsArray() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsArray();
+}
+
+void Utsname::Serialize(::protozero::Message* msg) const {
+  // Field 1: sysname
+  if (_has_field_[1]) {
+    ::protozero::internal::gen_helpers::SerializeString(1, sysname_, msg);
+  }
+
+  // Field 2: version
+  if (_has_field_[2]) {
+    ::protozero::internal::gen_helpers::SerializeString(2, version_, msg);
+  }
+
+  // Field 3: release
+  if (_has_field_[3]) {
+    ::protozero::internal::gen_helpers::SerializeString(3, release_, msg);
+  }
+
+  // Field 4: machine
+  if (_has_field_[4]) {
+    ::protozero::internal::gen_helpers::SerializeString(4, machine_, msg);
+  }
+
+  protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
+}
+
 }  // namespace perfetto
 }  // namespace protos
 }  // namespace gen
@@ -14970,7 +16426,8 @@ bool TracingServiceState_Producer::operator==(const TracingServiceState_Producer
    && ::protozero::internal::gen_helpers::EqualsField(name_, other.name_)
    && ::protozero::internal::gen_helpers::EqualsField(pid_, other.pid_)
    && ::protozero::internal::gen_helpers::EqualsField(uid_, other.uid_)
-   && ::protozero::internal::gen_helpers::EqualsField(sdk_version_, other.sdk_version_);
+   && ::protozero::internal::gen_helpers::EqualsField(sdk_version_, other.sdk_version_)
+   && ::protozero::internal::gen_helpers::EqualsField(frozen_, other.frozen_);
 }
 
 bool TracingServiceState_Producer::ParseFromArray(const void* raw, size_t size) {
@@ -14997,6 +16454,9 @@ bool TracingServiceState_Producer::ParseFromArray(const void* raw, size_t size) 
         break;
       case 4 /* sdk_version */:
         ::protozero::internal::gen_helpers::DeserializeString(field, &sdk_version_);
+        break;
+      case 6 /* frozen */:
+        field.get(&frozen_);
         break;
       default:
         field.SerializeAndAppendTo(&unknown_fields_);
@@ -15042,6 +16502,11 @@ void TracingServiceState_Producer::Serialize(::protozero::Message* msg) const {
   // Field 4: sdk_version
   if (_has_field_[4]) {
     ::protozero::internal::gen_helpers::SerializeString(4, sdk_version_, msg);
+  }
+
+  // Field 6: frozen
+  if (_has_field_[6]) {
+    ::protozero::internal::gen_helpers::SerializeTinyVarInt(6, frozen_, msg);
   }
 
   protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
@@ -15855,6 +17320,178 @@ void AndroidSystemPropertyConfig::Serialize(::protozero::Message* msg) const {
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
+// gen_amalgamated begin source: gen/protos/perfetto/config/android/app_wakelock_config.gen.cc
+// gen_amalgamated expanded: #include "perfetto/protozero/gen_field_helpers.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/message.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/packed_repeated_fields.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/proto_decoder.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/scattered_heap_buffer.h"
+// DO NOT EDIT. Autogenerated by Perfetto cppgen_plugin
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfloat-equal"
+#endif
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/app_wakelock_config.gen.h"
+
+namespace perfetto {
+namespace protos {
+namespace gen {
+
+AppWakelocksConfig::AppWakelocksConfig() = default;
+AppWakelocksConfig::~AppWakelocksConfig() = default;
+AppWakelocksConfig::AppWakelocksConfig(const AppWakelocksConfig&) = default;
+AppWakelocksConfig& AppWakelocksConfig::operator=(const AppWakelocksConfig&) = default;
+AppWakelocksConfig::AppWakelocksConfig(AppWakelocksConfig&&) noexcept = default;
+AppWakelocksConfig& AppWakelocksConfig::operator=(AppWakelocksConfig&&) = default;
+
+bool AppWakelocksConfig::operator==(const AppWakelocksConfig& other) const {
+  return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
+   && ::protozero::internal::gen_helpers::EqualsField(write_delay_ms_, other.write_delay_ms_)
+   && ::protozero::internal::gen_helpers::EqualsField(filter_duration_below_ms_, other.filter_duration_below_ms_)
+   && ::protozero::internal::gen_helpers::EqualsField(drop_owner_pid_, other.drop_owner_pid_);
+}
+
+bool AppWakelocksConfig::ParseFromArray(const void* raw, size_t size) {
+  unknown_fields_.clear();
+  bool packed_error = false;
+
+  ::protozero::ProtoDecoder dec(raw, size);
+  for (auto field = dec.ReadField(); field.valid(); field = dec.ReadField()) {
+    if (field.id() < _has_field_.size()) {
+      _has_field_.set(field.id());
+    }
+    switch (field.id()) {
+      case 1 /* write_delay_ms */:
+        field.get(&write_delay_ms_);
+        break;
+      case 2 /* filter_duration_below_ms */:
+        field.get(&filter_duration_below_ms_);
+        break;
+      case 3 /* drop_owner_pid */:
+        field.get(&drop_owner_pid_);
+        break;
+      default:
+        field.SerializeAndAppendTo(&unknown_fields_);
+        break;
+    }
+  }
+  return !packed_error && !dec.bytes_left();
+}
+
+std::string AppWakelocksConfig::SerializeAsString() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsString();
+}
+
+std::vector<uint8_t> AppWakelocksConfig::SerializeAsArray() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsArray();
+}
+
+void AppWakelocksConfig::Serialize(::protozero::Message* msg) const {
+  // Field 1: write_delay_ms
+  if (_has_field_[1]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(1, write_delay_ms_, msg);
+  }
+
+  // Field 2: filter_duration_below_ms
+  if (_has_field_[2]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(2, filter_duration_below_ms_, msg);
+  }
+
+  // Field 3: drop_owner_pid
+  if (_has_field_[3]) {
+    ::protozero::internal::gen_helpers::SerializeTinyVarInt(3, drop_owner_pid_, msg);
+  }
+
+  protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
+}
+
+}  // namespace perfetto
+}  // namespace protos
+}  // namespace gen
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+// gen_amalgamated begin source: gen/protos/perfetto/config/android/kernel_wakelocks_config.gen.cc
+// gen_amalgamated expanded: #include "perfetto/protozero/gen_field_helpers.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/message.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/packed_repeated_fields.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/proto_decoder.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/scattered_heap_buffer.h"
+// DO NOT EDIT. Autogenerated by Perfetto cppgen_plugin
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfloat-equal"
+#endif
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/kernel_wakelocks_config.gen.h"
+
+namespace perfetto {
+namespace protos {
+namespace gen {
+
+KernelWakelocksConfig::KernelWakelocksConfig() = default;
+KernelWakelocksConfig::~KernelWakelocksConfig() = default;
+KernelWakelocksConfig::KernelWakelocksConfig(const KernelWakelocksConfig&) = default;
+KernelWakelocksConfig& KernelWakelocksConfig::operator=(const KernelWakelocksConfig&) = default;
+KernelWakelocksConfig::KernelWakelocksConfig(KernelWakelocksConfig&&) noexcept = default;
+KernelWakelocksConfig& KernelWakelocksConfig::operator=(KernelWakelocksConfig&&) = default;
+
+bool KernelWakelocksConfig::operator==(const KernelWakelocksConfig& other) const {
+  return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
+   && ::protozero::internal::gen_helpers::EqualsField(poll_ms_, other.poll_ms_);
+}
+
+bool KernelWakelocksConfig::ParseFromArray(const void* raw, size_t size) {
+  unknown_fields_.clear();
+  bool packed_error = false;
+
+  ::protozero::ProtoDecoder dec(raw, size);
+  for (auto field = dec.ReadField(); field.valid(); field = dec.ReadField()) {
+    if (field.id() < _has_field_.size()) {
+      _has_field_.set(field.id());
+    }
+    switch (field.id()) {
+      case 1 /* poll_ms */:
+        field.get(&poll_ms_);
+        break;
+      default:
+        field.SerializeAndAppendTo(&unknown_fields_);
+        break;
+    }
+  }
+  return !packed_error && !dec.bytes_left();
+}
+
+std::string KernelWakelocksConfig::SerializeAsString() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsString();
+}
+
+std::vector<uint8_t> KernelWakelocksConfig::SerializeAsArray() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsArray();
+}
+
+void KernelWakelocksConfig::Serialize(::protozero::Message* msg) const {
+  // Field 1: poll_ms
+  if (_has_field_[1]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(1, poll_ms_, msg);
+  }
+
+  protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
+}
+
+}  // namespace perfetto
+}  // namespace protos
+}  // namespace gen
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 // gen_amalgamated begin source: gen/protos/perfetto/config/android/network_trace_config.gen.cc
 // gen_amalgamated expanded: #include "perfetto/protozero/gen_field_helpers.h"
 // gen_amalgamated expanded: #include "perfetto/protozero/message.h"
@@ -16607,6 +18244,7 @@ FtraceConfig& FtraceConfig::operator=(FtraceConfig&&) = default;
 bool FtraceConfig::operator==(const FtraceConfig& other) const {
   return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
    && ::protozero::internal::gen_helpers::EqualsField(ftrace_events_, other.ftrace_events_)
+   && ::protozero::internal::gen_helpers::EqualsField(kprobe_events_, other.kprobe_events_)
    && ::protozero::internal::gen_helpers::EqualsField(atrace_categories_, other.atrace_categories_)
    && ::protozero::internal::gen_helpers::EqualsField(atrace_apps_, other.atrace_apps_)
    && ::protozero::internal::gen_helpers::EqualsField(atrace_categories_prefer_sdk_, other.atrace_categories_prefer_sdk_)
@@ -16619,6 +18257,7 @@ bool FtraceConfig::operator==(const FtraceConfig& other) const {
    && ::protozero::internal::gen_helpers::EqualsField(ksyms_mem_policy_, other.ksyms_mem_policy_)
    && ::protozero::internal::gen_helpers::EqualsField(initialize_ksyms_synchronously_for_testing_, other.initialize_ksyms_synchronously_for_testing_)
    && ::protozero::internal::gen_helpers::EqualsField(throttle_rss_stat_, other.throttle_rss_stat_)
+   && ::protozero::internal::gen_helpers::EqualsField(denser_generic_event_encoding_, other.denser_generic_event_encoding_)
    && ::protozero::internal::gen_helpers::EqualsField(disable_generic_events_, other.disable_generic_events_)
    && ::protozero::internal::gen_helpers::EqualsField(syscall_events_, other.syscall_events_)
    && ::protozero::internal::gen_helpers::EqualsField(enable_function_graph_, other.enable_function_graph_)
@@ -16627,11 +18266,16 @@ bool FtraceConfig::operator==(const FtraceConfig& other) const {
    && ::protozero::internal::gen_helpers::EqualsField(preserve_ftrace_buffer_, other.preserve_ftrace_buffer_)
    && ::protozero::internal::gen_helpers::EqualsField(use_monotonic_raw_clock_, other.use_monotonic_raw_clock_)
    && ::protozero::internal::gen_helpers::EqualsField(instance_name_, other.instance_name_)
-   && ::protozero::internal::gen_helpers::EqualsField(buffer_size_lower_bound_, other.buffer_size_lower_bound_);
+   && ::protozero::internal::gen_helpers::EqualsField(buffer_size_lower_bound_, other.buffer_size_lower_bound_)
+   && ::protozero::internal::gen_helpers::EqualsField(debug_ftrace_abi_, other.debug_ftrace_abi_);
 }
 
+int FtraceConfig::kprobe_events_size() const { return static_cast<int>(kprobe_events_.size()); }
+void FtraceConfig::clear_kprobe_events() { kprobe_events_.clear(); }
+FtraceConfig_KprobeEvent* FtraceConfig::add_kprobe_events() { kprobe_events_.emplace_back(); return &kprobe_events_.back(); }
 bool FtraceConfig::ParseFromArray(const void* raw, size_t size) {
   ftrace_events_.clear();
+  kprobe_events_.clear();
   atrace_categories_.clear();
   atrace_apps_.clear();
   atrace_categories_prefer_sdk_.clear();
@@ -16650,6 +18294,10 @@ bool FtraceConfig::ParseFromArray(const void* raw, size_t size) {
       case 1 /* ftrace_events */:
         ftrace_events_.emplace_back();
         ::protozero::internal::gen_helpers::DeserializeString(field, &ftrace_events_.back());
+        break;
+      case 30 /* kprobe_events */:
+        kprobe_events_.emplace_back();
+        kprobe_events_.back().ParseFromArray(field.data(), field.size());
         break;
       case 2 /* atrace_categories */:
         atrace_categories_.emplace_back();
@@ -16690,6 +18338,9 @@ bool FtraceConfig::ParseFromArray(const void* raw, size_t size) {
       case 15 /* throttle_rss_stat */:
         field.get(&throttle_rss_stat_);
         break;
+      case 32 /* denser_generic_event_encoding */:
+        field.get(&denser_generic_event_encoding_);
+        break;
       case 16 /* disable_generic_events */:
         field.get(&disable_generic_events_);
         break;
@@ -16720,6 +18371,9 @@ bool FtraceConfig::ParseFromArray(const void* raw, size_t size) {
       case 27 /* buffer_size_lower_bound */:
         field.get(&buffer_size_lower_bound_);
         break;
+      case 31 /* debug_ftrace_abi */:
+        field.get(&debug_ftrace_abi_);
+        break;
       default:
         field.SerializeAndAppendTo(&unknown_fields_);
         break;
@@ -16744,6 +18398,11 @@ void FtraceConfig::Serialize(::protozero::Message* msg) const {
   // Field 1: ftrace_events
   for (auto& it : ftrace_events_) {
     ::protozero::internal::gen_helpers::SerializeString(1, it, msg);
+  }
+
+  // Field 30: kprobe_events
+  for (auto& it : kprobe_events_) {
+    it.Serialize(msg->BeginNestedMessage<::protozero::Message>(30));
   }
 
   // Field 2: atrace_categories
@@ -16806,6 +18465,11 @@ void FtraceConfig::Serialize(::protozero::Message* msg) const {
     ::protozero::internal::gen_helpers::SerializeTinyVarInt(15, throttle_rss_stat_, msg);
   }
 
+  // Field 32: denser_generic_event_encoding
+  if (_has_field_[32]) {
+    ::protozero::internal::gen_helpers::SerializeTinyVarInt(32, denser_generic_event_encoding_, msg);
+  }
+
   // Field 16: disable_generic_events
   if (_has_field_[16]) {
     ::protozero::internal::gen_helpers::SerializeTinyVarInt(16, disable_generic_events_, msg);
@@ -16849,6 +18513,11 @@ void FtraceConfig::Serialize(::protozero::Message* msg) const {
   // Field 27: buffer_size_lower_bound
   if (_has_field_[27]) {
     ::protozero::internal::gen_helpers::SerializeTinyVarInt(27, buffer_size_lower_bound_, msg);
+  }
+
+  // Field 31: debug_ftrace_abi
+  if (_has_field_[31]) {
+    ::protozero::internal::gen_helpers::SerializeTinyVarInt(31, debug_ftrace_abi_, msg);
   }
 
   protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
@@ -17106,6 +18775,70 @@ void FtraceConfig_CompactSchedConfig::Serialize(::protozero::Message* msg) const
   protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
 }
 
+
+FtraceConfig_KprobeEvent::FtraceConfig_KprobeEvent() = default;
+FtraceConfig_KprobeEvent::~FtraceConfig_KprobeEvent() = default;
+FtraceConfig_KprobeEvent::FtraceConfig_KprobeEvent(const FtraceConfig_KprobeEvent&) = default;
+FtraceConfig_KprobeEvent& FtraceConfig_KprobeEvent::operator=(const FtraceConfig_KprobeEvent&) = default;
+FtraceConfig_KprobeEvent::FtraceConfig_KprobeEvent(FtraceConfig_KprobeEvent&&) noexcept = default;
+FtraceConfig_KprobeEvent& FtraceConfig_KprobeEvent::operator=(FtraceConfig_KprobeEvent&&) = default;
+
+bool FtraceConfig_KprobeEvent::operator==(const FtraceConfig_KprobeEvent& other) const {
+  return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
+   && ::protozero::internal::gen_helpers::EqualsField(probe_, other.probe_)
+   && ::protozero::internal::gen_helpers::EqualsField(type_, other.type_);
+}
+
+bool FtraceConfig_KprobeEvent::ParseFromArray(const void* raw, size_t size) {
+  unknown_fields_.clear();
+  bool packed_error = false;
+
+  ::protozero::ProtoDecoder dec(raw, size);
+  for (auto field = dec.ReadField(); field.valid(); field = dec.ReadField()) {
+    if (field.id() < _has_field_.size()) {
+      _has_field_.set(field.id());
+    }
+    switch (field.id()) {
+      case 1 /* probe */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &probe_);
+        break;
+      case 2 /* type */:
+        field.get(&type_);
+        break;
+      default:
+        field.SerializeAndAppendTo(&unknown_fields_);
+        break;
+    }
+  }
+  return !packed_error && !dec.bytes_left();
+}
+
+std::string FtraceConfig_KprobeEvent::SerializeAsString() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsString();
+}
+
+std::vector<uint8_t> FtraceConfig_KprobeEvent::SerializeAsArray() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsArray();
+}
+
+void FtraceConfig_KprobeEvent::Serialize(::protozero::Message* msg) const {
+  // Field 1: probe
+  if (_has_field_[1]) {
+    ::protozero::internal::gen_helpers::SerializeString(1, probe_, msg);
+  }
+
+  // Field 2: type
+  if (_has_field_[2]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(2, type_, msg);
+  }
+
+  protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
+}
+
 }  // namespace perfetto
 }  // namespace protos
 }  // namespace gen
@@ -17207,6 +18940,103 @@ void GpuCounterConfig::Serialize(::protozero::Message* msg) const {
   // Field 4: fix_gpu_clock
   if (_has_field_[4]) {
     ::protozero::internal::gen_helpers::SerializeTinyVarInt(4, fix_gpu_clock_, msg);
+  }
+
+  protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
+}
+
+}  // namespace perfetto
+}  // namespace protos
+}  // namespace gen
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+// gen_amalgamated begin source: gen/protos/perfetto/config/gpu/gpu_renderstages_config.gen.cc
+// gen_amalgamated expanded: #include "perfetto/protozero/gen_field_helpers.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/message.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/packed_repeated_fields.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/proto_decoder.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/scattered_heap_buffer.h"
+// DO NOT EDIT. Autogenerated by Perfetto cppgen_plugin
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfloat-equal"
+#endif
+// gen_amalgamated expanded: #include "protos/perfetto/config/gpu/gpu_renderstages_config.gen.h"
+
+namespace perfetto {
+namespace protos {
+namespace gen {
+
+GpuRenderStagesConfig::GpuRenderStagesConfig() = default;
+GpuRenderStagesConfig::~GpuRenderStagesConfig() = default;
+GpuRenderStagesConfig::GpuRenderStagesConfig(const GpuRenderStagesConfig&) = default;
+GpuRenderStagesConfig& GpuRenderStagesConfig::operator=(const GpuRenderStagesConfig&) = default;
+GpuRenderStagesConfig::GpuRenderStagesConfig(GpuRenderStagesConfig&&) noexcept = default;
+GpuRenderStagesConfig& GpuRenderStagesConfig::operator=(GpuRenderStagesConfig&&) = default;
+
+bool GpuRenderStagesConfig::operator==(const GpuRenderStagesConfig& other) const {
+  return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
+   && ::protozero::internal::gen_helpers::EqualsField(full_loadstore_, other.full_loadstore_)
+   && ::protozero::internal::gen_helpers::EqualsField(low_overhead_, other.low_overhead_)
+   && ::protozero::internal::gen_helpers::EqualsField(trace_metrics_, other.trace_metrics_);
+}
+
+bool GpuRenderStagesConfig::ParseFromArray(const void* raw, size_t size) {
+  trace_metrics_.clear();
+  unknown_fields_.clear();
+  bool packed_error = false;
+
+  ::protozero::ProtoDecoder dec(raw, size);
+  for (auto field = dec.ReadField(); field.valid(); field = dec.ReadField()) {
+    if (field.id() < _has_field_.size()) {
+      _has_field_.set(field.id());
+    }
+    switch (field.id()) {
+      case 1 /* full_loadstore */:
+        field.get(&full_loadstore_);
+        break;
+      case 2 /* low_overhead */:
+        field.get(&low_overhead_);
+        break;
+      case 3 /* trace_metrics */:
+        trace_metrics_.emplace_back();
+        ::protozero::internal::gen_helpers::DeserializeString(field, &trace_metrics_.back());
+        break;
+      default:
+        field.SerializeAndAppendTo(&unknown_fields_);
+        break;
+    }
+  }
+  return !packed_error && !dec.bytes_left();
+}
+
+std::string GpuRenderStagesConfig::SerializeAsString() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsString();
+}
+
+std::vector<uint8_t> GpuRenderStagesConfig::SerializeAsArray() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsArray();
+}
+
+void GpuRenderStagesConfig::Serialize(::protozero::Message* msg) const {
+  // Field 1: full_loadstore
+  if (_has_field_[1]) {
+    ::protozero::internal::gen_helpers::SerializeTinyVarInt(1, full_loadstore_, msg);
+  }
+
+  // Field 2: low_overhead
+  if (_has_field_[2]) {
+    ::protozero::internal::gen_helpers::SerializeTinyVarInt(2, low_overhead_, msg);
+  }
+
+  // Field 3: trace_metrics
+  for (auto& it : trace_metrics_) {
+    ::protozero::internal::gen_helpers::SerializeString(3, it, msg);
   }
 
   protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
@@ -18464,6 +20294,7 @@ bool PerfEventConfig::operator==(const PerfEventConfig& other) const {
    && ::protozero::internal::gen_helpers::EqualsField(timebase_, other.timebase_)
    && ::protozero::internal::gen_helpers::EqualsField(followers_, other.followers_)
    && ::protozero::internal::gen_helpers::EqualsField(callstack_sampling_, other.callstack_sampling_)
+   && ::protozero::internal::gen_helpers::EqualsField(target_cpu_, other.target_cpu_)
    && ::protozero::internal::gen_helpers::EqualsField(ring_buffer_read_period_ms_, other.ring_buffer_read_period_ms_)
    && ::protozero::internal::gen_helpers::EqualsField(ring_buffer_pages_, other.ring_buffer_pages_)
    && ::protozero::internal::gen_helpers::EqualsField(max_enqueued_footprint_kb_, other.max_enqueued_footprint_kb_)
@@ -18486,6 +20317,7 @@ void PerfEventConfig::clear_followers() { followers_.clear(); }
 FollowerEvent* PerfEventConfig::add_followers() { followers_.emplace_back(); return &followers_.back(); }
 bool PerfEventConfig::ParseFromArray(const void* raw, size_t size) {
   followers_.clear();
+  target_cpu_.clear();
   target_installed_by_.clear();
   target_pid_.clear();
   target_cmdline_.clear();
@@ -18509,6 +20341,10 @@ bool PerfEventConfig::ParseFromArray(const void* raw, size_t size) {
         break;
       case 16 /* callstack_sampling */:
         (*callstack_sampling_).ParseFromArray(field.data(), field.size());
+        break;
+      case 20 /* target_cpu */:
+        target_cpu_.emplace_back();
+        field.get(&target_cpu_.back());
         break;
       case 8 /* ring_buffer_read_period_ms */:
         field.get(&ring_buffer_read_period_ms_);
@@ -18594,6 +20430,11 @@ void PerfEventConfig::Serialize(::protozero::Message* msg) const {
   // Field 16: callstack_sampling
   if (_has_field_[16]) {
     (*callstack_sampling_).Serialize(msg->BeginNestedMessage<::protozero::Message>(16));
+  }
+
+  // Field 20: target_cpu
+  for (auto& it : target_cpu_) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(20, it, msg);
   }
 
   // Field 8: ring_buffer_read_period_ms
@@ -19277,7 +21118,7 @@ void SysStatsConfig::Serialize(::protozero::Message* msg) const {
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
-// gen_amalgamated begin source: gen/protos/perfetto/config/system_info/system_info.gen.cc
+// gen_amalgamated begin source: gen/protos/perfetto/config/system_info/system_info_config.gen.cc
 // gen_amalgamated expanded: #include "perfetto/protozero/gen_field_helpers.h"
 // gen_amalgamated expanded: #include "perfetto/protozero/message.h"
 // gen_amalgamated expanded: #include "perfetto/protozero/packed_repeated_fields.h"
@@ -19288,7 +21129,7 @@ void SysStatsConfig::Serialize(::protozero::Message* msg) const {
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wfloat-equal"
 #endif
-// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info_config.gen.h"
 
 namespace perfetto {
 namespace protos {
@@ -19615,6 +21456,170 @@ void ChromeConfig::Serialize(::protozero::Message* msg) const {
 #if defined(__GNUC__) || defined(__clang__)
 #pragma GCC diagnostic pop
 #endif
+// gen_amalgamated begin source: gen/protos/perfetto/config/chrome/histogram_samples.gen.cc
+// gen_amalgamated expanded: #include "perfetto/protozero/gen_field_helpers.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/message.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/packed_repeated_fields.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/proto_decoder.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/scattered_heap_buffer.h"
+// DO NOT EDIT. Autogenerated by Perfetto cppgen_plugin
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfloat-equal"
+#endif
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/histogram_samples.gen.h"
+
+namespace perfetto {
+namespace protos {
+namespace gen {
+
+ChromiumHistogramSamplesConfig::ChromiumHistogramSamplesConfig() = default;
+ChromiumHistogramSamplesConfig::~ChromiumHistogramSamplesConfig() = default;
+ChromiumHistogramSamplesConfig::ChromiumHistogramSamplesConfig(const ChromiumHistogramSamplesConfig&) = default;
+ChromiumHistogramSamplesConfig& ChromiumHistogramSamplesConfig::operator=(const ChromiumHistogramSamplesConfig&) = default;
+ChromiumHistogramSamplesConfig::ChromiumHistogramSamplesConfig(ChromiumHistogramSamplesConfig&&) noexcept = default;
+ChromiumHistogramSamplesConfig& ChromiumHistogramSamplesConfig::operator=(ChromiumHistogramSamplesConfig&&) = default;
+
+bool ChromiumHistogramSamplesConfig::operator==(const ChromiumHistogramSamplesConfig& other) const {
+  return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
+   && ::protozero::internal::gen_helpers::EqualsField(histograms_, other.histograms_)
+   && ::protozero::internal::gen_helpers::EqualsField(filter_histogram_names_, other.filter_histogram_names_);
+}
+
+int ChromiumHistogramSamplesConfig::histograms_size() const { return static_cast<int>(histograms_.size()); }
+void ChromiumHistogramSamplesConfig::clear_histograms() { histograms_.clear(); }
+ChromiumHistogramSamplesConfig_HistogramSample* ChromiumHistogramSamplesConfig::add_histograms() { histograms_.emplace_back(); return &histograms_.back(); }
+bool ChromiumHistogramSamplesConfig::ParseFromArray(const void* raw, size_t size) {
+  histograms_.clear();
+  unknown_fields_.clear();
+  bool packed_error = false;
+
+  ::protozero::ProtoDecoder dec(raw, size);
+  for (auto field = dec.ReadField(); field.valid(); field = dec.ReadField()) {
+    if (field.id() < _has_field_.size()) {
+      _has_field_.set(field.id());
+    }
+    switch (field.id()) {
+      case 1 /* histograms */:
+        histograms_.emplace_back();
+        histograms_.back().ParseFromArray(field.data(), field.size());
+        break;
+      case 2 /* filter_histogram_names */:
+        field.get(&filter_histogram_names_);
+        break;
+      default:
+        field.SerializeAndAppendTo(&unknown_fields_);
+        break;
+    }
+  }
+  return !packed_error && !dec.bytes_left();
+}
+
+std::string ChromiumHistogramSamplesConfig::SerializeAsString() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsString();
+}
+
+std::vector<uint8_t> ChromiumHistogramSamplesConfig::SerializeAsArray() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsArray();
+}
+
+void ChromiumHistogramSamplesConfig::Serialize(::protozero::Message* msg) const {
+  // Field 1: histograms
+  for (auto& it : histograms_) {
+    it.Serialize(msg->BeginNestedMessage<::protozero::Message>(1));
+  }
+
+  // Field 2: filter_histogram_names
+  if (_has_field_[2]) {
+    ::protozero::internal::gen_helpers::SerializeTinyVarInt(2, filter_histogram_names_, msg);
+  }
+
+  protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
+}
+
+
+ChromiumHistogramSamplesConfig_HistogramSample::ChromiumHistogramSamplesConfig_HistogramSample() = default;
+ChromiumHistogramSamplesConfig_HistogramSample::~ChromiumHistogramSamplesConfig_HistogramSample() = default;
+ChromiumHistogramSamplesConfig_HistogramSample::ChromiumHistogramSamplesConfig_HistogramSample(const ChromiumHistogramSamplesConfig_HistogramSample&) = default;
+ChromiumHistogramSamplesConfig_HistogramSample& ChromiumHistogramSamplesConfig_HistogramSample::operator=(const ChromiumHistogramSamplesConfig_HistogramSample&) = default;
+ChromiumHistogramSamplesConfig_HistogramSample::ChromiumHistogramSamplesConfig_HistogramSample(ChromiumHistogramSamplesConfig_HistogramSample&&) noexcept = default;
+ChromiumHistogramSamplesConfig_HistogramSample& ChromiumHistogramSamplesConfig_HistogramSample::operator=(ChromiumHistogramSamplesConfig_HistogramSample&&) = default;
+
+bool ChromiumHistogramSamplesConfig_HistogramSample::operator==(const ChromiumHistogramSamplesConfig_HistogramSample& other) const {
+  return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
+   && ::protozero::internal::gen_helpers::EqualsField(histogram_name_, other.histogram_name_)
+   && ::protozero::internal::gen_helpers::EqualsField(min_value_, other.min_value_)
+   && ::protozero::internal::gen_helpers::EqualsField(max_value_, other.max_value_);
+}
+
+bool ChromiumHistogramSamplesConfig_HistogramSample::ParseFromArray(const void* raw, size_t size) {
+  unknown_fields_.clear();
+  bool packed_error = false;
+
+  ::protozero::ProtoDecoder dec(raw, size);
+  for (auto field = dec.ReadField(); field.valid(); field = dec.ReadField()) {
+    if (field.id() < _has_field_.size()) {
+      _has_field_.set(field.id());
+    }
+    switch (field.id()) {
+      case 1 /* histogram_name */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &histogram_name_);
+        break;
+      case 2 /* min_value */:
+        field.get(&min_value_);
+        break;
+      case 3 /* max_value */:
+        field.get(&max_value_);
+        break;
+      default:
+        field.SerializeAndAppendTo(&unknown_fields_);
+        break;
+    }
+  }
+  return !packed_error && !dec.bytes_left();
+}
+
+std::string ChromiumHistogramSamplesConfig_HistogramSample::SerializeAsString() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsString();
+}
+
+std::vector<uint8_t> ChromiumHistogramSamplesConfig_HistogramSample::SerializeAsArray() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsArray();
+}
+
+void ChromiumHistogramSamplesConfig_HistogramSample::Serialize(::protozero::Message* msg) const {
+  // Field 1: histogram_name
+  if (_has_field_[1]) {
+    ::protozero::internal::gen_helpers::SerializeString(1, histogram_name_, msg);
+  }
+
+  // Field 2: min_value
+  if (_has_field_[2]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(2, min_value_, msg);
+  }
+
+  // Field 3: max_value
+  if (_has_field_[3]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(3, max_value_, msg);
+  }
+
+  protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
+}
+
+}  // namespace perfetto
+}  // namespace protos
+}  // namespace gen
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 // gen_amalgamated begin source: gen/protos/perfetto/config/chrome/scenario_config.gen.cc
 // gen_amalgamated expanded: #include "perfetto/protozero/gen_field_helpers.h"
 // gen_amalgamated expanded: #include "perfetto/protozero/message.h"
@@ -19629,7 +21634,8 @@ void ChromeConfig::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated expanded: #include "protos/perfetto/config/chrome/scenario_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/trace_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/data_source_config.gen.h"
-// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/histogram_samples.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/track_event/track_event_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/test_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/sys_stats/sys_stats_config.gen.h"
@@ -19645,9 +21651,11 @@ void ChromeConfig::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptor_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptors/console_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/inode_file/inode_file_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/gpu/gpu_renderstages_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/gpu/vulkan_memory_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/gpu/gpu_counter_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/ftrace/ftrace_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/system_metrics.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/etw/etw_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/chrome/v8_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/chrome/chrome_config.gen.h"
@@ -19659,6 +21667,8 @@ void ChromeConfig::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/pixel_modem_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/packages_list_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/network_trace_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/kernel_wakelocks_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/app_wakelock_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_sdk_sysprop_guard_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_system_property_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_polled_state_config.gen.h"
@@ -20053,7 +22063,8 @@ bool ScenarioConfig::operator==(const ScenarioConfig& other) const {
    && ::protozero::internal::gen_helpers::EqualsField(upload_rules_, other.upload_rules_)
    && ::protozero::internal::gen_helpers::EqualsField(setup_rules_, other.setup_rules_)
    && ::protozero::internal::gen_helpers::EqualsField(trace_config_, other.trace_config_)
-   && ::protozero::internal::gen_helpers::EqualsField(nested_scenarios_, other.nested_scenarios_);
+   && ::protozero::internal::gen_helpers::EqualsField(nested_scenarios_, other.nested_scenarios_)
+   && ::protozero::internal::gen_helpers::EqualsField(use_system_backend_, other.use_system_backend_);
 }
 
 int ScenarioConfig::start_rules_size() const { return static_cast<int>(start_rules_.size()); }
@@ -20112,6 +22123,9 @@ bool ScenarioConfig::ParseFromArray(const void* raw, size_t size) {
         nested_scenarios_.emplace_back();
         nested_scenarios_.back().ParseFromArray(field.data(), field.size());
         break;
+      case 8 /* use_system_backend */:
+        field.get(&use_system_backend_);
+        break;
       default:
         field.SerializeAndAppendTo(&unknown_fields_);
         break;
@@ -20166,6 +22180,11 @@ void ScenarioConfig::Serialize(::protozero::Message* msg) const {
   // Field 7: nested_scenarios
   for (auto& it : nested_scenarios_) {
     it.Serialize(msg->BeginNestedMessage<::protozero::Message>(7));
+  }
+
+  // Field 8: use_system_backend
+  if (_has_field_[8]) {
+    ::protozero::internal::gen_helpers::SerializeTinyVarInt(8, use_system_backend_, msg);
   }
 
   protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
@@ -20263,6 +22282,83 @@ void NestedScenarioConfig::Serialize(::protozero::Message* msg) const {
   // Field 4: upload_rules
   for (auto& it : upload_rules_) {
     it.Serialize(msg->BeginNestedMessage<::protozero::Message>(4));
+  }
+
+  protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
+}
+
+}  // namespace perfetto
+}  // namespace protos
+}  // namespace gen
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
+// gen_amalgamated begin source: gen/protos/perfetto/config/chrome/system_metrics.gen.cc
+// gen_amalgamated expanded: #include "perfetto/protozero/gen_field_helpers.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/message.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/packed_repeated_fields.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/proto_decoder.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/scattered_heap_buffer.h"
+// DO NOT EDIT. Autogenerated by Perfetto cppgen_plugin
+#if defined(__GNUC__) || defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wfloat-equal"
+#endif
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/system_metrics.gen.h"
+
+namespace perfetto {
+namespace protos {
+namespace gen {
+
+ChromiumSystemMetricsConfig::ChromiumSystemMetricsConfig() = default;
+ChromiumSystemMetricsConfig::~ChromiumSystemMetricsConfig() = default;
+ChromiumSystemMetricsConfig::ChromiumSystemMetricsConfig(const ChromiumSystemMetricsConfig&) = default;
+ChromiumSystemMetricsConfig& ChromiumSystemMetricsConfig::operator=(const ChromiumSystemMetricsConfig&) = default;
+ChromiumSystemMetricsConfig::ChromiumSystemMetricsConfig(ChromiumSystemMetricsConfig&&) noexcept = default;
+ChromiumSystemMetricsConfig& ChromiumSystemMetricsConfig::operator=(ChromiumSystemMetricsConfig&&) = default;
+
+bool ChromiumSystemMetricsConfig::operator==(const ChromiumSystemMetricsConfig& other) const {
+  return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
+   && ::protozero::internal::gen_helpers::EqualsField(sampling_interval_ms_, other.sampling_interval_ms_);
+}
+
+bool ChromiumSystemMetricsConfig::ParseFromArray(const void* raw, size_t size) {
+  unknown_fields_.clear();
+  bool packed_error = false;
+
+  ::protozero::ProtoDecoder dec(raw, size);
+  for (auto field = dec.ReadField(); field.valid(); field = dec.ReadField()) {
+    if (field.id() < _has_field_.size()) {
+      _has_field_.set(field.id());
+    }
+    switch (field.id()) {
+      case 1 /* sampling_interval_ms */:
+        field.get(&sampling_interval_ms_);
+        break;
+      default:
+        field.SerializeAndAppendTo(&unknown_fields_);
+        break;
+    }
+  }
+  return !packed_error && !dec.bytes_left();
+}
+
+std::string ChromiumSystemMetricsConfig::SerializeAsString() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsString();
+}
+
+std::vector<uint8_t> ChromiumSystemMetricsConfig::SerializeAsArray() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsArray();
+}
+
+void ChromiumSystemMetricsConfig::Serialize(::protozero::Message* msg) const {
+  // Field 1: sampling_interval_ms
+  if (_has_field_[1]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(1, sampling_interval_ms_, msg);
   }
 
   protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
@@ -20372,7 +22468,7 @@ void V8Config::Serialize(::protozero::Message* msg) const {
 #pragma GCC diagnostic ignored "-Wfloat-equal"
 #endif
 // gen_amalgamated expanded: #include "protos/perfetto/config/data_source_config.gen.h"
-// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/test_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptor_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptors/console_config.gen.h"
@@ -20429,6 +22525,11 @@ bool DataSourceConfig::operator==(const DataSourceConfig& other) const {
    && ::protozero::internal::gen_helpers::EqualsField(android_input_event_config_, other.android_input_event_config_)
    && ::protozero::internal::gen_helpers::EqualsField(pixel_modem_config_, other.pixel_modem_config_)
    && ::protozero::internal::gen_helpers::EqualsField(windowmanager_config_, other.windowmanager_config_)
+   && ::protozero::internal::gen_helpers::EqualsField(chromium_system_metrics_, other.chromium_system_metrics_)
+   && ::protozero::internal::gen_helpers::EqualsField(kernel_wakelocks_config_, other.kernel_wakelocks_config_)
+   && ::protozero::internal::gen_helpers::EqualsField(gpu_renderstages_config_, other.gpu_renderstages_config_)
+   && ::protozero::internal::gen_helpers::EqualsField(chromium_histogram_samples_, other.chromium_histogram_samples_)
+   && ::protozero::internal::gen_helpers::EqualsField(app_wakelocks_config_, other.app_wakelocks_config_)
    && ::protozero::internal::gen_helpers::EqualsField(legacy_config_, other.legacy_config_)
    && ::protozero::internal::gen_helpers::EqualsField(for_testing_, other.for_testing_);
 }
@@ -20556,6 +22657,21 @@ bool DataSourceConfig::ParseFromArray(const void* raw, size_t size) {
         break;
       case 130 /* windowmanager_config */:
         ::protozero::internal::gen_helpers::DeserializeString(field, &windowmanager_config_);
+        break;
+      case 131 /* chromium_system_metrics */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &chromium_system_metrics_);
+        break;
+      case 132 /* kernel_wakelocks_config */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &kernel_wakelocks_config_);
+        break;
+      case 133 /* gpu_renderstages_config */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &gpu_renderstages_config_);
+        break;
+      case 134 /* chromium_histogram_samples */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &chromium_histogram_samples_);
+        break;
+      case 135 /* app_wakelocks_config */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &app_wakelocks_config_);
         break;
       case 1000 /* legacy_config */:
         ::protozero::internal::gen_helpers::DeserializeString(field, &legacy_config_);
@@ -20774,6 +22890,31 @@ void DataSourceConfig::Serialize(::protozero::Message* msg) const {
     msg->AppendString(130, windowmanager_config_);
   }
 
+  // Field 131: chromium_system_metrics
+  if (_has_field_[131]) {
+    msg->AppendString(131, chromium_system_metrics_);
+  }
+
+  // Field 132: kernel_wakelocks_config
+  if (_has_field_[132]) {
+    msg->AppendString(132, kernel_wakelocks_config_);
+  }
+
+  // Field 133: gpu_renderstages_config
+  if (_has_field_[133]) {
+    msg->AppendString(133, gpu_renderstages_config_);
+  }
+
+  // Field 134: chromium_histogram_samples
+  if (_has_field_[134]) {
+    msg->AppendString(134, chromium_histogram_samples_);
+  }
+
+  // Field 135: app_wakelocks_config
+  if (_has_field_[135]) {
+    msg->AppendString(135, app_wakelocks_config_);
+  }
+
   // Field 1000: legacy_config
   if (_has_field_[1000]) {
     ::protozero::internal::gen_helpers::SerializeString(1000, legacy_config_, msg);
@@ -20973,7 +23114,8 @@ void InterceptorConfig::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated expanded: #include "protos/perfetto/config/stress_test_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/trace_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/data_source_config.gen.h"
-// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/histogram_samples.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/track_event/track_event_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/test_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/sys_stats/sys_stats_config.gen.h"
@@ -20989,9 +23131,11 @@ void InterceptorConfig::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptor_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptors/console_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/inode_file/inode_file_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/gpu/gpu_renderstages_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/gpu/vulkan_memory_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/gpu/gpu_counter_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/ftrace/ftrace_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/system_metrics.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/etw/etw_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/chrome/v8_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/chrome/chrome_config.gen.h"
@@ -21003,6 +23147,8 @@ void InterceptorConfig::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/pixel_modem_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/packages_list_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/network_trace_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/kernel_wakelocks_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/app_wakelock_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_sdk_sysprop_guard_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_system_property_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_polled_state_config.gen.h"
@@ -21564,7 +23710,8 @@ void TestConfig_DummyFields::Serialize(::protozero::Message* msg) const {
 #endif
 // gen_amalgamated expanded: #include "protos/perfetto/config/trace_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/data_source_config.gen.h"
-// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/histogram_samples.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/track_event/track_event_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/test_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/sys_stats/sys_stats_config.gen.h"
@@ -21580,9 +23727,11 @@ void TestConfig_DummyFields::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptor_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptors/console_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/inode_file/inode_file_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/gpu/gpu_renderstages_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/gpu/vulkan_memory_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/gpu/gpu_counter_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/ftrace/ftrace_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/system_metrics.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/etw/etw_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/chrome/v8_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/chrome/chrome_config.gen.h"
@@ -21594,6 +23743,8 @@ void TestConfig_DummyFields::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/pixel_modem_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/packages_list_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/network_trace_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/kernel_wakelocks_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/app_wakelock_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_sdk_sysprop_guard_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_system_property_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_polled_state_config.gen.h"
@@ -23257,6 +25408,8 @@ void TraceConfig_BufferConfig::Serialize(::protozero::Message* msg) const {
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/common/sys_stats_counters.pbzero.cc
 // Intentionally empty (crbug.com/998165)
+// gen_amalgamated begin source: gen/protos/perfetto/common/system_info.pbzero.cc
+// Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/common/trace_stats.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/common/tracing_service_capabilities.pbzero.cc
@@ -23287,6 +25440,10 @@ void TraceConfig_BufferConfig::Serialize(::protozero::Message* msg) const {
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/android/android_system_property.pbzero.cc
 // Intentionally empty (crbug.com/998165)
+// gen_amalgamated begin source: gen/protos/perfetto/trace/android/app_wakelock_data.pbzero.cc
+// Intentionally empty (crbug.com/998165)
+// gen_amalgamated begin source: gen/protos/perfetto/trace/android/bluetooth_trace.pbzero.cc
+// Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/android/camera_event.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/android/frame_timeline_event.pbzero.cc
@@ -23296,6 +25453,8 @@ void TraceConfig_BufferConfig::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated begin source: gen/protos/perfetto/trace/android/graphics_frame_event.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/android/initial_display_state.pbzero.cc
+// Intentionally empty (crbug.com/998165)
+// gen_amalgamated begin source: gen/protos/perfetto/trace/android/kernel_wakelock_data.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/android/network_trace.pbzero.cc
 // Intentionally empty (crbug.com/998165)
@@ -25091,7 +27250,9 @@ bool ChromeFrameReporter::operator==(const ChromeFrameReporter& other) const {
    && ::protozero::internal::gen_helpers::EqualsField(frame_type_, other.frame_type_)
    && ::protozero::internal::gen_helpers::EqualsField(high_latency_contribution_stage_, other.high_latency_contribution_stage_)
    && ::protozero::internal::gen_helpers::EqualsField(checkerboarded_needs_raster_, other.checkerboarded_needs_raster_)
-   && ::protozero::internal::gen_helpers::EqualsField(checkerboarded_needs_record_, other.checkerboarded_needs_record_);
+   && ::protozero::internal::gen_helpers::EqualsField(checkerboarded_needs_record_, other.checkerboarded_needs_record_)
+   && ::protozero::internal::gen_helpers::EqualsField(surface_frame_trace_id_, other.surface_frame_trace_id_)
+   && ::protozero::internal::gen_helpers::EqualsField(display_trace_id_, other.display_trace_id_);
 }
 
 bool ChromeFrameReporter::ParseFromArray(const void* raw, size_t size) {
@@ -25153,6 +27314,12 @@ bool ChromeFrameReporter::ParseFromArray(const void* raw, size_t size) {
         break;
       case 16 /* checkerboarded_needs_record */:
         field.get(&checkerboarded_needs_record_);
+        break;
+      case 17 /* surface_frame_trace_id */:
+        field.get(&surface_frame_trace_id_);
+        break;
+      case 18 /* display_trace_id */:
+        field.get(&display_trace_id_);
         break;
       default:
         field.SerializeAndAppendTo(&unknown_fields_);
@@ -25253,6 +27420,16 @@ void ChromeFrameReporter::Serialize(::protozero::Message* msg) const {
   // Field 16: checkerboarded_needs_record
   if (_has_field_[16]) {
     ::protozero::internal::gen_helpers::SerializeTinyVarInt(16, checkerboarded_needs_record_, msg);
+  }
+
+  // Field 17: surface_frame_trace_id
+  if (_has_field_[17]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(17, surface_frame_trace_id_, msg);
+  }
+
+  // Field 18: display_trace_id
+  if (_has_field_[18]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(18, display_trace_id_, msg);
   }
 
   protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
@@ -27986,12 +30163,15 @@ bool TrackDescriptor::operator==(const TrackDescriptor& other) const {
    && ::protozero::internal::gen_helpers::EqualsField(parent_uuid_, other.parent_uuid_)
    && ::protozero::internal::gen_helpers::EqualsField(name_, other.name_)
    && ::protozero::internal::gen_helpers::EqualsField(static_name_, other.static_name_)
+   && ::protozero::internal::gen_helpers::EqualsField(atrace_name_, other.atrace_name_)
    && ::protozero::internal::gen_helpers::EqualsField(process_, other.process_)
    && ::protozero::internal::gen_helpers::EqualsField(chrome_process_, other.chrome_process_)
    && ::protozero::internal::gen_helpers::EqualsField(thread_, other.thread_)
    && ::protozero::internal::gen_helpers::EqualsField(chrome_thread_, other.chrome_thread_)
    && ::protozero::internal::gen_helpers::EqualsField(counter_, other.counter_)
-   && ::protozero::internal::gen_helpers::EqualsField(disallow_merging_with_system_tracks_, other.disallow_merging_with_system_tracks_);
+   && ::protozero::internal::gen_helpers::EqualsField(disallow_merging_with_system_tracks_, other.disallow_merging_with_system_tracks_)
+   && ::protozero::internal::gen_helpers::EqualsField(child_ordering_, other.child_ordering_)
+   && ::protozero::internal::gen_helpers::EqualsField(sibling_order_rank_, other.sibling_order_rank_);
 }
 
 bool TrackDescriptor::ParseFromArray(const void* raw, size_t size) {
@@ -28016,6 +30196,9 @@ bool TrackDescriptor::ParseFromArray(const void* raw, size_t size) {
       case 10 /* static_name */:
         ::protozero::internal::gen_helpers::DeserializeString(field, &static_name_);
         break;
+      case 13 /* atrace_name */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &atrace_name_);
+        break;
       case 3 /* process */:
         (*process_).ParseFromArray(field.data(), field.size());
         break;
@@ -28033,6 +30216,12 @@ bool TrackDescriptor::ParseFromArray(const void* raw, size_t size) {
         break;
       case 9 /* disallow_merging_with_system_tracks */:
         field.get(&disallow_merging_with_system_tracks_);
+        break;
+      case 11 /* child_ordering */:
+        field.get(&child_ordering_);
+        break;
+      case 12 /* sibling_order_rank */:
+        field.get(&sibling_order_rank_);
         break;
       default:
         field.SerializeAndAppendTo(&unknown_fields_);
@@ -28075,6 +30264,11 @@ void TrackDescriptor::Serialize(::protozero::Message* msg) const {
     ::protozero::internal::gen_helpers::SerializeString(10, static_name_, msg);
   }
 
+  // Field 13: atrace_name
+  if (_has_field_[13]) {
+    ::protozero::internal::gen_helpers::SerializeString(13, atrace_name_, msg);
+  }
+
   // Field 3: process
   if (_has_field_[3]) {
     (*process_).Serialize(msg->BeginNestedMessage<::protozero::Message>(3));
@@ -28103,6 +30297,16 @@ void TrackDescriptor::Serialize(::protozero::Message* msg) const {
   // Field 9: disallow_merging_with_system_tracks
   if (_has_field_[9]) {
     ::protozero::internal::gen_helpers::SerializeTinyVarInt(9, disallow_merging_with_system_tracks_, msg);
+  }
+
+  // Field 11: child_ordering
+  if (_has_field_[11]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(11, child_ordering_, msg);
+  }
+
+  // Field 12: sibling_order_rank
+  if (_has_field_[12]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(12, sibling_order_rank_, msg);
   }
 
   protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
@@ -29020,6 +31224,10 @@ void TrackEvent_LegacyEvent::Serialize(::protozero::Message* msg) const {
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/config/android/android_system_property_config.pbzero.cc
 // Intentionally empty (crbug.com/998165)
+// gen_amalgamated begin source: gen/protos/perfetto/config/android/app_wakelock_config.pbzero.cc
+// Intentionally empty (crbug.com/998165)
+// gen_amalgamated begin source: gen/protos/perfetto/config/android/kernel_wakelocks_config.pbzero.cc
+// Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/config/android/network_trace_config.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/config/android/packages_list_config.pbzero.cc
@@ -29037,6 +31245,8 @@ void TrackEvent_LegacyEvent::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated begin source: gen/protos/perfetto/config/ftrace/ftrace_config.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/config/gpu/gpu_counter_config.pbzero.cc
+// Intentionally empty (crbug.com/998165)
+// gen_amalgamated begin source: gen/protos/perfetto/config/gpu/gpu_renderstages_config.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/config/gpu/vulkan_memory_config.pbzero.cc
 // Intentionally empty (crbug.com/998165)
@@ -29060,13 +31270,17 @@ void TrackEvent_LegacyEvent::Serialize(::protozero::Message* msg) const {
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/config/sys_stats/sys_stats_config.pbzero.cc
 // Intentionally empty (crbug.com/998165)
-// gen_amalgamated begin source: gen/protos/perfetto/config/system_info/system_info.pbzero.cc
+// gen_amalgamated begin source: gen/protos/perfetto/config/system_info/system_info_config.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/config/track_event/track_event_config.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/config/chrome/chrome_config.pbzero.cc
 // Intentionally empty (crbug.com/998165)
+// gen_amalgamated begin source: gen/protos/perfetto/config/chrome/histogram_samples.pbzero.cc
+// Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/config/chrome/scenario_config.pbzero.cc
+// Intentionally empty (crbug.com/998165)
+// gen_amalgamated begin source: gen/protos/perfetto/config/chrome/system_metrics.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/config/chrome/v8_config.pbzero.cc
 // Intentionally empty (crbug.com/998165)
@@ -29087,8 +31301,6 @@ void TrackEvent_LegacyEvent::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated begin source: gen/protos/perfetto/trace/trace_uuid.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/trigger.pbzero.cc
-// Intentionally empty (crbug.com/998165)
-// gen_amalgamated begin source: gen/protos/perfetto/trace/system_info.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/etw/etw.pbzero.cc
 // Intentionally empty (crbug.com/998165)
@@ -29124,6 +31336,8 @@ void TrackEvent_LegacyEvent::Serialize(::protozero::Message* msg) const {
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/ftrace/compaction.pbzero.cc
 // Intentionally empty (crbug.com/998165)
+// gen_amalgamated begin source: gen/protos/perfetto/trace/ftrace/cpm_trace.pbzero.cc
+// Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/ftrace/cpuhp.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/ftrace/cros_ec.pbzero.cc
@@ -29149,6 +31363,8 @@ void TrackEvent_LegacyEvent::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated begin source: gen/protos/perfetto/trace/ftrace/fence.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/ftrace/filemap.pbzero.cc
+// Intentionally empty (crbug.com/998165)
+// gen_amalgamated begin source: gen/protos/perfetto/trace/ftrace/fs.pbzero.cc
 // Intentionally empty (crbug.com/998165)
 // gen_amalgamated begin source: gen/protos/perfetto/trace/ftrace/ftrace.pbzero.cc
 // Intentionally empty (crbug.com/998165)
@@ -29321,128 +31537,6 @@ namespace perfetto {
 TraceWriterBase::~TraceWriterBase() = default;
 
 }  // namespace perfetto
-// gen_amalgamated begin source: src/tracing/core/clock_snapshots.cc
-// gen_amalgamated begin header: include/perfetto/tracing/core/clock_snapshots.h
-/*
- * Copyright (C) 2024 The Android Open Source Project
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-#ifndef INCLUDE_PERFETTO_TRACING_CORE_CLOCK_SNAPSHOTS_H_
-#define INCLUDE_PERFETTO_TRACING_CORE_CLOCK_SNAPSHOTS_H_
-
-#include <cstdint>
-#include <vector>
-
-namespace perfetto {
-struct ClockReading {
-  ClockReading(uint32_t _clock_id, uint64_t _timestamp)
-      : clock_id(_clock_id), timestamp(_timestamp) {}
-  ClockReading() = default;
-
-  // Identifier of the clock domain (of type protos::pbzero::BuiltinClock).
-  uint32_t clock_id = 0;
-  // Clock reading as uint64_t.
-  uint64_t timestamp = 0;
-};
-
-using ClockSnapshotVector = std::vector<ClockReading>;
-
-// Takes snapshots of clock readings of all supported built-in clocks.
-ClockSnapshotVector CaptureClockSnapshots();
-
-}  // namespace perfetto
-
-#endif  // INCLUDE_PERFETTO_TRACING_CORE_CLOCK_SNAPSHOTS_H_
-/*
- * Copyright (C) 2024 The Android Open Source Project
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-// gen_amalgamated expanded: #include "perfetto/tracing/core/clock_snapshots.h"
-
-// gen_amalgamated expanded: #include "perfetto/base/build_config.h"
-// gen_amalgamated expanded: #include "perfetto/base/time.h"
-// gen_amalgamated expanded: #include "protos/perfetto/common/builtin_clock.pbzero.h"
-
-namespace perfetto {
-
-ClockSnapshotVector CaptureClockSnapshots() {
-  ClockSnapshotVector snapshot_data;
-#if !PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE) && \
-    !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) &&   \
-    !PERFETTO_BUILDFLAG(PERFETTO_OS_NACL)
-  struct {
-    clockid_t id;
-    protos::pbzero::BuiltinClock type;
-    struct timespec ts;
-  } clocks[] = {
-      {CLOCK_BOOTTIME, protos::pbzero::BUILTIN_CLOCK_BOOTTIME, {0, 0}},
-      {CLOCK_REALTIME_COARSE,
-       protos::pbzero::BUILTIN_CLOCK_REALTIME_COARSE,
-       {0, 0}},
-      {CLOCK_MONOTONIC_COARSE,
-       protos::pbzero::BUILTIN_CLOCK_MONOTONIC_COARSE,
-       {0, 0}},
-      {CLOCK_REALTIME, protos::pbzero::BUILTIN_CLOCK_REALTIME, {0, 0}},
-      {CLOCK_MONOTONIC, protos::pbzero::BUILTIN_CLOCK_MONOTONIC, {0, 0}},
-      {CLOCK_MONOTONIC_RAW,
-       protos::pbzero::BUILTIN_CLOCK_MONOTONIC_RAW,
-       {0, 0}},
-  };
-  // First snapshot all the clocks as atomically as we can.
-  for (auto& clock : clocks) {
-    if (clock_gettime(clock.id, &clock.ts) == -1)
-      PERFETTO_DLOG("clock_gettime failed for clock %d", clock.id);
-  }
-  for (auto& clock : clocks) {
-    snapshot_data.push_back(ClockReading(
-        static_cast<uint32_t>(clock.type),
-        static_cast<uint64_t>(base::FromPosixTimespec(clock.ts).count())));
-  }
-#else  // OS_APPLE || OS_WIN && OS_NACL
-  auto wall_time_ns = static_cast<uint64_t>(base::GetWallTimeNs().count());
-  // The default trace clock is boot time, so we always need to emit a path to
-  // it. However since we don't actually have a boot time source on these
-  // platforms, pretend that wall time equals boot time.
-  snapshot_data.push_back(
-      ClockReading(protos::pbzero::BUILTIN_CLOCK_BOOTTIME, wall_time_ns));
-  snapshot_data.push_back(
-      ClockReading(protos::pbzero::BUILTIN_CLOCK_MONOTONIC, wall_time_ns));
-#endif
-
-#if PERFETTO_BUILDFLAG(PERFETTO_ARCH_CPU_X86_64)
-  // X86-specific but OS-independent TSC clocksource
-  snapshot_data.push_back(
-      ClockReading(protos::pbzero::BUILTIN_CLOCK_TSC, base::Rdtsc()));
-#endif  // PERFETTO_BUILDFLAG(PERFETTO_ARCH_CPU_X86_64)
-
-  return snapshot_data;
-}
-
-}  // namespace perfetto
 // gen_amalgamated begin source: src/tracing/core/id_allocator.cc
 // gen_amalgamated begin header: src/tracing/core/id_allocator.h
 /*
@@ -29472,7 +31566,7 @@ ClockSnapshotVector CaptureClockSnapshots() {
 
 namespace perfetto {
 
-// Handles assigment of IDs (int types) from a fixed-size pool.
+// Handles assignment of IDs (int types) from a fixed-size pool.
 // Zero is not considered a valid ID.
 // The base class takes always a uint32_t and the derived class casts and checks
 // bounds at compile time. This is to avoid bloating code with different
@@ -29665,7 +31759,6 @@ class PERFETTO_EXPORT_COMPONENT SharedMemory {
   void* start() { return const_cast<void*>(std::as_const(*this).start()); }
   virtual const void* start() const = 0;
 
-
   virtual size_t size() const = 0;
 };
 
@@ -29703,6 +31796,7 @@ namespace perfetto {
 class InProcessSharedMemory : public SharedMemory {
  public:
   static constexpr size_t kDefaultSize = 128 * 1024;
+  static constexpr size_t kShmemEmulationSize = 1024 * 1024;
 
   // Default ctor used for intra-process shmem between a producer and the
   // service.
@@ -29768,7 +31862,6 @@ size_t InProcessSharedMemory::size() const {
 }  // namespace perfetto
 // gen_amalgamated begin source: src/tracing/core/null_trace_writer.cc
 // gen_amalgamated begin header: src/tracing/core/null_trace_writer.h
-// gen_amalgamated begin header: include/perfetto/ext/tracing/core/trace_writer.h
 // gen_amalgamated begin header: include/perfetto/ext/tracing/core/basic_types.h
 /*
  * Copyright (C) 2017 The Android Open Source Project
@@ -29877,6 +31970,7 @@ constexpr MachineID kDefaultMachineID = base::kDefaultMachineID;
 }  // namespace perfetto
 
 #endif  // INCLUDE_PERFETTO_EXT_TRACING_CORE_BASIC_TYPES_H_
+// gen_amalgamated begin header: include/perfetto/ext/tracing/core/trace_writer.h
 /*
  * Copyright (C) 2017 The Android Open Source Project
  *
@@ -29949,10 +32043,15 @@ class PERFETTO_EXPORT_COMPONENT TraceWriter : public TraceWriterBase {
 #ifndef SRC_TRACING_CORE_NULL_TRACE_WRITER_H_
 #define SRC_TRACING_CORE_NULL_TRACE_WRITER_H_
 
+#include <cstdint>
+#include <functional>
+#include <memory>
+
+// gen_amalgamated expanded: #include "perfetto/ext/tracing/core/basic_types.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/trace_writer.h"
-// gen_amalgamated expanded: #include "perfetto/protozero/message_handle.h"
 // gen_amalgamated expanded: #include "perfetto/protozero/root_message.h"
 // gen_amalgamated expanded: #include "perfetto/protozero/scattered_stream_null_delegate.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/scattered_stream_writer.h"
 
 namespace perfetto {
 
@@ -29971,6 +32070,7 @@ class NullTraceWriter : public TraceWriter {
   void Flush(std::function<void()> callback = {}) override;
   WriterID writer_id() const override;
   uint64_t written() const override;
+  uint64_t drop_count() const override;
 
  private:
   NullTraceWriter(const NullTraceWriter&) = delete;
@@ -30046,6 +32146,10 @@ WriterID NullTraceWriter::writer_id() const {
 }
 
 uint64_t NullTraceWriter::written() const {
+  return 0;
+}
+
+uint64_t NullTraceWriter::drop_count() const {
   return 0;
 }
 
@@ -30345,7 +32449,7 @@ class SharedMemoryABI {
 
   // There is one page header per page, at the beginning of the page.
   struct PageHeader {
-    // |layout| bits:
+    // |header_bitmap| bits:
     // [31] [30:28] [27:26] ... [1:0]
     //  |      |       |     |    |
     //  |      |       |     |    +---------- ChunkState[0]
@@ -30353,7 +32457,7 @@ class SharedMemoryABI {
     //  |      |       +--------------------- ChunkState[13]
     //  |      +----------------------------- PageLayout (0 == page fully free)
     //  +------------------------------------ Reserved for future use
-    std::atomic<uint32_t> layout;
+    std::atomic<uint32_t> header_bitmap;
 
     // If we'll ever going to use this in the future it might come handy
     // reviving the kPageBeingPartitioned logic (look in git log, it was there
@@ -30539,39 +32643,41 @@ class SharedMemoryABI {
   // before). The Producer should use this only as a hint to decide out whether
   // it should TryPartitionPage() or acquire an individual chunk.
   bool is_page_free(size_t page_idx) {
-    return page_header(page_idx)->layout.load(std::memory_order_relaxed) == 0;
+    return GetPageHeaderBitmap(page_idx, std::memory_order_relaxed) == 0;
   }
 
   // Returns true if all chunks in the page are kChunkComplete. As above, this
   // is advisory only. The Service is supposed to use this only to decide
   // whether to TryAcquireAllChunksForReading() or not.
   bool is_page_complete(size_t page_idx) {
-    auto layout = page_header(page_idx)->layout.load(std::memory_order_relaxed);
-    const uint32_t num_chunks = GetNumChunksForLayout(layout);
+    auto bitmap = GetPageHeaderBitmap(page_idx, std::memory_order_relaxed);
+    const uint32_t num_chunks = GetNumChunksFromHeaderBitmap(bitmap);
     if (num_chunks == 0)
       return false;  // Non partitioned pages cannot be complete.
-    return (layout & kAllChunksMask) ==
+    return (bitmap & kAllChunksMask) ==
            (kAllChunksComplete & ((1 << (num_chunks * kChunkShift)) - 1));
   }
 
   // For testing / debugging only.
   std::string page_header_dbg(size_t page_idx) {
-    uint32_t x = page_header(page_idx)->layout.load(std::memory_order_relaxed);
+    uint32_t x = GetPageHeaderBitmap(page_idx, std::memory_order_relaxed);
     return std::bitset<32>(x).to_string();
   }
 
-  // Returns the page layout, which is a bitmap that specifies the chunking
-  // layout of the page and each chunk's current state. Reads with an
-  // acquire-load semantic to ensure a producer's writes corresponding to an
-  // update of the layout (e.g. clearing a chunk's header) are observed
-  // consistently.
-  uint32_t GetPageLayout(size_t page_idx) {
-    return page_header(page_idx)->layout.load(std::memory_order_acquire);
+  // Returns the page header bitmap, which is a bitmap that specifies the
+  // chunking layout of the page and each chunk's current state. Unless
+  // explicitly specified, reads with an acquire-load semantic to ensure a
+  // producer's writes corresponding to an update of the bitmap (e.g. clearing
+  // a chunk's header) are observed consistently.
+  uint32_t GetPageHeaderBitmap(
+      size_t page_idx,
+      std::memory_order order = std::memory_order_acquire) {
+    return page_header(page_idx)->header_bitmap.load(order);
   }
 
   // Returns a bitmap in which each bit is set if the corresponding Chunk exists
-  // in the page (according to the page layout) and is free. If the page is not
-  // partitioned it returns 0 (as if the page had no free chunks).
+  // in the page (according to the page header bitmap) and is free. If the page
+  // is not partitioned it returns 0 (as if the page had no free chunks).
   uint32_t GetFreeChunks(size_t page_idx);
 
   // Tries to atomically partition a page with the given |layout|. Returns true
@@ -30600,7 +32706,7 @@ class SharedMemoryABI {
   // needs to guarantee that the chunk is already in the kChunkBeingWritten
   // state.
   Chunk GetChunkUnchecked(size_t page_idx,
-                          uint32_t page_layout,
+                          uint32_t header_bitmap,
                           size_t chunk_idx);
 
   // Creates a Chunk by adopting the given buffer (|data| and |size|) and chunk
@@ -30623,37 +32729,44 @@ class SharedMemoryABI {
   }
 
   ChunkState GetChunkState(size_t page_idx, size_t chunk_idx) {
-    PageHeader* phdr = page_header(page_idx);
-    uint32_t layout = phdr->layout.load(std::memory_order_relaxed);
-    return GetChunkStateFromLayout(layout, chunk_idx);
+    uint32_t bitmap = GetPageHeaderBitmap(page_idx, std::memory_order_relaxed);
+    return GetChunkStateFromHeaderBitmap(bitmap, chunk_idx);
   }
 
   std::pair<size_t, size_t> GetPageAndChunkIndex(const Chunk& chunk);
 
-  uint16_t GetChunkSizeForLayout(uint32_t page_layout) const {
-    return chunk_sizes_[(page_layout & kLayoutMask) >> kLayoutShift];
+  uint16_t GetChunkSizeFromHeaderBitmap(uint32_t header_bitmap) const {
+    return chunk_sizes_[GetLayoutFromHeaderBitmap(header_bitmap)];
   }
 
-  static ChunkState GetChunkStateFromLayout(uint32_t page_layout,
-                                            size_t chunk_idx) {
-    return static_cast<ChunkState>((page_layout >> (chunk_idx * kChunkShift)) &
-                                   kChunkMask);
+  static ChunkState GetChunkStateFromHeaderBitmap(uint32_t header_bitmap,
+                                                  size_t chunk_idx) {
+    return static_cast<ChunkState>(
+        (header_bitmap >> (chunk_idx * kChunkShift)) & kChunkMask);
   }
 
-  static constexpr uint32_t GetNumChunksForLayout(uint32_t page_layout) {
-    return kNumChunksForLayout[(page_layout & kLayoutMask) >> kLayoutShift];
+  static constexpr PageLayout GetLayoutFromHeaderBitmap(
+      uint32_t header_bitmap) {
+    return static_cast<PageLayout>((header_bitmap & kLayoutMask) >>
+                                   kLayoutShift);
+  }
+
+  static constexpr uint32_t GetNumChunksFromHeaderBitmap(
+      uint32_t header_bitmap) {
+    return kNumChunksForLayout[GetLayoutFromHeaderBitmap(header_bitmap)];
   }
 
   // Returns a bitmap in which each bit is set if the corresponding Chunk exists
   // in the page (according to the page layout) and is not free. If the page is
   // not partitioned it returns 0 (as if the page had no used chunks). Bit N
   // corresponds to Chunk N.
-  static uint32_t GetUsedChunks(uint32_t page_layout) {
-    const uint32_t num_chunks = GetNumChunksForLayout(page_layout);
+  static uint32_t GetUsedChunks(uint32_t header_bitmap) {
+    const uint32_t num_chunks = GetNumChunksFromHeaderBitmap(header_bitmap);
     uint32_t res = 0;
     for (uint32_t i = 0; i < num_chunks; i++) {
-      res |= ((page_layout & kChunkMask) != kChunkFree) ? (1 << i) : 0;
-      page_layout >>= kChunkShift;
+      res |= (GetChunkStateFromHeaderBitmap(header_bitmap, i) != kChunkFree)
+                 ? (1 << i)
+                 : 0;
     }
     return res;
   }
@@ -30789,7 +32902,7 @@ void SharedMemoryABI::Initialize(uint8_t* start,
                     sizeof(std::atomic<uint16_t>) == sizeof(uint16_t),
                 "Incompatible STL <atomic> implementation");
 
-  // Chec that the kAllChunks(Complete,Free) are consistent with the
+  // Check that the kAllChunks(Complete,Free) are consistent with the
   // ChunkState enum values.
 
   // These must be zero because rely on zero-initialized memory being
@@ -30817,13 +32930,14 @@ void SharedMemoryABI::Initialize(uint8_t* start,
   PERFETTO_CHECK(size % page_size == 0);
 }
 
-SharedMemoryABI::Chunk SharedMemoryABI::GetChunkUnchecked(size_t page_idx,
-                                                          uint32_t page_layout,
-                                                          size_t chunk_idx) {
-  const size_t num_chunks = GetNumChunksForLayout(page_layout);
+SharedMemoryABI::Chunk SharedMemoryABI::GetChunkUnchecked(
+    size_t page_idx,
+    uint32_t header_bitmap,
+    size_t chunk_idx) {
+  const size_t num_chunks = GetNumChunksFromHeaderBitmap(header_bitmap);
   PERFETTO_DCHECK(chunk_idx < num_chunks);
   // Compute the chunk virtual address and write it into |chunk|.
-  const uint16_t chunk_size = GetChunkSizeForLayout(page_layout);
+  const uint16_t chunk_size = GetChunkSizeFromHeaderBitmap(header_bitmap);
   size_t chunk_offset_in_page = sizeof(PageHeader) + chunk_idx * chunk_size;
 
   Chunk chunk(page_start(page_idx) + chunk_offset_in_page, chunk_size,
@@ -30841,8 +32955,9 @@ SharedMemoryABI::Chunk SharedMemoryABI::TryAcquireChunk(
                   desired_chunk_state == kChunkBeingWritten);
   PageHeader* phdr = page_header(page_idx);
   for (int attempt = 0; attempt < kRetryAttempts; attempt++) {
-    uint32_t layout = phdr->layout.load(std::memory_order_acquire);
-    const size_t num_chunks = GetNumChunksForLayout(layout);
+    uint32_t header_bitmap =
+        phdr->header_bitmap.load(std::memory_order_acquire);
+    const size_t num_chunks = GetNumChunksFromHeaderBitmap(header_bitmap);
 
     // The page layout has changed (or the page is free).
     if (chunk_idx >= num_chunks)
@@ -30854,17 +32969,18 @@ SharedMemoryABI::Chunk SharedMemoryABI::TryAcquireChunk(
     // 2. kChunkComplete -> kChunkBeingRead (Service).
     ChunkState expected_chunk_state =
         desired_chunk_state == kChunkBeingWritten ? kChunkFree : kChunkComplete;
-    auto cur_chunk_state = (layout >> (chunk_idx * kChunkShift)) & kChunkMask;
+    auto cur_chunk_state =
+        GetChunkStateFromHeaderBitmap(header_bitmap, chunk_idx);
     if (cur_chunk_state != expected_chunk_state)
       return Chunk();
 
-    uint32_t next_layout = layout;
-    next_layout &= ~(kChunkMask << (chunk_idx * kChunkShift));
-    next_layout |= (desired_chunk_state << (chunk_idx * kChunkShift));
-    if (phdr->layout.compare_exchange_strong(layout, next_layout,
-                                             std::memory_order_acq_rel)) {
+    uint32_t next_header_bitmap = header_bitmap;
+    next_header_bitmap &= ~(kChunkMask << (chunk_idx * kChunkShift));
+    next_header_bitmap |= (desired_chunk_state << (chunk_idx * kChunkShift));
+    if (phdr->header_bitmap.compare_exchange_strong(
+            header_bitmap, next_header_bitmap, std::memory_order_acq_rel)) {
       // Compute the chunk virtual address and write it into |chunk|.
-      Chunk chunk = GetChunkUnchecked(page_idx, layout, chunk_idx);
+      Chunk chunk = GetChunkUnchecked(page_idx, header_bitmap, chunk_idx);
       if (desired_chunk_state == kChunkBeingWritten) {
         PERFETTO_DCHECK(header);
         ChunkHeader* new_header = chunk.header();
@@ -30882,24 +32998,24 @@ SharedMemoryABI::Chunk SharedMemoryABI::TryAcquireChunk(
 
 bool SharedMemoryABI::TryPartitionPage(size_t page_idx, PageLayout layout) {
   PERFETTO_DCHECK(layout >= kPageDiv1 && layout <= kPageDiv14);
-  uint32_t expected_layout = 0;  // Free page.
-  uint32_t next_layout = (layout << kLayoutShift) & kLayoutMask;
+  uint32_t expected_bitmap = 0;  // Free page.
+  uint32_t next_bitmap = (layout << kLayoutShift) & kLayoutMask;
   PageHeader* phdr = page_header(page_idx);
-  if (!phdr->layout.compare_exchange_strong(expected_layout, next_layout,
-                                            std::memory_order_acq_rel)) {
+  if (!phdr->header_bitmap.compare_exchange_strong(expected_bitmap, next_bitmap,
+                                                   std::memory_order_acq_rel)) {
     return false;
   }
   return true;
 }
 
 uint32_t SharedMemoryABI::GetFreeChunks(size_t page_idx) {
-  uint32_t layout =
-      page_header(page_idx)->layout.load(std::memory_order_relaxed);
-  const uint32_t num_chunks = GetNumChunksForLayout(layout);
+  uint32_t bitmap = GetPageHeaderBitmap(page_idx, std::memory_order_relaxed);
+  const uint32_t num_chunks = GetNumChunksFromHeaderBitmap(bitmap);
   uint32_t res = 0;
+
   for (uint32_t i = 0; i < num_chunks; i++) {
-    res |= ((layout & kChunkMask) == kChunkFree) ? (1 << i) : 0;
-    layout >>= kChunkShift;
+    res |=
+        (GetChunkStateFromHeaderBitmap(bitmap, i) == kChunkFree) ? (1 << i) : 0;
   }
   return res;
 }
@@ -30920,14 +33036,15 @@ size_t SharedMemoryABI::ReleaseChunk(Chunk chunk,
 
   for (int attempt = 0; attempt < kRetryAttempts; attempt++) {
     PageHeader* phdr = page_header(page_idx);
-    uint32_t layout = phdr->layout.load(std::memory_order_relaxed);
-    const size_t page_chunk_size = GetChunkSizeForLayout(layout);
+    uint32_t bitmap = phdr->header_bitmap.load(std::memory_order_relaxed);
+    const size_t page_chunk_size = GetChunkSizeFromHeaderBitmap(bitmap);
 
     // TODO(primiano): this should not be a CHECK, because a malicious producer
     // could crash us by putting the chunk in an invalid state. This should
     // gracefully fail. Keep a CHECK until then.
     PERFETTO_CHECK(chunk.size() == page_chunk_size);
-    const uint32_t chunk_state = GetChunkStateFromLayout(layout, chunk_idx);
+    const uint32_t chunk_state =
+        GetChunkStateFromHeaderBitmap(bitmap, chunk_idx);
 
     // Verify that the chunk is still in a state that allows the transition to
     // |desired_chunk_state|. The only allowed transitions are:
@@ -30946,17 +33063,17 @@ size_t SharedMemoryABI::ReleaseChunk(Chunk chunk,
 
     // TODO(primiano): should not be a CHECK (same rationale of comment above).
     PERFETTO_CHECK(chunk_state == expected_chunk_state);
-    uint32_t next_layout = layout;
-    next_layout &= ~(kChunkMask << (chunk_idx * kChunkShift));
-    next_layout |= (desired_chunk_state << (chunk_idx * kChunkShift));
+    uint32_t next_bitmap = bitmap;
+    next_bitmap &= ~(kChunkMask << (chunk_idx * kChunkShift));
+    next_bitmap |= (desired_chunk_state << (chunk_idx * kChunkShift));
 
     // If we are freeing a chunk and all the other chunks in the page are free
     // we should de-partition the page and mark it as clear.
-    if ((next_layout & kAllChunksMask) == kAllChunksFree)
-      next_layout = 0;
+    if ((next_bitmap & kAllChunksMask) == kAllChunksFree)
+      next_bitmap = 0;
 
-    if (phdr->layout.compare_exchange_strong(layout, next_layout,
-                                             std::memory_order_acq_rel)) {
+    if (phdr->header_bitmap.compare_exchange_strong(
+            bitmap, next_bitmap, std::memory_order_acq_rel)) {
       return page_idx;
     }
     WaitBeforeNextAttempt(attempt);
@@ -31005,7 +33122,8 @@ std::pair<size_t, size_t> SharedMemoryABI::GetPageAndChunkIndex(
   PERFETTO_DCHECK((offset - sizeof(PageHeader)) % chunk.size() == 0);
   const size_t chunk_idx = (offset - sizeof(PageHeader)) / chunk.size();
   PERFETTO_DCHECK(chunk_idx < kMaxChunksPerPage);
-  PERFETTO_DCHECK(chunk_idx < GetNumChunksForLayout(GetPageLayout(page_idx)));
+  PERFETTO_DCHECK(chunk_idx <
+                  GetNumChunksFromHeaderBitmap(GetPageHeaderBitmap(page_idx)));
   return std::make_pair(page_idx, chunk_idx);
 }
 
@@ -31014,6 +33132,50 @@ std::pair<size_t, size_t> SharedMemoryABI::GetPageAndChunkIndex(
 // gen_amalgamated begin header: src/tracing/core/shared_memory_arbiter_impl.h
 // gen_amalgamated begin header: include/perfetto/ext/tracing/core/shared_memory_arbiter.h
 // gen_amalgamated begin header: include/perfetto/ext/tracing/core/tracing_service.h
+// gen_amalgamated begin header: include/perfetto/ext/base/clock_snapshots.h
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef INCLUDE_PERFETTO_EXT_BASE_CLOCK_SNAPSHOTS_H_
+#define INCLUDE_PERFETTO_EXT_BASE_CLOCK_SNAPSHOTS_H_
+
+#include <cstdint>
+#include <vector>
+
+namespace perfetto::base {
+
+struct ClockReading {
+  ClockReading(uint32_t _clock_id, uint64_t _timestamp)
+      : clock_id(_clock_id), timestamp(_timestamp) {}
+  ClockReading() = default;
+
+  // Identifier of the clock domain (of type protos::pbzero::BuiltinClock).
+  uint32_t clock_id = 0;
+  // Clock reading as uint64_t.
+  uint64_t timestamp = 0;
+};
+
+using ClockSnapshotVector = std::vector<ClockReading>;
+
+// Takes snapshots of clock readings of all supported built-in clocks.
+ClockSnapshotVector CaptureClockSnapshots();
+
+}  // namespace perfetto::base
+
+#endif  // INCLUDE_PERFETTO_EXT_BASE_CLOCK_SNAPSHOTS_H_
 // gen_amalgamated begin header: include/perfetto/ext/tracing/core/trace_packet.h
 // gen_amalgamated begin header: include/perfetto/ext/tracing/core/slice.h
 /*
@@ -31036,6 +33198,7 @@ std::pair<size_t, size_t> SharedMemoryABI::GetPageAndChunkIndex(
 #define INCLUDE_PERFETTO_EXT_TRACING_CORE_SLICE_H_
 
 #include <stddef.h>
+#include <stdint.h>
 #include <string.h>
 
 #include <memory>
@@ -31184,8 +33347,8 @@ class PERFETTO_EXPORT_COMPONENT TracePacket {
   TracePacket(const TracePacket&) = delete;
   TracePacket& operator=(const TracePacket&) = delete;
 
-  Slices slices_;     // Not owned.
-  size_t size_ = 0;   // SUM(slice.size for slice in slices_).
+  Slices slices_;    // Not owned.
+  size_t size_ = 0;  // SUM(slice.size for slice in slices_).
 
   // Internally we store index+1, and use 0 for the "not set" case.
   uint32_t buffer_index_for_stats_ = 0;
@@ -31225,13 +33388,13 @@ class PERFETTO_EXPORT_COMPONENT TracePacket {
 #include <vector>
 
 // gen_amalgamated expanded: #include "perfetto/base/export.h"
+// gen_amalgamated expanded: #include "perfetto/ext/base/clock_snapshots.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/scoped_file.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/sys_types.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/basic_types.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/shared_memory.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/trace_packet.h"
 // gen_amalgamated expanded: #include "perfetto/tracing/buffer_exhausted_policy.h"
-// gen_amalgamated expanded: #include "perfetto/tracing/core/clock_snapshots.h"
 // gen_amalgamated expanded: #include "perfetto/tracing/core/flush_flags.h"
 // gen_amalgamated expanded: #include "perfetto/tracing/core/forward_decls.h"
 
@@ -31315,8 +33478,7 @@ class PERFETTO_EXPORT_COMPONENT ProducerEndpoint {
   // DataSourceConfig.target_buffer().
   virtual std::unique_ptr<TraceWriter> CreateTraceWriter(
       BufferID target_buffer,
-      BufferExhaustedPolicy buffer_exhausted_policy =
-          BufferExhaustedPolicy::kDefault) = 0;
+      BufferExhaustedPolicy buffer_exhausted_policy) = 0;
 
   // TODO(eseckler): Also expose CreateStartupTraceWriter() ?
 
@@ -31394,9 +33556,17 @@ class PERFETTO_EXPORT_COMPONENT ConsumerEndpoint {
   // Clones an existing tracing session and attaches to it. The session is
   // cloned in read-only mode and can only be used to read a snapshot of an
   // existing tracing session. Will invoke Consumer::OnSessionCloned().
-  // If TracingSessionID == kBugreportSessionId (0xff...ff) the session with the
-  // highest bugreport score is cloned (if any exists).
   struct CloneSessionArgs {
+    // Exactly one between tsid and unique_session_name should be set.
+
+    // The id of the tracing session that should be cloned. If
+    // kBugreportSessionId (0xff...ff) the session with the highest bugreport
+    // score is cloned (if any exists).
+    TracingSessionID tsid = 0;
+
+    // The unique_session_name of the session that should be cloned.
+    std::string unique_session_name;
+
     // If set, the trace filter will not have effect on the cloned session.
     // Used for bugreports.
     bool skip_trace_filter = false;
@@ -31404,8 +33574,24 @@ class PERFETTO_EXPORT_COMPONENT ConsumerEndpoint {
     // If set, affects the generation of the FlushFlags::CloneTarget to be set
     // to kBugreport when requesting the flush to the producers.
     bool for_bugreport = false;
+
+    // If not empty, this is stored in the trace as name of the trigger that
+    // caused the clone.
+    std::string clone_trigger_name;
+    // If not empty, this is stored in the trace as name of the producer that
+    // triggered the clone.
+    std::string clone_trigger_producer_name;
+    // If not zero, this is stored in the trace as uid of the producer that
+    // triggered the clone.
+    uid_t clone_trigger_trusted_producer_uid = 0;
+    // If not zero, this is stored in the trace as timestamp of the trigger that
+    // caused the clone.
+    uint64_t clone_trigger_boot_time_ns = 0;
+    // If not zero, this is stored in the trace as the configured delay (in
+    // milliseconds) of the trigger that caused the clone.
+    uint64_t clone_trigger_delay_ms = 0;
   };
-  virtual void CloneSession(TracingSessionID, CloneSessionArgs) = 0;
+  virtual void CloneSession(CloneSessionArgs) = 0;
 
   // Requests all data sources to flush their data immediately and invokes the
   // passed callback once all of them have acked the flush (in which case
@@ -31499,14 +33685,16 @@ class PERFETTO_EXPORT_COMPONENT RelayEndpoint {
 
   // A snapshot of client and host clocks.
   struct SyncClockSnapshot {
-    ClockSnapshotVector client_clock_snapshots;
-    ClockSnapshotVector host_clock_snapshots;
+    base::ClockSnapshotVector client_clock_snapshots;
+    base::ClockSnapshotVector host_clock_snapshots;
   };
 
   enum class SyncMode : uint32_t { PING = 1, UPDATE = 2 };
+
+  virtual void CacheSystemInfo(std::vector<uint8_t> serialized_system_info) = 0;
   virtual void SyncClocks(SyncMode sync_mode,
-                          ClockSnapshotVector client_clocks,
-                          ClockSnapshotVector host_clocks) = 0;
+                          base::ClockSnapshotVector client_clocks,
+                          base::ClockSnapshotVector host_clocks) = 0;
   virtual void Disconnect() = 0;
 };
 
@@ -31698,8 +33886,7 @@ class PERFETTO_EXPORT_COMPONENT SharedMemoryArbiter {
   // only BufferExhaustedPolicy::kDrop is supported.
   virtual std::unique_ptr<TraceWriter> CreateTraceWriter(
       BufferID target_buffer,
-      BufferExhaustedPolicy buffer_exhausted_policy =
-          BufferExhaustedPolicy::kDefault) = 0;
+      BufferExhaustedPolicy buffer_exhausted_policy) = 0;
 
   // Creates a TraceWriter that will commit to the target buffer with the given
   // reservation ID (creating a new reservation for this ID if none exists yet).
@@ -31994,7 +34181,7 @@ class SharedMemoryArbiterImpl : public SharedMemoryArbiter {
   // service to move it to the central tracing buffer. |target_buffer| is the
   // absolute trace buffer ID where the service should move the chunk onto (the
   // producer is just to copy back the same number received in the
-  // DataSourceConfig upon the StartDataSource() reques).
+  // DataSourceConfig upon the StartDataSource() request).
   // PatchList is a pointer to the list of patches for previous chunks. The
   // first patched entries will be removed from the patched list and sent over
   // to the service in the same CommitData() IPC request.
@@ -32023,7 +34210,7 @@ class SharedMemoryArbiterImpl : public SharedMemoryArbiter {
   // See include/perfetto/tracing/core/shared_memory_arbiter.h for comments.
   std::unique_ptr<TraceWriter> CreateTraceWriter(
       BufferID target_buffer,
-      BufferExhaustedPolicy = BufferExhaustedPolicy::kDefault) override;
+      BufferExhaustedPolicy) override;
   std::unique_ptr<TraceWriter> CreateStartupTraceWriter(
       uint16_t target_buffer_reservation_id) override;
   void BindToProducerEndpoint(TracingService::ProducerEndpoint*,
@@ -32098,6 +34285,19 @@ class SharedMemoryArbiterImpl : public SharedMemoryArbiter {
   void BindStartupTargetBufferImpl(std::unique_lock<std::mutex> scoped_lock,
                                    uint16_t target_buffer_reservation_id,
                                    BufferID target_buffer_id);
+
+  // Returns some statistics about chunks/pages in the shared memory buffer.
+  struct Stats {
+    size_t chunks_free = 0;
+    size_t chunks_being_written = 0;
+    size_t chunks_being_read = 0;
+    size_t chunks_complete = 0;
+
+    // No chunks are included from free/malformed pages.
+    size_t pages_free = 0;
+    size_t pages_unexpected = 0;
+  };
+  Stats GetStats();
 
   // If any flush callbacks were queued up while the arbiter or any target
   // buffer reservation was unbound, this wraps the pending callbacks into a new
@@ -32348,13 +34548,17 @@ class PatchList {
 #ifndef SRC_TRACING_CORE_TRACE_WRITER_IMPL_H_
 #define SRC_TRACING_CORE_TRACE_WRITER_IMPL_H_
 
+#include <cstdint>
+#include <functional>
+#include <memory>
+
 // gen_amalgamated expanded: #include "perfetto/base/proc_utils.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/basic_types.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/shared_memory_abi.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/shared_memory_arbiter.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/trace_writer.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/contiguous_memory_range.h"
 // gen_amalgamated expanded: #include "perfetto/protozero/message_handle.h"
-// gen_amalgamated expanded: #include "perfetto/protozero/proto_utils.h"
 // gen_amalgamated expanded: #include "perfetto/protozero/root_message.h"
 // gen_amalgamated expanded: #include "perfetto/protozero/scattered_stream_writer.h"
 // gen_amalgamated expanded: #include "perfetto/tracing/buffer_exhausted_policy.h"
@@ -32397,6 +34601,7 @@ class TraceWriterImpl : public TraceWriter,
   uint64_t written() const override {
     return protobuf_stream_writer_.written();
   }
+  uint64_t drop_count() const override { return drop_count_; }
 
   bool drop_packets_for_testing() const { return drop_packets_; }
 
@@ -32520,6 +34725,14 @@ class TraceWriterImpl : public TraceWriter,
   // True for the first packet on sequence. See the comment for
   // TracePacket.first_packet_on_sequence for more details.
   bool first_packet_on_sequence_ = true;
+
+  // Number of times the trace writter entered a
+  // SharedMemory::BufferExhaustedPolicy::kDrop mode (i.e. as indicated by the
+  // `drop_packets_` variable). Note that this does *not* necessarily equal the
+  // number of trace packets dropped as multiple packets could have been dropped
+  // in one entry into kDrop mode (i.e. this variable will be a *lower bound*
+  // but *not* an upper bound).
+  uint64_t drop_count_ = 0;
 };
 
 }  // namespace perfetto
@@ -32671,7 +34884,6 @@ Chunk SharedMemoryArbiterImpl::GetNewChunk(
         auto layout = SharedMemoryArbiterImpl::default_page_layout;
 
         if (shmem_abi_.is_page_free(page_idx_)) {
-          // TODO(primiano): Use the |size_hint| here to decide the layout.
           is_new_page = shmem_abi_.TryPartitionPage(page_idx_, layout);
         }
         uint32_t free_chunks;
@@ -32691,8 +34903,8 @@ Chunk SharedMemoryArbiterImpl::GetNewChunk(
           if (!chunk.is_valid())
             continue;
           if (stall_count > kLogAfterNStalls) {
-            PERFETTO_LOG("Recovered from stall after %d iterations",
-                         stall_count);
+            PERFETTO_DLOG("Recovered from stall after %d iterations",
+                          stall_count);
           }
 
           if (should_commit_synchronously) {
@@ -32718,12 +34930,17 @@ Chunk SharedMemoryArbiterImpl::GetNewChunk(
     // All chunks are taken (either kBeingWritten by us or kBeingRead by the
     // Service).
     if (stall_count++ == kLogAfterNStalls) {
-      PERFETTO_LOG("Shared memory buffer overrun! Stalling");
+      PERFETTO_DLOG("Shared memory buffer overrun! Stalling");
     }
 
     if (stall_count == kAssertAtNStalls) {
+      Stats stats = GetStats();
       PERFETTO_FATAL(
-          "Shared memory buffer max stall count exceeded; possible deadlock");
+          "Shared memory buffer max stall count exceeded; possible deadlock "
+          "free=%zu bw=%zu br=%zu comp=%zu pages_free=%zu pages_err=%zu",
+          stats.chunks_free, stats.chunks_being_written,
+          stats.chunks_being_read, stats.chunks_complete, stats.pages_free,
+          stats.pages_unexpected);
     }
 
     // If the IPC thread itself is stalled because the current process has
@@ -32783,7 +35000,7 @@ void SharedMemoryArbiterImpl::UpdateCommitDataRequest(
   uint32_t flush_delay_ms = 0;
   base::WeakPtr<SharedMemoryArbiterImpl> weak_this;
   {
-    std::lock_guard<std::mutex> scoped_lock(lock_);
+    std::unique_lock<std::mutex> scoped_lock(lock_);
 
     if (!commit_data_req_) {
       commit_data_req_.reset(new CommitDataRequest());
@@ -32892,6 +35109,29 @@ void SharedMemoryArbiterImpl::UpdateCommitDataRequest(
       task_runner_to_post_delayed_callback_on = task_runner_;
       flush_delay_ms = 0;
     }
+
+    // When using shmem emulation we commit the completed chunks immediately
+    // to prevent the |bytes_pending_commit_| to become greater than the size
+    // of the IPC buffer, since the chunk's data must be passed in the commit
+    // data request proto through the network socket. Not doing so could
+    // result in a "IPC Frame too large" issue on the host traced side.
+    if (fully_bound_ && use_shmem_emulation_) {
+      if (task_runner_->RunsTasksOnCurrentThread()) {
+        task_runner_to_post_delayed_callback_on = nullptr;
+        // Allow next call to UpdateCommitDataRequest to start
+        // another batching period.
+        delayed_flush_scheduled_ = false;
+        // We can't flush while holding the lock
+        scoped_lock.unlock();
+        FlushPendingCommitDataRequests();
+      } else {
+        // Since we aren't on the |task_runner_| thread post a task instead,
+        // in order to prevent non-overlaping commit data request flushes.
+        weak_this = weak_ptr_factory_.GetWeakPtr();
+        task_runner_to_post_delayed_callback_on = task_runner_;
+        flush_delay_ms = 0;
+      }
+    }
   }  // scoped_lock(lock_)
 
   // We shouldn't post tasks while locked.
@@ -32929,9 +35169,9 @@ bool SharedMemoryArbiterImpl::TryDirectPatchLocked(
   auto& chunks_to_move = commit_data_req_->chunks_to_move();
   for (auto ctm_it = chunks_to_move.rbegin(); ctm_it != chunks_to_move.rend();
        ++ctm_it) {
-    uint32_t layout = shmem_abi_.GetPageLayout(ctm_it->page());
-    auto chunk_state =
-        shmem_abi_.GetChunkStateFromLayout(layout, ctm_it->chunk());
+    uint32_t header_bitmap = shmem_abi_.GetPageHeaderBitmap(ctm_it->page());
+    auto chunk_state = shmem_abi_.GetChunkStateFromHeaderBitmap(
+        header_bitmap, ctm_it->chunk());
     // Note: the subset of |commit_data_req_| chunks that still need patching is
     // also the subset of chunks that are still being written to. The rest of
     // the chunks in |commit_data_req_| do not need patching and have already
@@ -32939,8 +35179,8 @@ bool SharedMemoryArbiterImpl::TryDirectPatchLocked(
     if (chunk_state != SharedMemoryABI::kChunkBeingWritten)
       continue;
 
-    chunk =
-        shmem_abi_.GetChunkUnchecked(ctm_it->page(), layout, ctm_it->chunk());
+    chunk = shmem_abi_.GetChunkUnchecked(ctm_it->page(), header_bitmap,
+                                         ctm_it->chunk());
     if (chunk.writer_id() == writer_id &&
         chunk.header()->chunk_id.load(std::memory_order_relaxed) ==
             patch.chunk_id) {
@@ -33060,16 +35300,16 @@ void SharedMemoryArbiterImpl::FlushPendingCommitDataRequests(
       // not be possible to apply any more patches to them and we need to move
       // them to kChunkComplete - otherwise the service won't look at them.
       for (auto& ctm : *commit_data_req_->mutable_chunks_to_move()) {
-        uint32_t layout = shmem_abi_.GetPageLayout(ctm.page());
-        auto chunk_state =
-            shmem_abi_.GetChunkStateFromLayout(layout, ctm.chunk());
+        uint32_t header_bitmap = shmem_abi_.GetPageHeaderBitmap(ctm.page());
+        auto chunk_state = shmem_abi_.GetChunkStateFromHeaderBitmap(
+            header_bitmap, ctm.chunk());
         // Note: the subset of |commit_data_req_| chunks that still need
         // patching is also the subset of chunks that are still being written
         // to. The rest of the chunks in |commit_data_req_| do not need patching
         // and have already been marked as complete.
         if (chunk_state == SharedMemoryABI::kChunkBeingWritten) {
-          auto chunk =
-              shmem_abi_.GetChunkUnchecked(ctm.page(), layout, ctm.chunk());
+          auto chunk = shmem_abi_.GetChunkUnchecked(ctm.page(), header_bitmap,
+                                                    ctm.chunk());
           shmem_abi_.ReleaseChunkAsComplete(std::move(chunk));
         }
 
@@ -33078,8 +35318,8 @@ void SharedMemoryArbiterImpl::FlushPendingCommitDataRequests(
           // 1. serialize the chunk data to |ctm| as we won't modify the chunk
           // anymore.
           // 2. free the chunk as the service won't be able to do this.
-          auto chunk =
-              shmem_abi_.GetChunkUnchecked(ctm.page(), layout, ctm.chunk());
+          auto chunk = shmem_abi_.GetChunkUnchecked(ctm.page(), header_bitmap,
+                                                    ctm.chunk());
           PERFETTO_CHECK(chunk.is_valid());
           ctm.set_data(chunk.begin(), chunk.size());
           shmem_abi_.ReleaseChunkAsFree(std::move(chunk));
@@ -33273,6 +35513,45 @@ void SharedMemoryArbiterImpl::BindStartupTargetBufferImpl(
     FlushPendingCommitDataRequests(flush_callback);
 }
 
+SharedMemoryArbiterImpl::Stats SharedMemoryArbiterImpl::GetStats() {
+  std::lock_guard<std::mutex> scoped_lock(lock_);
+  Stats res;
+
+  for (size_t page_idx = 0; page_idx < shmem_abi_.num_pages(); page_idx++) {
+    uint32_t bitmap = shmem_abi_.page_header(page_idx)->header_bitmap.load(
+        std::memory_order_relaxed);
+    SharedMemoryABI::PageLayout layout =
+        SharedMemoryABI::GetLayoutFromHeaderBitmap(bitmap);
+    if (layout == SharedMemoryABI::kPageNotPartitioned) {
+      res.pages_free++;
+    } else if (layout == SharedMemoryABI::kPageDivReserved1 ||
+               layout == SharedMemoryABI::kPageDivReserved2) {
+      res.pages_unexpected++;
+    }
+    // Free and unexpected pages have zero chunks.
+    const uint32_t num_chunks =
+        SharedMemoryABI::GetNumChunksFromHeaderBitmap(bitmap);
+    for (uint32_t i = 0; i < num_chunks; i++) {
+      switch (SharedMemoryABI::GetChunkStateFromHeaderBitmap(bitmap, i)) {
+        case SharedMemoryABI::kChunkFree:
+          res.chunks_free++;
+          break;
+        case SharedMemoryABI::kChunkBeingWritten:
+          res.chunks_being_written++;
+          break;
+        case SharedMemoryABI::kChunkBeingRead:
+          res.chunks_being_read++;
+          break;
+        case SharedMemoryABI::kChunkComplete:
+          res.chunks_complete++;
+          break;
+      }
+    }
+  }
+
+  return res;
+}
+
 std::function<void()>
 SharedMemoryArbiterImpl::TakePendingFlushCallbacksLocked() {
   if (pending_flush_callbacks_.empty())
@@ -33388,6 +35667,7 @@ std::unique_ptr<TraceWriter> SharedMemoryArbiterImpl::CreateTraceWriterInternal(
 
 void SharedMemoryArbiterImpl::ReleaseWriterID(WriterID id) {
   base::TaskRunner* task_runner = nullptr;
+  base::WeakPtr<SharedMemoryArbiterImpl> weak_this;
   {
     std::lock_guard<std::mutex> scoped_lock(lock_);
     active_writer_ids_.Free(id);
@@ -33406,12 +35686,15 @@ void SharedMemoryArbiterImpl::ReleaseWriterID(WriterID id) {
     if (!task_runner_)
       return;
 
+    // If `active_writer_ids_` is empty, `TryShutdown()` can return true
+    // and `*this` can be deleted. Let's grab everything we need from `*this`
+    // before releasing the lock.
+    weak_this = weak_ptr_factory_.GetWeakPtr();
     task_runner = task_runner_;
   }  // scoped_lock
 
   // We shouldn't post tasks while locked. |task_runner| remains valid after
   // unlocking, because |task_runner_| is never reset.
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
   task_runner->PostTask([weak_this, id] {
     if (weak_this)
       weak_this->producer_endpoint_->UnregisterTraceWriter(id);
@@ -33855,6 +36138,9 @@ protozero::ContiguousMemoryRange TraceWriterImpl::GetNewBuffer() {
       ReturnCompletedChunk();
     }
 
+    // Only increment the count if we are newly entering this state not
+    // otherwise.
+    drop_count_ += !drop_packets_;
     drop_packets_ = true;
     cur_chunk_ = SharedMemoryABI::Chunk();  // Reset to an invalid chunk.
     cur_chunk_packet_count_inflated_ = false;
@@ -33914,7 +36200,7 @@ protozero::ContiguousMemoryRange TraceWriterImpl::GetNewBuffer() {
 #endif
       }
     }  // for(nested_msg)
-  }    // if(fragmenting_packet)
+  }  // if(fragmenting_packet)
 
   if (cur_chunk_.is_valid()) {
     // ReturnCompletedChunk will consume the first patched entries from
@@ -35239,9 +37525,15 @@ CheckedScope& CheckedScope::operator=(CheckedScope&& other) {
 #ifndef INCLUDE_PERFETTO_TRACING_INTERNAL_INTERCEPTOR_TRACE_WRITER_H_
 #define INCLUDE_PERFETTO_TRACING_INTERNAL_INTERCEPTOR_TRACE_WRITER_H_
 
+#include <atomic>
+#include <cstdint>
+#include <functional>
+#include <memory>
+
+// gen_amalgamated expanded: #include "perfetto/protozero/message_handle.h"
 // gen_amalgamated expanded: #include "perfetto/protozero/scattered_heap_buffer.h"
 // gen_amalgamated expanded: #include "perfetto/tracing/interceptor.h"
-// gen_amalgamated expanded: #include "perfetto/tracing/internal/basic_types.h"
+// gen_amalgamated expanded: #include "perfetto/tracing/internal/data_source_internal.h"
 // gen_amalgamated expanded: #include "perfetto/tracing/trace_writer_base.h"
 // gen_amalgamated expanded: #include "protos/perfetto/trace/trace_packet.pbzero.h"
 
@@ -35263,6 +37555,7 @@ class InterceptorTraceWriter : public TraceWriterBase {
   void FinishTracePacket() override;
   void Flush(std::function<void()> callback = {}) override;
   uint64_t written() const override;
+  uint64_t drop_count() const override;
 
  private:
   std::unique_ptr<InterceptorBase::ThreadLocalState> tls_;
@@ -35307,7 +37600,18 @@ class InterceptorTraceWriter : public TraceWriterBase {
 
 // gen_amalgamated expanded: #include "perfetto/tracing/internal/interceptor_trace_writer.h"
 
+#include <atomic>
+#include <cstddef>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <utility>
+
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/trace_writer.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/field.h"
+// gen_amalgamated expanded: #include "perfetto/protozero/message_handle.h"
+// gen_amalgamated expanded: #include "perfetto/tracing/interceptor.h"
+// gen_amalgamated expanded: #include "perfetto/tracing/internal/data_source_internal.h"
 
 namespace perfetto {
 namespace internal {
@@ -35370,6 +37674,10 @@ void InterceptorTraceWriter::FinishTracePacket() {}
 
 uint64_t InterceptorTraceWriter::written() const {
   return bytes_written_;
+}
+
+uint64_t InterceptorTraceWriter::drop_count() const {
+  return 0;
 }
 
 }  // namespace internal
@@ -35557,7 +37865,7 @@ class UnsupportedConsumerEndpoint : public ConsumerEndpoint {
   void QueryCapabilities(QueryCapabilitiesCallback) override {}
 
   void SaveTraceForBugreport(SaveTraceForBugreportCallback) override {}
-  void CloneSession(TracingSessionID, CloneSessionArgs) override {}
+  void CloneSession(CloneSessionArgs) override {}
 
  private:
   Consumer* const consumer_;
@@ -35618,7 +37926,7 @@ namespace perfetto {
 namespace internal {
 
 // An always-fail implementation of TracingMuxer. Before tracing has been
-// initialiazed, all muxer operations will route here and fail with a helpful
+// initialized, all muxer operations will route here and fail with a helpful
 // error message. This is to avoid introducing null checks in
 // performance-critical parts of the codebase.
 class TracingMuxerFake : public TracingMuxer {
@@ -35810,6 +38118,7 @@ void TracingMuxerFake::ActivateTriggers(const std::vector<std::string>&,
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/basic_types.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/consumer.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/producer.h"
+// gen_amalgamated expanded: #include "perfetto/ext/tracing/core/tracing_service.h"
 // gen_amalgamated expanded: #include "perfetto/tracing/backend_type.h"
 // gen_amalgamated expanded: #include "perfetto/tracing/core/data_source_descriptor.h"
 // gen_amalgamated expanded: #include "perfetto/tracing/core/forward_decls.h"
@@ -35942,6 +38251,9 @@ class TracingMuxerImpl : public TracingMuxer {
                            const std::shared_ptr<TraceConfig>&,
                            base::ScopedFile trace_fd = base::ScopedFile());
   void StartTracingSession(TracingSessionGlobalID);
+  void CloneTracingSession(TracingSessionGlobalID,
+                           TracingSession::CloneTraceArgs,
+                           TracingSession::CloneTraceCallback);
   void ChangeTracingSessionConfig(TracingSessionGlobalID, const TraceConfig&);
   void StopTracingSession(TracingSessionGlobalID);
   void DestroyTracingSession(TracingSessionGlobalID);
@@ -36107,6 +38419,10 @@ class TracingMuxerImpl : public TracingMuxer {
     // consumer wasn't connected yet.
     bool get_trace_stats_pending_ = false;
 
+    // Similarly we need to buffer a session cloning args if the session is
+    // cloning another sesison before the consumer was connected.
+    std::optional<ConsumerEndpoint::CloneSessionArgs> session_to_clone_;
+
     // Whether this session was already stopped. This will happen in response to
     // Stop{,Blocking}, but also if the service stops the session for us
     // automatically (e.g., when there are no data sources).
@@ -36134,6 +38450,9 @@ class TracingMuxerImpl : public TracingMuxer {
 
     // An internal callback used to implement StopBlocking().
     std::function<void()> blocking_stop_complete_callback_;
+
+    // Callback for a pending call to CloneTrace().
+    TracingSession::CloneTraceCallback clone_trace_callback_;
 
     // Callback passed to ReadTrace().
     std::function<void(TracingSession::ReadTraceCallbackArgs)>
@@ -36163,6 +38482,7 @@ class TracingMuxerImpl : public TracingMuxer {
     void Setup(const TraceConfig&, int fd) override;
     void Start() override;
     void StartBlocking() override;
+    void CloneTrace(CloneTraceArgs args, CloneTraceCallback) override;
     void SetOnStartCallback(std::function<void()>) override;
     void SetOnErrorCallback(std::function<void(TracingError)>) override;
     void Stop() override;
@@ -36388,7 +38708,6 @@ class TracingMuxerImpl : public TracingMuxer {
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 
 #ifndef INCLUDE_PERFETTO_TRACING_CORE_TRACING_SERVICE_STATE_H_
 #define INCLUDE_PERFETTO_TRACING_CORE_TRACING_SERVICE_STATE_H_
@@ -36846,6 +39165,11 @@ void TracingMuxerImpl::ConsumerImpl::OnConnect() {
     query_service_state_callback_ = nullptr;
     muxer_->QueryServiceState(session_id_, std::move(callback));
   }
+  if (session_to_clone_) {
+    service_->CloneSession(*session_to_clone_);
+    session_to_clone_ = std::nullopt;
+  }
+
   if (stop_pending_)
     muxer_->StopTracingSession(session_id_);
 }
@@ -37017,9 +39341,17 @@ void TracingMuxerImpl::ConsumerImpl::OnObservableEvents(
 }
 
 void TracingMuxerImpl::ConsumerImpl::OnSessionCloned(
-    const OnSessionClonedArgs&) {
-  // CloneSession is not exposed in the SDK. This should never happen.
-  PERFETTO_DCHECK(false);
+    const OnSessionClonedArgs& args) {
+  if (!clone_trace_callback_)
+    return;
+  TracingSession::CloneTraceCallbackArgs callback_arg{};
+  callback_arg.success = args.success;
+  callback_arg.error = std::move(args.error);
+  callback_arg.uuid_msb = args.uuid.msb();
+  callback_arg.uuid_lsb = args.uuid.lsb();
+  muxer_->task_runner_->PostTask(
+      std::bind(std::move(clone_trace_callback_), std::move(callback_arg)));
+  clone_trace_callback_ = nullptr;
 }
 
 void TracingMuxerImpl::ConsumerImpl::OnTraceStats(
@@ -37090,6 +39422,15 @@ void TracingMuxerImpl::TracingSessionImpl::Start() {
   auto session_id = session_id_;
   muxer->task_runner_->PostTask(
       [muxer, session_id] { muxer->StartTracingSession(session_id); });
+}
+
+void TracingMuxerImpl::TracingSessionImpl::CloneTrace(CloneTraceArgs args,
+                                                      CloneTraceCallback cb) {
+  auto* muxer = muxer_;
+  auto session_id = session_id_;
+  muxer->task_runner_->PostTask([muxer, session_id, args, cb] {
+    muxer->CloneTracingSession(session_id, args, std::move(cb));
+  });
 }
 
 // Can be called from any thread.
@@ -37613,7 +39954,7 @@ static bool MaybeAdoptStartupTracingInDataSource(
             static_cast<internal::BufferId>(cfg.target_buffer());
         internal_state->config.reset(new DataSourceConfig(cfg));
 
-        // TODO(eseckler): Should the data souce config provided by the service
+        // TODO(eseckler): Should the data source config provided by the service
         // be allowed to specify additional interceptors / additional data
         // source params?
 
@@ -37947,7 +40288,7 @@ void TracingMuxerImpl::StopDataSource_AsyncEnd(TracingBackendId backend_id,
     return;
   }
 
-  const uint32_t mask = ~(1 << ds.instance_idx);
+  const uint32_t mask = ~(1U << ds.instance_idx);
   ds.static_state->valid_instances.fetch_and(mask, std::memory_order_acq_rel);
 
   bool will_notify_on_stop;
@@ -38049,8 +40390,8 @@ void TracingMuxerImpl::ClearDataSourceIncrementalState(
 
   // Make DataSource::TraceContext::GetIncrementalState() eventually notice that
   // the incremental state should be cleared.
-  ds.static_state->incremental_state_generation.fetch_add(
-      1, std::memory_order_relaxed);
+  ds.static_state->GetUnsafe(ds.instance_idx)
+      ->incremental_state_generation.fetch_add(1, std::memory_order_relaxed);
 }
 
 bool TracingMuxerImpl::FlushDataSource_AsyncBegin(
@@ -38329,6 +40670,32 @@ void TracingMuxerImpl::StartTracingSession(TracingSessionGlobalID session_id) {
   }
 
   // TODO implement support for the deferred-start + fast-triggering case.
+}
+
+void TracingMuxerImpl::CloneTracingSession(
+    TracingSessionGlobalID session_id,
+    TracingSession::CloneTraceArgs args,
+    TracingSession::CloneTraceCallback callback) {
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+  auto* consumer = FindConsumer(session_id);
+  if (!consumer) {
+    TracingSession::CloneTraceCallbackArgs callback_arg{};
+    callback_arg.success = false;
+    callback_arg.error = "Tracing session not found";
+    callback(callback_arg);
+    return;
+  }
+  // Multiple concurrent cloning isn't supported.
+  PERFETTO_DCHECK(!consumer->clone_trace_callback_);
+  consumer->clone_trace_callback_ = std::move(callback);
+  ConsumerEndpoint::CloneSessionArgs consumer_args{};
+  consumer_args.unique_session_name = args.unique_session_name;
+  if (!consumer->connected_) {
+    consumer->session_to_clone_ = std::move(consumer_args);
+    return;
+  }
+  consumer->session_to_clone_ = std::nullopt;
+  consumer->service_->CloneSession(consumer_args);
 }
 
 void TracingMuxerImpl::ChangeTracingSessionConfig(
@@ -38735,7 +41102,7 @@ std::unique_ptr<TracingSession> TracingMuxerImpl::CreateTracingSession(
       // backend without a valid type.
       if (!backend.type) {
         PERFETTO_ELOG(
-            "No tracing backend ready for type=%d, consumer will disconnect",
+            "No tracing backend ready for type=%u, consumer will disconnect",
             requested_backend_type);
         InitializeConsumer(session_id);
         return;
@@ -38759,7 +41126,7 @@ std::unique_ptr<TracingSession> TracingMuxerImpl::CreateTracingSession(
           }
 
           PERFETTO_ELOG(
-              "Consumer session for backend type type=%d forbidden, "
+              "Consumer session for backend type type=%u forbidden, "
               "consumer will disconnect",
               type);
 
@@ -38808,7 +41175,7 @@ TracingMuxerImpl::CreateStartupTracingSession(
       // backend without a valid type.
       if (!backend.type) {
         PERFETTO_ELOG(
-            "No tracing backend initialized for type=%d, startup tracing "
+            "No tracing backend initialized for type=%u, startup tracing "
             "failed",
             backend_type);
         if (opts.on_setup)
@@ -39580,7 +41947,7 @@ void TrackEventInternal::ResetIncrementalState(
     }
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_MAC)
-    // Emit a MacOS point-of-interest signpost to synchonize Mac profiler time
+    // Emit a MacOS point-of-interest signpost to synchronize Mac profiler time
     // with boot time.
     // TODO(leszeks): Consider allowing synchronization against other clocks
     // than boot time.
@@ -39624,9 +41991,11 @@ void TrackEventInternal::ResetIncrementalState(
   // trace points won't explicitly reference it. We also write the process
   // descriptor from every thread that writes trace events to ensure it gets
   // emitted at least once.
+  incr_state->seen_tracks.insert(default_track.uuid);
   WriteTrackDescriptor(default_track, trace_writer, incr_state, tls_state,
                        sequence_timestamp);
 
+  incr_state->seen_tracks.insert(ProcessTrack::Current().uuid);
   WriteTrackDescriptor(ProcessTrack::Current(), trace_writer, incr_state,
                        tls_state, sequence_timestamp);
 
@@ -39872,6 +42241,317 @@ PlatformThreadLocalObject::CreateInstance() {
 base::PlatformProcessId Platform::process_id_ = 0;
 
 }  // namespace perfetto
+// gen_amalgamated begin source: src/tracing/platform_posix.cc
+/*
+ * Copyright (C) 2019 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// gen_amalgamated expanded: #include "perfetto/base/build_config.h"
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||   \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
+
+// gen_amalgamated expanded: #include "perfetto/ext/base/file_utils.h"
+// gen_amalgamated expanded: #include "perfetto/ext/base/thread_task_runner.h"
+// gen_amalgamated expanded: #include "perfetto/tracing/internal/tracing_tls.h"
+// gen_amalgamated expanded: #include "perfetto/tracing/platform.h"
+// gen_amalgamated expanded: #include "perfetto/tracing/trace_writer_base.h"
+
+#include <pthread.h>
+#include <stdlib.h>
+
+namespace perfetto {
+
+namespace {
+
+class PlatformPosix : public Platform {
+ public:
+  PlatformPosix();
+  ~PlatformPosix() override;
+
+  ThreadLocalObject* GetOrCreateThreadLocalObject() override;
+
+  std::unique_ptr<base::TaskRunner> CreateTaskRunner(
+      const CreateTaskRunnerArgs&) override;
+  std::string GetCurrentProcessName() override;
+  void Shutdown() override;
+
+ private:
+  pthread_key_t tls_key_{};
+};
+
+PlatformPosix* g_instance = nullptr;
+
+using ThreadLocalObject = Platform::ThreadLocalObject;
+
+PlatformPosix::PlatformPosix() {
+  PERFETTO_CHECK(!g_instance);
+  g_instance = this;
+  auto tls_dtor = [](void* obj) {
+    // The Posix TLS implementation resets the key before calling this dtor.
+    // Here we re-reset it to the object we are about to delete. This is to
+    // handle re-entrant usages of tracing in the PostTask done during the dtor
+    // (see comments in TracingTLS::~TracingTLS()). Chromium's platform
+    // implementation (which does NOT use this platform impl) has a similar
+    // workaround (https://crrev.com/c/2748300).
+    pthread_setspecific(g_instance->tls_key_, obj);
+    delete static_cast<ThreadLocalObject*>(obj);
+    pthread_setspecific(g_instance->tls_key_, nullptr);
+  };
+  PERFETTO_CHECK(pthread_key_create(&tls_key_, tls_dtor) == 0);
+}
+
+PlatformPosix::~PlatformPosix() {
+  // pthread_key_delete doesn't call destructors, so do it manually for the
+  // calling thread.
+  void* tls_ptr = pthread_getspecific(tls_key_);
+  delete static_cast<ThreadLocalObject*>(tls_ptr);
+
+  pthread_key_delete(tls_key_);
+  g_instance = nullptr;
+}
+
+void PlatformPosix::Shutdown() {
+  PERFETTO_CHECK(g_instance == this);
+  delete this;
+  PERFETTO_CHECK(!g_instance);
+  // We're not clearing out the instance in GetDefaultPlatform() since it's not
+  // possible to re-initialize Perfetto after calling this function anyway.
+}
+
+ThreadLocalObject* PlatformPosix::GetOrCreateThreadLocalObject() {
+  // In chromium this should be implemented using base::ThreadLocalStorage.
+  void* tls_ptr = pthread_getspecific(tls_key_);
+
+  // This is needed to handle re-entrant calls during TLS dtor.
+  // See comments in platform.cc and aosp/1712371 .
+  ThreadLocalObject* tls = static_cast<ThreadLocalObject*>(tls_ptr);
+  if (!tls) {
+    tls = ThreadLocalObject::CreateInstance().release();
+    pthread_setspecific(tls_key_, tls);
+  }
+  return tls;
+}
+
+std::unique_ptr<base::TaskRunner> PlatformPosix::CreateTaskRunner(
+    const CreateTaskRunnerArgs& args) {
+  return std::unique_ptr<base::TaskRunner>(new base::ThreadTaskRunner(
+      base::ThreadTaskRunner::CreateAndStart(args.name_for_debugging)));
+}
+
+std::string PlatformPosix::GetCurrentProcessName() {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  std::string cmdline;
+  base::ReadFile("/proc/self/cmdline", &cmdline);
+  return cmdline.substr(0, cmdline.find('\0'));
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
+  return std::string(getprogname());
+#else
+  return "unknown_producer";
+#endif
+}
+
+}  // namespace
+
+// static
+Platform* Platform::GetDefaultPlatform() {
+  static PlatformPosix* instance = new PlatformPosix();
+  return instance;
+}
+
+}  // namespace perfetto
+#endif  // OS_LINUX || OS_ANDROID || OS_APPLE || OS_FUCHSIA
+// gen_amalgamated begin source: src/tracing/platform_windows.cc
+/*
+ * Copyright (C) 2021 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// gen_amalgamated expanded: #include "perfetto/base/build_config.h"
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
+
+#include <Windows.h>
+
+// gen_amalgamated expanded: #include "perfetto/ext/base/thread_task_runner.h"
+// gen_amalgamated expanded: #include "perfetto/tracing/internal/tracing_tls.h"
+// gen_amalgamated expanded: #include "perfetto/tracing/platform.h"
+
+// Thread Termination Callbacks.
+// Windows doesn't support a per-thread destructor with its
+// TLS primitives. So, we build it manually by inserting a
+// function to be called on each thread's exit.
+// This magic is from chromium's base/threading/thread_local_storage_win.cc
+// which in turn is from http://www.codeproject.com/threads/tls.asp.
+
+#ifdef _WIN64
+#pragma comment(linker, "/INCLUDE:_tls_used")
+#pragma comment(linker, "/INCLUDE:perfetto_thread_callback_base")
+#else
+#pragma comment(linker, "/INCLUDE:__tls_used")
+#pragma comment(linker, "/INCLUDE:_perfetto_thread_callback_base")
+#endif
+
+namespace perfetto {
+
+namespace {
+
+class PlatformWindows : public Platform {
+ public:
+  static PlatformWindows* instance;
+  PlatformWindows();
+  ~PlatformWindows() override;
+
+  ThreadLocalObject* GetOrCreateThreadLocalObject() override;
+  std::unique_ptr<base::TaskRunner> CreateTaskRunner(
+      const CreateTaskRunnerArgs&) override;
+  std::string GetCurrentProcessName() override;
+  void OnThreadExit();
+
+ private:
+  DWORD tls_key_{};
+};
+
+using ThreadLocalObject = Platform::ThreadLocalObject;
+
+// static
+PlatformWindows* PlatformWindows::instance = nullptr;
+
+PlatformWindows::PlatformWindows() {
+  instance = this;
+  tls_key_ = ::TlsAlloc();
+  PERFETTO_CHECK(tls_key_ != TLS_OUT_OF_INDEXES);
+}
+
+PlatformWindows::~PlatformWindows() {
+  ::TlsFree(tls_key_);
+  instance = nullptr;
+}
+
+void PlatformWindows::OnThreadExit() {
+  auto tls = static_cast<ThreadLocalObject*>(::TlsGetValue(tls_key_));
+  if (tls) {
+    // At this point we rely on the TLS object to be still set to the TracingTLS
+    // we are deleting. See comments in TracingTLS::~TracingTLS().
+    delete tls;
+  }
+}
+
+ThreadLocalObject* PlatformWindows::GetOrCreateThreadLocalObject() {
+  void* tls_ptr = ::TlsGetValue(tls_key_);
+
+  auto* tls = static_cast<ThreadLocalObject*>(tls_ptr);
+  if (!tls) {
+    tls = ThreadLocalObject::CreateInstance().release();
+    ::TlsSetValue(tls_key_, tls);
+  }
+  return tls;
+}
+
+std::unique_ptr<base::TaskRunner> PlatformWindows::CreateTaskRunner(
+    const CreateTaskRunnerArgs& args) {
+  return std::unique_ptr<base::TaskRunner>(new base::ThreadTaskRunner(
+      base::ThreadTaskRunner::CreateAndStart(args.name_for_debugging)));
+}
+
+std::string PlatformWindows::GetCurrentProcessName() {
+  char buf[MAX_PATH];
+  auto len = ::GetModuleFileNameA(nullptr /*current*/, buf, sizeof(buf));
+  std::string name(buf, static_cast<size_t>(len));
+  size_t sep = name.find_last_of('\\');
+  if (sep != std::string::npos)
+    name = name.substr(sep + 1);
+  return name;
+}
+
+}  // namespace
+
+// static
+Platform* Platform::GetDefaultPlatform() {
+  static PlatformWindows* thread_safe_init_instance = new PlatformWindows();
+  return thread_safe_init_instance;
+}
+
+}  // namespace perfetto
+
+// -----------------------
+// Thread-local destructor
+// -----------------------
+
+// .CRT$XLA to .CRT$XLZ is an array of PIMAGE_TLS_CALLBACK pointers that are
+// called automatically by the OS loader code (not the CRT) when the module is
+// loaded and on thread creation. They are NOT called if the module has been
+// loaded by a LoadLibrary() call. It must have implicitly been loaded at
+// process startup.
+// See VC\crt\src\tlssup.c for reference.
+
+// extern "C" suppresses C++ name mangling so we know the symbol name for the
+// linker /INCLUDE:symbol pragma above.
+extern "C" {
+// The linker must not discard perfetto_thread_callback_base. (We force a
+// reference to this variable with a linker /INCLUDE:symbol pragma to ensure
+// that.) If this variable is discarded, the OnThreadExit function will never be
+// called.
+
+void NTAPI PerfettoOnThreadExit(PVOID, DWORD, PVOID);
+void NTAPI PerfettoOnThreadExit(PVOID, DWORD reason, PVOID) {
+  if (reason == DLL_THREAD_DETACH || reason == DLL_PROCESS_DETACH) {
+    if (perfetto::PlatformWindows::instance)
+      perfetto::PlatformWindows::instance->OnThreadExit();
+  }
+}
+
+#ifdef _WIN64
+
+// .CRT section is merged with .rdata on x64 so it must be constant data.
+#pragma const_seg(".CRT$XLP")
+
+// When defining a const variable, it must have external linkage to be sure the
+// linker doesn't discard it.
+extern const PIMAGE_TLS_CALLBACK perfetto_thread_callback_base;
+const PIMAGE_TLS_CALLBACK perfetto_thread_callback_base = PerfettoOnThreadExit;
+
+// Reset the default section.
+#pragma const_seg()
+
+#else  // _WIN64
+
+#pragma data_seg(".CRT$XLP")
+PIMAGE_TLS_CALLBACK perfetto_thread_callback_base = PerfettoOnThreadExit;
+// Reset the default section.
+#pragma data_seg()
+
+#endif  // _WIN64
+
+}  // extern "C"
+
+#endif  // OS_WIN
 // gen_amalgamated begin source: src/tracing/traced_value.cc
 /*
  * Copyright (C) 2021 The Android Open Source Project
@@ -40058,6 +42738,85 @@ TracedArray TracedDictionary::AddArray(DynamicString key) {
 
 }  // namespace perfetto
 // gen_amalgamated begin source: src/tracing/tracing.cc
+// gen_amalgamated begin header: include/perfetto/ext/base/no_destructor.h
+/*
+ * Copyright (C) 2019 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef INCLUDE_PERFETTO_EXT_BASE_NO_DESTRUCTOR_H_
+#define INCLUDE_PERFETTO_EXT_BASE_NO_DESTRUCTOR_H_
+
+#include <new>
+#include <utility>
+
+namespace perfetto {
+namespace base {
+
+// Wrapper that can hold an object of type T, without invoking the contained
+// object's destructor when being destroyed. Useful for creating statics while
+// avoiding static destructors.
+//
+// Stores the object inline, and therefore doesn't incur memory allocation and
+// pointer indirection overheads.
+//
+// Example of use:
+//
+//   const std::string& GetStr() {
+//     static base::NoDestructor<std::string> s("hello");
+//     return s.ref();
+//   }
+//
+template <typename T>
+class NoDestructor {
+ public:
+  // Forward arguments to T's constructor. Note that this doesn't cover
+  // construction from initializer lists.
+  template <typename... Args>
+  explicit NoDestructor(Args&&... args) {
+    new (storage_) T(std::forward<Args>(args)...);
+  }
+
+  NoDestructor(const NoDestructor&) = delete;
+  NoDestructor& operator=(const NoDestructor&) = delete;
+  NoDestructor(NoDestructor&&) = delete;
+  NoDestructor& operator=(NoDestructor&&) = delete;
+
+  ~NoDestructor() = default;
+
+  /* To avoid type-punned pointer strict aliasing warnings on GCC6 and below
+   * these need to be split over two lines. If they are collapsed onto one line.
+   *   return reinterpret_cast<const T*>(storage_);
+   * The error fires.
+   */
+  const T& ref() const {
+    auto* const cast = reinterpret_cast<const T*>(storage_);
+    return *cast;
+  }
+  T& ref() {
+    auto* const cast = reinterpret_cast<T*>(storage_);
+    return *cast;
+  }
+
+ private:
+  alignas(T) char storage_[sizeof(T)];
+};
+
+}  // namespace base
+}  // namespace perfetto
+
+#endif  // INCLUDE_PERFETTO_EXT_BASE_NO_DESTRUCTOR_H_
 /*
  * Copyright (C) 2019 The Android Open Source Project
  *
@@ -40185,6 +42944,8 @@ void Tracing::ActivateTriggers(const std::vector<std::string>& triggers,
 }
 
 TracingSession::~TracingSession() = default;
+
+void TracingSession::CloneTrace(CloneTraceArgs, CloneTraceCallback) {}
 
 // Can be called from any thread.
 bool TracingSession::FlushBlocking(uint32_t timeout_ms) {
@@ -40415,6 +43176,21 @@ void ThreadTrack::Serialize(protos::pbzero::TrackDescriptor* desc) const {
   desc->AppendRawProtoBytes(bytes.data(), bytes.size());
 }
 
+protos::gen::TrackDescriptor NamedTrack::Serialize() const {
+  auto desc = Track::Serialize();
+  if (static_name_) {
+    desc.set_static_name(static_name_.value);
+  } else {
+    desc.set_name(dynamic_name_.value);
+  }
+  return desc;
+}
+
+void NamedTrack::Serialize(protos::pbzero::TrackDescriptor* desc) const {
+  auto bytes = Serialize().SerializeAsString();
+  desc->AppendRawProtoBytes(bytes.data(), bytes.size());
+}
+
 protos::gen::TrackDescriptor CounterTrack::Serialize() const {
   auto desc = Track::Serialize();
   auto* counter = desc.mutable_counter();
@@ -40497,20 +43273,21 @@ void TrackRegistry::InitializeInstance() {
 
 // static
 uint64_t TrackRegistry::ComputeProcessUuid() {
+  base::Hasher hash;
   // Use the process start time + pid as the unique identifier for this process.
   // This ensures that if there are two independent copies of the Perfetto SDK
   // in the same process (e.g., one in the app and another in a system
   // framework), events emitted by each will be consistently interleaved on
   // common thread and process tracks.
   if (uint64_t start_time = GetProcessStartTime()) {
-    base::Hasher hash;
     hash.Update(start_time);
-    hash.Update(Platform::GetCurrentProcessId());
-    return hash.digest();
+  } else {
+    // Fall back to a randomly generated identifier.
+    static uint64_t random_once = static_cast<uint64_t>(base::Uuidv4().lsb());
+    hash.Update(random_once);
   }
-  // Fall back to a randomly generated identifier.
-  static uint64_t random_once = static_cast<uint64_t>(base::Uuidv4().lsb());
-  return random_once;
+  hash.Update(Platform::GetCurrentProcessId());
+  return hash.digest();
 }
 
 void TrackRegistry::ResetForTesting() {
@@ -40520,7 +43297,7 @@ void TrackRegistry::ResetForTesting() {
 void TrackRegistry::UpdateTrack(Track track,
                                 const std::string& serialized_desc) {
   std::lock_guard<std::mutex> lock(mutex_);
-  tracks_[track.uuid] = std::move(serialized_desc);
+  tracks_[track.uuid] = {serialized_desc, track.parent_uuid};
 }
 
 void TrackRegistry::EraseTrack(Track track) {
@@ -41064,7 +43841,6 @@ enum class PerfettoStatsdAtom {
 
   // Guardrails inside perfetto_cmd before tracing is finished.
   kOnTimeout = 16,
-  kCmdUserBuildTracingNotAllowed = 43,
 
   // Checkpoints inside traced.
   kTracedEnableTracing = 37,
@@ -41142,6 +43918,10 @@ enum class PerfettoStatsdAtom {
   // Contained status of guardrail state initialization and upload limit in
   // perfetto_cmd. Removed as perfetto no longer manages stateful guardrails
   // reserved 44, 45, 46;
+
+  // Contained the guardrail for user build tracing. Removed as this guardrail
+  // causes more problem than it solves these days.
+  // reserved 43;
 };
 
 // This must match the values of the PerfettoTrigger::TriggerType enum in:
@@ -41149,17 +43929,15 @@ enum class PerfettoStatsdAtom {
 enum PerfettoTriggerAtom {
   kUndefined = 0,
 
-  kCmdTrigger = 1,
-  kCmdTriggerFail = 2,
-
-  kTriggerPerfettoTrigger = 3,
-  kTriggerPerfettoTriggerFail = 4,
-
   kTracedLimitProbability = 5,
   kTracedLimitMaxPer24h = 6,
 
-  kProbesProducerTrigger = 7,
-  kProbesProducerTriggerFail = 8,
+  kTracedTrigger = 9,
+
+  // Contained events of logging triggers through perfetto_cmd, probes and
+  // trigger_perfetto.
+  // Removed in W (Oct 2024) and replaced by |kTracedTrigger|.
+  // reserved 1, 2, 3, 4, 7, 8
 };
 
 }  // namespace perfetto
@@ -41294,6 +44072,86 @@ void MaybeLogTriggerEvents(PerfettoTriggerAtom,
 #endif
 
 }  // namespace perfetto::android_stats
+// gen_amalgamated begin source: src/base/clock_snapshots.cc
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// gen_amalgamated expanded: #include "perfetto/ext/base/clock_snapshots.h"
+
+// gen_amalgamated expanded: #include "perfetto/base/build_config.h"
+// gen_amalgamated expanded: #include "perfetto/base/time.h"
+// gen_amalgamated expanded: #include "protos/perfetto/common/builtin_clock.pbzero.h"
+
+namespace perfetto::base {
+
+ClockSnapshotVector CaptureClockSnapshots() {
+  ClockSnapshotVector snapshot_data;
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE) && \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) &&   \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_NACL) &&  \
+    !PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+  struct {
+    clockid_t id;
+    protos::pbzero::BuiltinClock type;
+    struct timespec ts;
+  } clocks[] = {
+      {CLOCK_BOOTTIME, protos::pbzero::BUILTIN_CLOCK_BOOTTIME, {0, 0}},
+      {CLOCK_REALTIME_COARSE,
+       protos::pbzero::BUILTIN_CLOCK_REALTIME_COARSE,
+       {0, 0}},
+      {CLOCK_MONOTONIC_COARSE,
+       protos::pbzero::BUILTIN_CLOCK_MONOTONIC_COARSE,
+       {0, 0}},
+      {CLOCK_REALTIME, protos::pbzero::BUILTIN_CLOCK_REALTIME, {0, 0}},
+      {CLOCK_MONOTONIC, protos::pbzero::BUILTIN_CLOCK_MONOTONIC, {0, 0}},
+      {CLOCK_MONOTONIC_RAW,
+       protos::pbzero::BUILTIN_CLOCK_MONOTONIC_RAW,
+       {0, 0}},
+  };
+  // First snapshot all the clocks as atomically as we can.
+  for (auto& clock : clocks) {
+    if (clock_gettime(clock.id, &clock.ts) == -1)
+      PERFETTO_DLOG("clock_gettime failed for clock %d", clock.id);
+  }
+  for (auto& clock : clocks) {
+    snapshot_data.push_back(ClockReading(
+        static_cast<uint32_t>(clock.type),
+        static_cast<uint64_t>(base::FromPosixTimespec(clock.ts).count())));
+  }
+#else  // OS_APPLE || OS_WIN && OS_NACL
+  auto wall_time_ns = static_cast<uint64_t>(base::GetWallTimeNs().count());
+  // The default trace clock is boot time, so we always need to emit a path to
+  // it. However since we don't actually have a boot time source on these
+  // platforms, pretend that wall time equals boot time.
+  snapshot_data.push_back(
+      ClockReading(protos::pbzero::BUILTIN_CLOCK_BOOTTIME, wall_time_ns));
+  snapshot_data.push_back(
+      ClockReading(protos::pbzero::BUILTIN_CLOCK_MONOTONIC, wall_time_ns));
+#endif
+
+#if PERFETTO_BUILDFLAG(PERFETTO_ARCH_CPU_X86_64)
+  // X86-specific but OS-independent TSC clocksource
+  snapshot_data.push_back(
+      ClockReading(protos::pbzero::BUILTIN_CLOCK_TSC, base::Rdtsc()));
+#endif  // PERFETTO_BUILDFLAG(PERFETTO_ARCH_CPU_X86_64)
+
+  return snapshot_data;
+}
+
+}  // namespace perfetto::base
 // gen_amalgamated begin source: src/base/version.cc
 // gen_amalgamated begin header: include/perfetto/ext/base/version.h
 /*
@@ -41349,8 +44207,8 @@ const char* GetVersionCode();
 #ifndef GEN_PERFETTO_VERSION_GEN_H_
 #define GEN_PERFETTO_VERSION_GEN_H_
 
-#define PERFETTO_VERSION_STRING() "v48.1-8fc0fb096"
-#define PERFETTO_VERSION_SCM_REVISION() "8fc0fb09660d380577f2a8e68131255b03a28b79"
+#define PERFETTO_VERSION_STRING() "v50.1-da5fcf015"
+#define PERFETTO_VERSION_SCM_REVISION() "da5fcf015ddda87445f1a359604d7c6f4077e10a"
 
 #endif  // GEN_PERFETTO_VERSION_GEN_H_
 /*
@@ -41588,7 +44446,7 @@ enum FilterOpcode : uint32_t {
   // recurse into the nested message.
   kFilterOpcode_NestedField = 3,
 
-  // The imediate value is the id of the allowed field. The behaviour of this
+  // The immediate value is the id of the allowed field. The behaviour of this
   // opcode is the same as kFilterOpcode_SimpleField, with the further semantic
   // that the field is a string and needs to be processed using the string
   // filtering fules.
@@ -41671,7 +44529,7 @@ bool FilterBytecodeParser::LoadInternal(const uint8_t* bytecode_data,
 
   words.pop_back();  // Pop the checksum.
 
-  // Temporay storage for each message. Cleared on every END_OF_MESSAGE.
+  // Temporary storage for each message. Cleared on every END_OF_MESSAGE.
   std::vector<uint32_t> direct_indexed_fields;
   std::vector<uint32_t> ranges;
   uint32_t max_msg_index = 0;
@@ -41832,7 +44690,7 @@ FilterBytecodeParser::QueryResult FilterBytecodeParser::Query(
         break;
       }
     }  // for (word in ranges)
-  }    // if (field_id >= num_directly_indexed)
+  }  // if (field_id >= num_directly_indexed)
 
   res.allowed = (field_state & kAllowed) != 0;
   res.nested_msg_index = field_state & ~kAllowed;
@@ -42224,7 +45082,7 @@ class MessageTokenizer {
       }
 
       case kFixedIntValue:
-        // Unreacheable because of the if before the switch.
+        // Unreachable because of the if before the switch.
         PERFETTO_DCHECK(false);
         break;
 
@@ -42374,7 +45232,7 @@ class MessageFilter {
   // the root message passed to proto_filter when generating the bytecode
   // (in typical tracing use-cases, this is perfetto.protos.Trace). However, the
   // caller (TracingServiceImpl) might want to filter packets from the 2nd level
-  // (perfetto.protos.TracePacket) because the root level is pre-pended after
+  // (perfetto.protos.TracePacket) because the root level is prepended after
   // the fact. This call allows to change the root message for the filter.
   // The argument |field_ids| is an array of proto field ids and determines the
   // path to the new root. For instance, in the case of [1,2,3] SetFilterRoot
@@ -42412,7 +45270,7 @@ class MessageFilter {
 
   const Config& config() const { return config_; }
 
-  // Retuns the helper class used to perform string filtering.
+  // Returns the helper class used to perform string filtering.
   StringFilter& string_filter() { return config_.string_filter(); }
 
  private:
@@ -42764,7 +45622,7 @@ void MessageFilter::FilterOneByte(uint8_t octet) {
         IncrementCurrentFieldUsage(token.field_id, filter.allowed);
       }
     }  // if (token.valid)
-  }    // if (eat_next_bytes == 0)
+  }  // if (eat_next_bytes == 0)
 
   ++state->in_bytes;
   while (state->in_bytes >= state->in_bytes_limit) {
@@ -42843,6 +45701,95 @@ void MessageFilter::IncrementCurrentFieldUsage(uint32_t field_id,
 }
 
 }  // namespace protozero
+// gen_amalgamated begin source: src/tracing/service/clock.cc
+// gen_amalgamated begin header: src/tracing/service/clock.h
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef SRC_TRACING_SERVICE_CLOCK_H_
+#define SRC_TRACING_SERVICE_CLOCK_H_
+
+// gen_amalgamated expanded: #include "perfetto/base/time.h"
+
+namespace perfetto::tracing_service {
+
+class Clock {
+ public:
+  virtual ~Clock();
+  virtual base::TimeNanos GetBootTimeNs() = 0;
+  virtual base::TimeNanos GetWallTimeNs() = 0;
+
+  base::TimeMillis GetBootTimeMs() {
+    return std::chrono::duration_cast<base::TimeMillis>(GetBootTimeNs());
+  }
+  base::TimeMillis GetWallTimeMs() {
+    return std::chrono::duration_cast<base::TimeMillis>(GetWallTimeNs());
+  }
+
+  base::TimeSeconds GetBootTimeS() {
+    return std::chrono::duration_cast<base::TimeSeconds>(GetBootTimeNs());
+  }
+  base::TimeSeconds GetWallTimeS() {
+    return std::chrono::duration_cast<base::TimeSeconds>(GetWallTimeNs());
+  }
+};
+
+class ClockImpl : public Clock {
+ public:
+  ~ClockImpl() override;
+  base::TimeNanos GetBootTimeNs() override;
+  base::TimeNanos GetWallTimeNs() override;
+};
+
+}  // namespace perfetto::tracing_service
+
+#endif  // SRC_TRACING_SERVICE_CLOCK_H_
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// gen_amalgamated expanded: #include "src/tracing/service/clock.h"
+
+namespace perfetto::tracing_service {
+
+Clock::~Clock() = default;
+
+ClockImpl::~ClockImpl() = default;
+
+base::TimeNanos ClockImpl::GetBootTimeNs() {
+  return base::GetBootTimeNs();
+}
+
+base::TimeNanos ClockImpl::GetWallTimeNs() {
+  return base::GetWallTimeNs();
+}
+
+}  // namespace perfetto::tracing_service
 // gen_amalgamated begin source: src/tracing/service/metatrace_writer.cc
 // gen_amalgamated begin header: src/tracing/service/metatrace_writer.h
 /*
@@ -43206,7 +46153,7 @@ class ProtoFieldParserFSM {
         // Persistent error states.
         return 0;
 
-    }          // switch(state_)
+    }  // switch(state_)
     return 0;  // To keep GCC happy.
   }
 
@@ -43262,6 +46209,83 @@ bool PacketStreamValidator::Validate(const Slices& slices) {
 }
 
 }  // namespace perfetto
+// gen_amalgamated begin source: src/tracing/service/random.cc
+// gen_amalgamated begin header: src/tracing/service/random.h
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef SRC_TRACING_SERVICE_RANDOM_H_
+#define SRC_TRACING_SERVICE_RANDOM_H_
+
+#include <stdint.h>
+
+#include <random>
+
+namespace perfetto::tracing_service {
+
+class Random {
+ public:
+  virtual ~Random();
+  virtual double GetValue() = 0;
+};
+
+class RandomImpl : public Random {
+ public:
+  explicit RandomImpl(uint32_t seed);
+  ~RandomImpl() override;
+  double GetValue() override;
+
+ private:
+  std::minstd_rand prng_;
+  std::uniform_real_distribution<double> dist_;
+};
+
+}  // namespace perfetto::tracing_service
+
+#endif  // SRC_TRACING_SERVICE_RANDOM_H_
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+// gen_amalgamated expanded: #include "src/tracing/service/random.h"
+
+namespace perfetto::tracing_service {
+
+Random::~Random() = default;
+
+RandomImpl::RandomImpl(uint32_t seed) : prng_(seed) {}
+RandomImpl::~RandomImpl() = default;
+
+double RandomImpl::GetValue() {
+  return dist_(prng_);
+}
+
+}  // namespace perfetto::tracing_service
 // gen_amalgamated begin source: src/tracing/service/trace_buffer.cc
 // gen_amalgamated begin header: src/tracing/service/trace_buffer.h
 // gen_amalgamated begin header: include/perfetto/ext/base/flat_hash_map.h
@@ -44493,7 +47517,7 @@ class TraceBuffer {
   size_t size_to_end() const { return static_cast<size_t>(end() - wptr_); }
 
   base::PagedMemory data_;
-  size_t size_ = 0;            // Size in bytes of |data_|.
+  size_t size_ = 0;  // Size in bytes of |data_|.
 
   // High watermark. The number of bytes (<= |size_|) written into the buffer
   // before the first wraparound. This increases as data is written into the
@@ -44662,7 +47686,8 @@ void TraceBuffer::CopyChunkUntrusted(
   // up in a fragmented state where size_to_end() < sizeof(ChunkRecord).
   const size_t record_size =
       base::AlignUp<sizeof(ChunkRecord)>(size + sizeof(ChunkRecord));
-  TRACE_BUFFER_DLOG("CopyChunk @ %" PRIdPTR ", size=%zu", wptr_ - begin(), record_size);
+  TRACE_BUFFER_DLOG("CopyChunk @ %" PRIdPTR ", size=%zu", wptr_ - begin(),
+                    record_size);
   if (PERFETTO_UNLIKELY(record_size > max_chunk_size_)) {
     stats_.set_abi_violations(stats_.abi_violations() + 1);
     PERFETTO_DCHECK(suppress_client_dchecks_for_testing_);
@@ -44756,8 +47781,8 @@ void TraceBuffer::CopyChunkUntrusted(
     }
 
     uint8_t* wptr = reinterpret_cast<uint8_t*>(prev);
-    TRACE_BUFFER_DLOG("  overriding chunk @ %" PRIdPTR ", size=%zu", wptr - begin(),
-                      record_size);
+    TRACE_BUFFER_DLOG("  overriding chunk @ %" PRIdPTR ", size=%zu",
+                      wptr - begin(), record_size);
 
     // Update chunk meta data stored in the index, as it may have changed.
     record_meta->num_fragments = num_fragments;
@@ -44765,8 +47790,9 @@ void TraceBuffer::CopyChunkUntrusted(
     record_meta->set_complete(chunk_complete);
 
     // Override the ChunkRecord contents at the original |wptr|.
-    TRACE_BUFFER_DLOG("  copying @ [%" PRIdPTR " - %" PRIdPTR "] %zu", wptr - begin(),
-                      uintptr_t(wptr - begin()) + record_size, record_size);
+    TRACE_BUFFER_DLOG("  copying @ [%" PRIdPTR " - %" PRIdPTR "] %zu",
+                      wptr - begin(), uintptr_t(wptr - begin()) + record_size,
+                      record_size);
     WriteChunkRecord(wptr, record, src, size);
     TRACE_BUFFER_DLOG("Chunk raw: %s",
                       base::HexDump(wptr, record_size).c_str());
@@ -44825,8 +47851,9 @@ void TraceBuffer::CopyChunkUntrusted(
       index_.emplace(key, ChunkMeta(chunk_off, num_fragments, chunk_complete,
                                     chunk_flags, client_identity_trusted));
   PERFETTO_DCHECK(it_and_inserted.second);
-  TRACE_BUFFER_DLOG("  copying @ [%" PRIdPTR " - %" PRIdPTR "] %zu", wptr_ - begin(),
-                    uintptr_t(wptr_ - begin()) + record_size, record_size);
+  TRACE_BUFFER_DLOG("  copying @ [%" PRIdPTR " - %" PRIdPTR "] %zu",
+                    wptr_ - begin(), uintptr_t(wptr_ - begin()) + record_size,
+                    record_size);
   WriteChunkRecord(wptr_, record, src, size);
   TRACE_BUFFER_DLOG("Chunk raw: %s", base::HexDump(wptr_, record_size).c_str());
   wptr_ += record_size;
@@ -44914,11 +47941,12 @@ ssize_t TraceBuffer::DeleteNextChunksFor(size_t bytes_to_clear) {
         index_delete.push_back(it);
         will_remove = true;
       }
-      TRACE_BUFFER_DLOG(
-          "  del index {%" PRIu32 ",%" PRIu32 ",%u} @ [%" PRIdPTR " - %" PRIdPTR "] %d",
-          key.producer_id, key.writer_id, key.chunk_id,
-          next_chunk_ptr - begin(), next_chunk_ptr - begin() + next_chunk.size,
-          will_remove);
+      TRACE_BUFFER_DLOG("  del index {%" PRIu32 ",%" PRIu32 ",%u} @ [%" PRIdPTR
+                        " - %" PRIdPTR "] %d",
+                        key.producer_id, key.writer_id, key.chunk_id,
+                        next_chunk_ptr - begin(),
+                        next_chunk_ptr - begin() + next_chunk.size,
+                        will_remove);
       PERFETTO_DCHECK(will_remove);
     } else {
       padding_bytes_cleared += next_chunk.size;
@@ -44949,8 +47977,8 @@ void TraceBuffer::AddPaddingRecord(size_t size) {
   PERFETTO_DCHECK(size >= sizeof(ChunkRecord) && size <= ChunkRecord::kMaxSize);
   ChunkRecord record(size);
   record.is_padding = 1;
-  TRACE_BUFFER_DLOG("AddPaddingRecord @ [%" PRIdPTR " - %" PRIdPTR "] %zu", wptr_ - begin(),
-                    uintptr_t(wptr_ - begin()) + size, size);
+  TRACE_BUFFER_DLOG("AddPaddingRecord @ [%" PRIdPTR " - %" PRIdPTR "] %zu",
+                    wptr_ - begin(), uintptr_t(wptr_ - begin()) + size, size);
   WriteChunkRecord(wptr_, record, nullptr, size - sizeof(ChunkRecord));
   stats_.set_padding_bytes_written(stats_.padding_bytes_written() + size);
   // |wptr_| is deliberately not advanced when writing a padding record.
@@ -44980,29 +48008,28 @@ bool TraceBuffer::TryPatchChunkContents(ProducerID producer_id,
   PERFETTO_DCHECK(chunk_begin >= begin());
   uint8_t* chunk_end = chunk_begin + chunk_record->size;
   PERFETTO_DCHECK(chunk_end <= end());
+  uint8_t* payload_begin = chunk_begin + sizeof(ChunkRecord);
+  const size_t payload_size = static_cast<size_t>(chunk_end - payload_begin);
 
   static_assert(Patch::kSize == SharedMemoryABI::kPacketHeaderSize,
                 "Patch::kSize out of sync with SharedMemoryABI");
 
   for (size_t i = 0; i < patches_size; i++) {
-    uint8_t* ptr =
-        chunk_begin + sizeof(ChunkRecord) + patches[i].offset_untrusted;
-    TRACE_BUFFER_DLOG("PatchChunk {%" PRIu32 ",%" PRIu32
-                      ",%u} size=%zu @ %zu with {%02x %02x %02x %02x} cur "
-                      "{%02x %02x %02x %02x}",
-                      producer_id, writer_id, chunk_id, chunk_end - chunk_begin,
-                      patches[i].offset_untrusted, patches[i].data[0],
-                      patches[i].data[1], patches[i].data[2],
-                      patches[i].data[3], ptr[0], ptr[1], ptr[2], ptr[3]);
-    if (ptr < chunk_begin + sizeof(ChunkRecord) ||
-        ptr > chunk_end - Patch::kSize) {
+    const size_t offset_untrusted = patches[i].offset_untrusted;
+    if (payload_size < Patch::kSize ||
+        offset_untrusted > payload_size - Patch::kSize) {
       // Either the IPC was so slow and in the meantime the writer managed to
       // wrap over |chunk_id| or the producer sent a malicious IPC.
       stats_.set_patches_failed(stats_.patches_failed() + 1);
       return false;
     }
-
-    memcpy(ptr, &patches[i].data[0], Patch::kSize);
+    TRACE_BUFFER_DLOG("PatchChunk {%" PRIu32 ",%" PRIu32
+                      ",%u} size=%zu @ %zu with {%02x %02x %02x %02x}",
+                      producer_id, writer_id, chunk_id, chunk_end - chunk_begin,
+                      offset_untrusted, patches[i].data[0], patches[i].data[1],
+                      patches[i].data[2], patches[i].data[3]);
+    uint8_t* dst = payload_begin + offset_untrusted;
+    memcpy(dst, &patches[i].data[0], Patch::kSize);
   }
   TRACE_BUFFER_DLOG("Chunk raw (after patch): %s",
                     base::HexDump(chunk_begin, chunk_record->size).c_str());
@@ -45275,7 +48302,7 @@ bool TraceBuffer::ReadNextTracePacket(
       chunk_meta->set_last_read_packet_skipped(true);
       previous_packet_dropped = true;
     }  // while(...)  [iterate over packet fragments for the current chunk].
-  }    // for(;;MoveNext()) [iterate over chunks].
+  }  // for(;;MoveNext()) [iterate over chunks].
 }
 
 TraceBuffer::ReadAheadResult TraceBuffer::ReadAhead(TracePacket* packet) {
@@ -45835,6 +48862,43 @@ class CircularQueue {
 }  // namespace perfetto
 
 #endif  // INCLUDE_PERFETTO_EXT_BASE_CIRCULAR_QUEUE_H_
+// gen_amalgamated begin header: src/tracing/service/dependencies.h
+/*
+ * Copyright (C) 2024 The Android Open Source Project
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *      http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+#ifndef SRC_TRACING_SERVICE_DEPENDENCIES_H_
+#define SRC_TRACING_SERVICE_DEPENDENCIES_H_
+
+#include <memory>
+
+// gen_amalgamated expanded: #include "src/tracing/service/clock.h"
+// gen_amalgamated expanded: #include "src/tracing/service/random.h"
+
+namespace perfetto::tracing_service {
+
+// Dependencies of TracingServiceImpl. Can point to real implementations or to
+// mocks in tests.
+struct Dependencies {
+  std::unique_ptr<Clock> clock;
+  std::unique_ptr<Random> random;
+};
+
+}  // namespace perfetto::tracing_service
+
+#endif  // SRC_TRACING_SERVICE_DEPENDENCIES_H_
 /*
  * Copyright (C) 2017 The Android Open Source Project
  *
@@ -45859,7 +48923,6 @@ class CircularQueue {
 #include <map>
 #include <memory>
 #include <optional>
-#include <random>
 #include <set>
 #include <utility>
 #include <vector>
@@ -45868,10 +48931,11 @@ class CircularQueue {
 // gen_amalgamated expanded: #include "perfetto/base/status.h"
 // gen_amalgamated expanded: #include "perfetto/base/time.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/circular_queue.h"
+// gen_amalgamated expanded: #include "perfetto/ext/base/clock_snapshots.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/periodic_task.h"
-// gen_amalgamated expanded: #include "perfetto/ext/base/string_view.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/uuid.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/weak_ptr.h"
+// gen_amalgamated expanded: #include "perfetto/ext/base/weak_runner.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/basic_types.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/client_identity.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/commit_data_request.h"
@@ -45885,16 +48949,15 @@ class CircularQueue {
 // gen_amalgamated expanded: #include "perfetto/tracing/core/trace_config.h"
 // gen_amalgamated expanded: #include "src/android_stats/perfetto_atoms.h"
 // gen_amalgamated expanded: #include "src/tracing/core/id_allocator.h"
+// gen_amalgamated expanded: #include "src/tracing/service/clock.h"
+// gen_amalgamated expanded: #include "src/tracing/service/dependencies.h"
+// gen_amalgamated expanded: #include "src/tracing/service/random.h"
 
 namespace protozero {
 class MessageFilter;
 }
 
 namespace perfetto {
-
-namespace base {
-class TaskRunner;
-}  // namespace base
 
 namespace protos {
 namespace gen {
@@ -45913,6 +48976,7 @@ class TracePacket;
 class TracingServiceImpl : public TracingService {
  private:
   struct DataSourceInstance;
+  struct TriggerInfo;
 
  public:
   static constexpr size_t kMaxShmSize = 32 * 1024 * 1024ul;
@@ -45990,21 +49054,19 @@ class TracingServiceImpl : public TracingService {
       return std::nullopt;
     }
 
+    bool IsAndroidProcessFrozen();
     uid_t uid() const { return client_identity_.uid(); }
     pid_t pid() const { return client_identity_.pid(); }
     const ClientIdentity& client_identity() const { return client_identity_; }
 
    private:
     friend class TracingServiceImpl;
-    friend class TracingServiceImplTest;
-    friend class TracingIntegrationTest;
     ProducerEndpointImpl(const ProducerEndpointImpl&) = delete;
     ProducerEndpointImpl& operator=(const ProducerEndpointImpl&) = delete;
 
     ProducerID const id_;
     ClientIdentity const client_identity_;
     TracingServiceImpl* const service_;
-    base::TaskRunner* const task_runner_;
     Producer* producer_;
     std::unique_ptr<SharedMemory> shared_memory_;
     size_t shared_buffer_page_size_kb_ = 0;
@@ -46036,7 +49098,7 @@ class TracingServiceImpl : public TracingService {
     std::unique_ptr<SharedMemoryArbiterImpl> inproc_shmem_arbiter_;
 
     PERFETTO_THREAD_CHECKER(thread_checker_)
-    base::WeakPtrFactory<ProducerEndpointImpl> weak_ptr_factory_;  // Keep last.
+    base::WeakRunner weak_runner_;
   };
 
   // The implementation behind the service endpoint exposed to each consumer.
@@ -46049,7 +49111,6 @@ class TracingServiceImpl : public TracingService {
     ~ConsumerEndpointImpl() override;
 
     void NotifyOnTracingDisabled(const std::string& error);
-    void NotifyCloneSnapshotTrigger(const std::string& trigger_name);
 
     // TracingService::ConsumerEndpoint implementation.
     void EnableTracing(const TraceConfig&, base::ScopedFile) override;
@@ -46067,7 +49128,7 @@ class TracingServiceImpl : public TracingService {
                            QueryServiceStateCallback) override;
     void QueryCapabilities(QueryCapabilitiesCallback) override;
     void SaveTraceForBugreport(SaveTraceForBugreportCallback) override;
-    void CloneSession(TracingSessionID, CloneSessionArgs) override;
+    void CloneSession(CloneSessionArgs) override;
 
     // Will queue a task to notify the consumer about the state change.
     void OnDataSourceInstanceStateChange(const ProducerEndpointImpl&,
@@ -46082,6 +49143,8 @@ class TracingServiceImpl : public TracingService {
     friend class TracingServiceImpl;
     ConsumerEndpointImpl(const ConsumerEndpointImpl&) = delete;
     ConsumerEndpointImpl& operator=(const ConsumerEndpointImpl&) = delete;
+
+    void NotifyCloneSnapshotTrigger(const TriggerInfo& trigger_name);
 
     // Returns a pointer to an ObservableEvents object that the caller can fill
     // and schedules a task to send the ObservableEvents to the consumer.
@@ -46111,22 +49174,27 @@ class TracingServiceImpl : public TracingService {
 
     struct SyncedClockSnapshots {
       SyncedClockSnapshots(SyncMode _sync_mode,
-                           ClockSnapshotVector _client_clocks,
-                           ClockSnapshotVector _host_clocks)
+                           base::ClockSnapshotVector _client_clocks,
+                           base::ClockSnapshotVector _host_clocks)
           : sync_mode(_sync_mode),
             client_clocks(std::move(_client_clocks)),
             host_clocks(std::move(_host_clocks)) {}
       SyncMode sync_mode;
-      ClockSnapshotVector client_clocks;
-      ClockSnapshotVector host_clocks;
+      base::ClockSnapshotVector client_clocks;
+      base::ClockSnapshotVector host_clocks;
     };
 
     explicit RelayEndpointImpl(RelayClientID relay_client_id,
                                TracingServiceImpl* service);
     ~RelayEndpointImpl() override;
+
+    void CacheSystemInfo(std::vector<uint8_t> serialized_system_info) override {
+      serialized_system_info_ = serialized_system_info;
+    }
+
     void SyncClocks(SyncMode sync_mode,
-                    ClockSnapshotVector client_clocks,
-                    ClockSnapshotVector host_clocks) override;
+                    base::ClockSnapshotVector client_clocks,
+                    base::ClockSnapshotVector host_clocks) override;
     void Disconnect() override;
 
     MachineID machine_id() const { return relay_client_id_.first; }
@@ -46135,12 +49203,17 @@ class TracingServiceImpl : public TracingService {
       return synced_clocks_;
     }
 
+    std::vector<uint8_t>& serialized_system_info() {
+      return serialized_system_info_;
+    }
+
    private:
     RelayEndpointImpl(const RelayEndpointImpl&) = delete;
     RelayEndpointImpl& operator=(const RelayEndpointImpl&) = delete;
 
     RelayClientID relay_client_id_;
     TracingServiceImpl* const service_;
+    std::vector<uint8_t> serialized_system_info_;
     base::CircularQueue<SyncedClockSnapshots> synced_clocks_;
 
     PERFETTO_THREAD_CHECKER(thread_checker_)
@@ -46148,6 +49221,7 @@ class TracingServiceImpl : public TracingService {
 
   explicit TracingServiceImpl(std::unique_ptr<SharedMemory::Factory>,
                               base::TaskRunner*,
+                              tracing_service::Dependencies,
                               InitOpts = {});
   ~TracingServiceImpl() override;
 
@@ -46190,9 +49264,7 @@ class TracingServiceImpl : public TracingService {
              FlushFlags);
   void FlushAndDisableTracing(TracingSessionID);
   base::Status FlushAndCloneSession(ConsumerEndpointImpl*,
-                                    TracingSessionID,
-                                    bool skip_filter,
-                                    bool for_bugreport);
+                                    ConsumerEndpoint::CloneSessionArgs);
 
   // Starts reading the internal tracing buffers from the tracing session `tsid`
   // and sends them to `*consumer` (which must be != nullptr).
@@ -46252,11 +49324,6 @@ class TracingServiceImpl : public TracingService {
   ProducerEndpointImpl* GetProducer(ProducerID) const;
 
  private:
-  friend class TracingServiceImplTest;
-  friend class TracingIntegrationTest;
-
-  static constexpr int64_t kOneDayInNs = 24ll * 60 * 60 * 1000 * 1000 * 1000;
-
   struct TriggerHistory {
     int64_t timestamp_ns;
     uint64_t name_hash;
@@ -46317,14 +49384,25 @@ class TracingServiceImpl : public TracingService {
 
   using PendingCloneID = uint64_t;
 
+  struct TriggerInfo {
+    uint64_t boot_time_ns = 0;
+    std::string trigger_name;
+    std::string producer_name;
+    uid_t producer_uid = 0;
+    uint64_t trigger_delay_ms = 0;
+  };
+
   struct PendingClone {
     size_t pending_flush_cnt = 0;
     // This vector might not be populated all at once. Some buffers might be
     // nullptr while flushing is not done.
     std::vector<std::unique_ptr<TraceBuffer>> buffers;
+    std::vector<int64_t> buffer_cloned_timestamps;
     bool flush_failed = false;
     base::WeakPtr<ConsumerEndpointImpl> weak_consumer;
     bool skip_trace_filter = false;
+    std::optional<TriggerInfo> clone_trigger;
+    int64_t clone_started_timestamp_ns = 0;
   };
 
   // Holds the state of a tracing session. A tracing session is uniquely bound
@@ -46346,13 +49424,6 @@ class TracingServiceImpl : public TracingService {
     TracingSession& operator=(TracingSession&&) = delete;
 
     size_t num_buffers() const { return buffers_index.size(); }
-
-    uint32_t delay_to_next_write_period_ms() const {
-      PERFETTO_DCHECK(write_period_ms > 0);
-      return write_period_ms -
-             static_cast<uint32_t>(base::GetWallTimeMs().count() %
-                                   write_period_ms);
-    }
 
     uint32_t flush_timeout_ms() {
       uint32_t timeout_ms = config.flush_timeout_ms();
@@ -46430,12 +49501,6 @@ class TracingServiceImpl : public TracingService {
     // were received at. This is used to insert 'fake' packets back to the
     // consumer so they can tell when some event happened. The order matches the
     // order they were received.
-    struct TriggerInfo {
-      uint64_t boot_time_ns;
-      std::string trigger_name;
-      std::string producer_name;
-      uid_t producer_uid;
-    };
     std::vector<TriggerInfo> received_triggers;
 
     // The trace config provided by the Consumer when calling
@@ -46510,7 +49575,7 @@ class TracingServiceImpl : public TracingService {
       uint32_t field_id;
 
       // Stores the max size of |timestamps|. Set to 1 by default (in
-      // the constructor) but can be overriden in TraceSession constructor
+      // the constructor) but can be overridden in TraceSession constructor
       // if a larger size is required.
       uint32_t max_size;
 
@@ -46532,7 +49597,11 @@ class TracingServiceImpl : public TracingService {
 
     std::vector<ArbitraryLifecycleEvent> last_flush_events;
 
-    using ClockSnapshotData = ClockSnapshotVector;
+    // If this is a cloned tracing session, the timestamp at which each buffer
+    // was cloned.
+    std::vector<int64_t> buffer_cloned_timestamps;
+
+    using ClockSnapshotData = base::ClockSnapshotVector;
 
     // Initial clock snapshot, captured at trace start time (when state goes to
     // TracingSession::STARTED). Emitted into the trace when the consumer first
@@ -46579,10 +49648,13 @@ class TracingServiceImpl : public TracingService {
     std::vector<uint64_t> filter_bytes_discarded_per_buffer;
 
     // A randomly generated trace identifier. Note that this does NOT always
-    // match the requested TraceConfig.trace_uuid_msb/lsb. Spcifically, it does
+    // match the requested TraceConfig.trace_uuid_msb/lsb. Specifically, it does
     // until a gap-less snapshot is requested. Each snapshot re-generates the
     // uuid to avoid emitting two different traces with the same uuid.
     base::Uuid trace_uuid;
+
+    // This is set when the clone operation was caused by a clone trigger.
+    std::optional<TriggerInfo> clone_trigger;
 
     // NOTE: when adding new fields here consider whether that state should be
     // copied over in DoCloneSession() or not. Ask yourself: is this a
@@ -46607,6 +49679,12 @@ class TracingServiceImpl : public TracingService {
   // session doesn't exists.
   TracingSession* GetTracingSession(TracingSessionID);
 
+  // Returns a pointer to the |tracing_sessions_| entry with
+  // |unique_session_name| in the config (or nullptr if the
+  // session doesn't exists). CLONED_READ_ONLY sessions are ignored.
+  TracingSession* GetTracingSessionByUniqueName(
+      const std::string& unique_session_name);
+
   // Returns a pointer to the tracing session that has the highest
   // TraceConfig.bugreport_score, if any, or nullptr.
   TracingSession* FindTracingSessionWithMaxBugreportScore();
@@ -46619,6 +49697,7 @@ class TracingServiceImpl : public TracingService {
   // shared memory and trace buffers.
   void UpdateMemoryGuardrail();
 
+  uint32_t DelayToNextWritePeriodMs(const TracingSession&);
   void StartDataSourceInstance(ProducerEndpointImpl*,
                                TracingSession*,
                                DataSourceInstance*);
@@ -46629,9 +49708,15 @@ class TracingServiceImpl : public TracingService {
   void PeriodicSnapshotTask(TracingSessionID);
   void MaybeSnapshotClocksIntoRingBuffer(TracingSession*);
   bool SnapshotClocks(TracingSession::ClockSnapshotData*);
-  void SnapshotLifecyleEvent(TracingSession*,
-                             uint32_t field_id,
-                             bool snapshot_clocks);
+  // Records a lifecycle event of type |field_id| with the current timestamp.
+  void SnapshotLifecycleEvent(TracingSession*,
+                              uint32_t field_id,
+                              bool snapshot_clocks);
+  // Deletes all the lifecycle events of type |field_id| and records just one,
+  // that happened at time |boot_time_ns|.
+  void SetSingleLifecycleEvent(TracingSession*,
+                               uint32_t field_id,
+                               int64_t boot_time_ns);
   void EmitClockSnapshot(TracingSession*,
                          TracingSession::ClockSnapshotData,
                          std::vector<TracePacket>*);
@@ -46642,6 +49727,8 @@ class TracingServiceImpl : public TracingService {
   void EmitUuid(TracingSession*, std::vector<TracePacket>*);
   void MaybeEmitTraceConfig(TracingSession*, std::vector<TracePacket>*);
   void EmitSystemInfo(std::vector<TracePacket>*);
+  void MaybeEmitRemoteSystemInfo(std::vector<TracePacket>*);
+  void MaybeEmitCloneTrigger(TracingSession*, std::vector<TracePacket>*);
   void MaybeEmitReceivedTriggers(TracingSession*, std::vector<TracePacket>*);
   void MaybeEmitRemoteClockSync(TracingSession*, std::vector<TracePacket>*);
   void MaybeNotifyAllDataSourcesStarted(TracingSession*);
@@ -46665,15 +49752,18 @@ class TracingServiceImpl : public TracingService {
   std::map<ProducerID, std::vector<DataSourceInstanceID>>
   GetFlushableDataSourceInstancesForBuffers(TracingSession*,
                                             const std::set<BufferID>&);
-  bool DoCloneBuffers(TracingSession*,
+  bool DoCloneBuffers(const TracingSession&,
                       const std::set<BufferID>&,
-                      std::vector<std::unique_ptr<TraceBuffer>>*);
+                      PendingClone*);
   base::Status FinishCloneSession(ConsumerEndpointImpl*,
                                   TracingSessionID,
                                   std::vector<std::unique_ptr<TraceBuffer>>,
+                                  std::vector<int64_t> buf_cloned_timestamps,
                                   bool skip_filter,
                                   bool final_flush_outcome,
-                                  base::Uuid*);
+                                  std::optional<TriggerInfo> clone_trigger,
+                                  base::Uuid*,
+                                  int64_t clone_started_timestamp_ns);
   void OnFlushDoneForClone(TracingSessionID src_tsid,
                            PendingCloneID clone_id,
                            const std::set<BufferID>& buf_ids,
@@ -46719,10 +49809,10 @@ class TracingServiceImpl : public TracingService {
                             const std::string& trigger_name);
   size_t PurgeExpiredAndCountTriggerInWindow(int64_t now_ns,
                                              uint64_t trigger_name_hash);
-  static void StopOnDurationMsExpiry(base::WeakPtr<TracingServiceImpl>,
-                                     TracingSessionID);
+  void StopOnDurationMsExpiry(TracingSessionID);
 
-  base::TaskRunner* const task_runner_;
+  std::unique_ptr<tracing_service::Clock> clock_;
+  std::unique_ptr<tracing_service::Random> random_;
   const InitOpts init_opts_;
   std::unique_ptr<SharedMemory::Factory> shm_factory_;
   ProducerID last_producer_id_ = 0;
@@ -46737,24 +49827,18 @@ class TracingServiceImpl : public TracingService {
 
   std::multimap<std::string /*name*/, RegisteredDataSource> data_sources_;
   std::map<ProducerID, ProducerEndpointImpl*> producers_;
-  std::set<ConsumerEndpointImpl*> consumers_;
   std::map<RelayClientID, RelayEndpointImpl*> relay_clients_;
   std::map<TracingSessionID, TracingSession> tracing_sessions_;
   std::map<BufferID, std::unique_ptr<TraceBuffer>> buffers_;
   std::map<std::string, int64_t> session_to_last_trace_s_;
 
   // Contains timestamps of triggers.
-  // The queue is sorted by timestamp and invocations older than
-  // |trigger_window_ns_| are purged when a trigger happens.
+  // The queue is sorted by timestamp and invocations older than 24 hours are
+  // purged when a trigger happens.
   base::CircularQueue<TriggerHistory> trigger_history_;
 
   bool smb_scraping_enabled_ = false;
   bool lockdown_mode_ = false;
-  int64_t trigger_window_ns_ = kOneDayInNs;  // Overridable for testing.
-
-  std::minstd_rand trigger_probability_rand_;
-  std::uniform_real_distribution<> trigger_probability_dist_;
-  double trigger_rnd_override_for_testing_ = 0;  // Overridable for testing.
 
   uint8_t sync_marker_packet_[32];  // Lazily initialized.
   size_t sync_marker_packet_size_ = 0;
@@ -46765,8 +49849,7 @@ class TracingServiceImpl : public TracingService {
 
   PERFETTO_THREAD_CHECKER(thread_checker_)
 
-  base::WeakPtrFactory<TracingServiceImpl>
-      weak_ptr_factory_;  // Keep at the end.
+  base::WeakRunner weak_runner_;
 };
 
 }  // namespace perfetto
@@ -46822,16 +49905,13 @@ class TracingServiceImpl : public TracingService {
 #include <limits.h>
 #include <string.h>
 
+#include <algorithm>
 #include <cinttypes>
 #include <cstdint>
 #include <limits>
 #include <optional>
-#include <regex>
 #include <string>
 #include <unordered_set>
-// gen_amalgamated expanded: #include "perfetto/base/time.h"
-// gen_amalgamated expanded: #include "perfetto/ext/tracing/core/client_identity.h"
-// gen_amalgamated expanded: #include "perfetto/tracing/core/clock_snapshots.h"
 
 #if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) && \
     !PERFETTO_BUILDFLAG(PERFETTO_OS_NACL)
@@ -46853,12 +49933,11 @@ class TracingServiceImpl : public TracingService {
 #include <sys/stat.h>
 #endif
 
-#include <algorithm>
-
 // gen_amalgamated expanded: #include "perfetto/base/build_config.h"
 // gen_amalgamated expanded: #include "perfetto/base/status.h"
 // gen_amalgamated expanded: #include "perfetto/base/task_runner.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/android_utils.h"
+// gen_amalgamated expanded: #include "perfetto/ext/base/clock_snapshots.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/file_utils.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/metatrace.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/string_utils.h"
@@ -46869,6 +49948,7 @@ class TracingServiceImpl : public TracingService {
 // gen_amalgamated expanded: #include "perfetto/ext/base/version.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/watchdog.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/basic_types.h"
+// gen_amalgamated expanded: #include "perfetto/ext/tracing/core/client_identity.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/consumer.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/observable_events.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/producer.h"
@@ -46890,12 +49970,12 @@ class TracingServiceImpl : public TracingService {
 
 // gen_amalgamated expanded: #include "protos/perfetto/common/builtin_clock.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/common/builtin_clock.pbzero.h"
+// gen_amalgamated expanded: #include "protos/perfetto/common/system_info.pbzero.h"
 // gen_amalgamated expanded: #include "protos/perfetto/common/trace_stats.pbzero.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/trace_config.pbzero.h"
 // gen_amalgamated expanded: #include "protos/perfetto/trace/clock_snapshot.pbzero.h"
 // gen_amalgamated expanded: #include "protos/perfetto/trace/perfetto/tracing_service_event.pbzero.h"
 // gen_amalgamated expanded: #include "protos/perfetto/trace/remote_clock_sync.pbzero.h"
-// gen_amalgamated expanded: #include "protos/perfetto/trace/system_info.pbzero.h"
 // gen_amalgamated expanded: #include "protos/perfetto/trace/trace_packet.pbzero.h"
 // gen_amalgamated expanded: #include "protos/perfetto/trace/trace_uuid.pbzero.h"
 // gen_amalgamated expanded: #include "protos/perfetto/trace/trigger.pbzero.h"
@@ -46932,6 +50012,8 @@ constexpr uint32_t kGuardrailsMaxTracingDurationMillis = 24 * kMillisPerHour;
 
 constexpr size_t kMaxLifecycleEventsListedDataSources = 32;
 
+constexpr uint32_t kTracePacketSystemInfoFieldId = 45;
+
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) || PERFETTO_BUILDFLAG(PERFETTO_OS_NACL)
 struct iovec {
   void* iov_base;  // Address
@@ -46954,8 +50036,9 @@ ssize_t writev(int fd, const struct iovec* iov, int iovcnt) {
 
 #define IOV_MAX 1024  // Linux compatible limit.
 
-#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) ||
-        // PERFETTO_BUILDFLAG(PERFETTO_OS_NACL)
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+#define IOV_MAX 1024  // Linux compatible limit.
+#endif
 
 // Partially encodes a CommitDataRequest in an int32 for the purposes of
 // metatracing. Note that it encodes only the bottom 10 bits of the producer id
@@ -47139,23 +50222,27 @@ std::unique_ptr<TracingService> TracingService::CreateInstance(
     std::unique_ptr<SharedMemory::Factory> shm_factory,
     base::TaskRunner* task_runner,
     InitOpts init_opts) {
-  return std::unique_ptr<TracingService>(
-      new TracingServiceImpl(std::move(shm_factory), task_runner, init_opts));
+  tracing_service::Dependencies deps;
+  deps.clock = std::make_unique<tracing_service::ClockImpl>();
+  uint32_t seed = static_cast<uint32_t>(deps.clock->GetWallTimeMs().count());
+  deps.random = std::make_unique<tracing_service::RandomImpl>(seed);
+  return std::unique_ptr<TracingService>(new TracingServiceImpl(
+      std::move(shm_factory), task_runner, std::move(deps), init_opts));
 }
 
 TracingServiceImpl::TracingServiceImpl(
     std::unique_ptr<SharedMemory::Factory> shm_factory,
     base::TaskRunner* task_runner,
+    tracing_service::Dependencies deps,
     InitOpts init_opts)
-    : task_runner_(task_runner),
+    : clock_(std::move(deps.clock)),
+      random_(std::move(deps.random)),
       init_opts_(init_opts),
       shm_factory_(std::move(shm_factory)),
       uid_(base::GetCurrentUserId()),
       buffer_ids_(kMaxTraceBufferID),
-      trigger_probability_rand_(
-          static_cast<uint32_t>(base::GetWallTimeNs().count())),
-      weak_ptr_factory_(this) {
-  PERFETTO_DCHECK(task_runner_);
+      weak_runner_(task_runner) {
+  PERFETTO_DCHECK(task_runner);
 }
 
 TracingServiceImpl::~TracingServiceImpl() {
@@ -47201,8 +50288,8 @@ TracingServiceImpl::ConnectProducer(Producer* producer,
   }
 
   std::unique_ptr<ProducerEndpointImpl> endpoint(new ProducerEndpointImpl(
-      id, client_identity, this, task_runner_, producer, producer_name,
-      sdk_version, in_process, smb_scraping_enabled));
+      id, client_identity, this, weak_runner_.task_runner(), producer,
+      producer_name, sdk_version, in_process, smb_scraping_enabled));
   auto it_and_inserted = producers_.emplace(id, endpoint.get());
   PERFETTO_DCHECK(it_and_inserted.second);
   endpoint->shmem_size_hint_bytes_ = shared_memory_size_hint_bytes;
@@ -47210,11 +50297,8 @@ TracingServiceImpl::ConnectProducer(Producer* producer,
 
   // Producer::OnConnect() should run before Producer::OnTracingSetup(). The
   // latter may be posted by SetupSharedMemory() below, so post OnConnect() now.
-  auto weak_ptr = endpoint->weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask([weak_ptr] {
-    if (weak_ptr)
-      weak_ptr->producer_->OnConnect();
-  });
+  endpoint->weak_runner_.PostTask(
+      [endpoint = endpoint.get()] { endpoint->producer_->OnConnect(); });
 
   if (shm) {
     // The producer supplied an SMB. This is used only by Chrome; in the most
@@ -47284,14 +50368,12 @@ TracingServiceImpl::ConnectConsumer(Consumer* consumer, uid_t uid) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   PERFETTO_DLOG("Consumer %p connected from UID %" PRIu64,
                 reinterpret_cast<void*>(consumer), static_cast<uint64_t>(uid));
-  std::unique_ptr<ConsumerEndpointImpl> endpoint(
-      new ConsumerEndpointImpl(this, task_runner_, consumer, uid));
-  auto it_and_inserted = consumers_.emplace(endpoint.get());
-  PERFETTO_DCHECK(it_and_inserted.second);
+  std::unique_ptr<ConsumerEndpointImpl> endpoint(new ConsumerEndpointImpl(
+      this, weak_runner_.task_runner(), consumer, uid));
   // Consumer might go away before we're able to send the connect notification,
   // if that is the case just bail out.
   auto weak_ptr = endpoint->weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask([weak_ptr] {
+  weak_runner_.task_runner()->PostTask([weak_ptr = std::move(weak_ptr)] {
     if (weak_ptr)
       weak_ptr->consumer_->OnConnect();
   });
@@ -47301,11 +50383,9 @@ TracingServiceImpl::ConnectConsumer(Consumer* consumer, uid_t uid) {
 void TracingServiceImpl::DisconnectConsumer(ConsumerEndpointImpl* consumer) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   PERFETTO_DLOG("Consumer %p disconnected", reinterpret_cast<void*>(consumer));
-  PERFETTO_DCHECK(consumers_.count(consumer));
 
   if (consumer->tracing_session_id_)
     FreeBuffers(consumer->tracing_session_id_);  // Will also DisableTracing().
-  consumers_.erase(consumer);
 
   // At this point no more pointers to |consumer| should be around.
   PERFETTO_DCHECK(!std::any_of(
@@ -47319,7 +50399,6 @@ bool TracingServiceImpl::DetachConsumer(ConsumerEndpointImpl* consumer,
                                         const std::string& key) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   PERFETTO_DLOG("Consumer %p detached", reinterpret_cast<void*>(consumer));
-  PERFETTO_DCHECK(consumers_.count(consumer));
 
   TracingSessionID tsid = consumer->tracing_session_id_;
   TracingSession* tracing_session;
@@ -47362,7 +50441,6 @@ bool TracingServiceImpl::AttachConsumer(ConsumerEndpointImpl* consumer,
   PERFETTO_DCHECK_THREAD(thread_checker_);
   PERFETTO_DLOG("Consumer %p attaching to session %s",
                 reinterpret_cast<void*>(consumer), key.c_str());
-  PERFETTO_DCHECK(consumers_.count(consumer));
 
   if (consumer->tracing_session_id_) {
     PERFETTO_ELOG(
@@ -47638,7 +50716,7 @@ base::Status TracingServiceImpl::EnableTracing(ConsumerEndpointImpl* consumer,
   if (cfg.enable_extra_guardrails()) {
     // unique_session_name can be empty
     const std::string& name = cfg.unique_session_name();
-    int64_t now_s = base::GetBootTimeS().count();
+    int64_t now_s = clock_->GetBootTimeS().count();
 
     // Remove any entries where the time limit has passed so this map doesn't
     // grow indefinitely:
@@ -47746,7 +50824,8 @@ base::Status TracingServiceImpl::EnableTracing(ConsumerEndpointImpl* consumer,
   TracingSession* tracing_session =
       &tracing_sessions_
            .emplace(std::piecewise_construct, std::forward_as_tuple(tsid),
-                    std::forward_as_tuple(tsid, consumer, cfg, task_runner_))
+                    std::forward_as_tuple(tsid, consumer, cfg,
+                                          weak_runner_.task_runner()))
            .first->second;
 
   tracing_session->trace_uuid = uuid;
@@ -47885,7 +50964,6 @@ base::Status TracingServiceImpl::EnableTracing(ConsumerEndpointImpl* consumer,
   }
 
   bool has_start_trigger = false;
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
   switch (GetTriggerMode(cfg)) {
     case TraceConfig::TriggerConfig::UNSPECIFIED:
       // no triggers are specified so this isn't a trace that is using triggers.
@@ -47895,11 +50973,8 @@ base::Status TracingServiceImpl::EnableTracing(ConsumerEndpointImpl* consumer,
       // For traces which use START_TRACE triggers we need to ensure that the
       // tracing session will be cleaned up when it times out.
       has_start_trigger = true;
-      task_runner_->PostDelayedTask(
-          [weak_this, tsid]() {
-            if (weak_this)
-              weak_this->OnStartTriggersTimeout(tsid);
-          },
+      weak_runner_.PostDelayedTask(
+          [tsid, this]() { OnStartTriggersTimeout(tsid); },
           cfg.trigger_config().trigger_timeout_ms());
       break;
     case TraceConfig::TriggerConfig::STOP_TRACING:
@@ -47921,8 +50996,8 @@ base::Status TracingServiceImpl::EnableTracing(ConsumerEndpointImpl* consumer,
   tracing_session->state = TracingSession::CONFIGURED;
   PERFETTO_LOG(
       "Configured tracing session %" PRIu64
-      ", #sources:%zu, duration:%d ms%s, #buffers:%d, total "
-      "buffer size:%zu KB, total sessions:%zu, uid:%d session name: \"%s\"",
+      ", #sources:%zu, duration:%u ms%s, #buffers:%d, total "
+      "buffer size:%zu KB, total sessions:%zu, uid:%u session name: \"%s\"",
       tsid, cfg.data_sources().size(), tracing_session->config.duration_ms(),
       tracing_session->config.prefer_suspend_clock_for_duration()
           ? " (suspend_clock)"
@@ -48057,10 +51132,17 @@ void TracingServiceImpl::ChangeTraceConfig(ConsumerEndpointImpl* consumer,
   }
 }
 
+uint32_t TracingServiceImpl::DelayToNextWritePeriodMs(
+    const TracingSession& session) {
+  PERFETTO_DCHECK(session.write_period_ms > 0);
+  return session.write_period_ms -
+         static_cast<uint32_t>(clock_->GetWallTimeMs().count() %
+                               session.write_period_ms);
+}
+
 void TracingServiceImpl::StartTracing(TracingSessionID tsid) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
 
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
   TracingSession* tracing_session = GetTracingSession(tsid);
   if (!tracing_session) {
     PERFETTO_ELOG("StartTracing() failed, invalid session ID %" PRIu64, tsid);
@@ -48090,7 +51172,7 @@ void TracingServiceImpl::StartTracing(TracingSessionID tsid) {
   }
 
   // We don't snapshot the clocks here because we just did this above.
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       tracing_session,
       protos::pbzero::TracingServiceEvent::kTracingStartedFieldNumber,
       false /* snapshot_clocks */);
@@ -48112,10 +51194,7 @@ void TracingServiceImpl::StartTracing(TracingSessionID tsid) {
   snapshot_task_args.use_suspend_aware_timer =
       tracing_session->config.builtin_data_sources()
           .prefer_suspend_clock_for_snapshot();
-  snapshot_task_args.task = [weak_this, tsid] {
-    if (weak_this)
-      weak_this->PeriodicSnapshotTask(tsid);
-  };
+  snapshot_task_args.task = [this, tsid] { PeriodicSnapshotTask(tsid); };
   snapshot_task_args.period_ms =
       tracing_session->config.builtin_data_sources().snapshot_interval_ms();
   if (!snapshot_task_args.period_ms)
@@ -48126,7 +51205,7 @@ void TracingServiceImpl::StartTracing(TracingSessionID tsid) {
   const uint32_t trace_duration_ms = tracing_session->config.duration_ms();
   if (trace_duration_ms > 0) {
     auto stop_task =
-        std::bind(&TracingServiceImpl::StopOnDurationMsExpiry, weak_this, tsid);
+        std::bind(&TracingServiceImpl::StopOnDurationMsExpiry, this, tsid);
     if (tracing_session->config.prefer_suspend_clock_for_duration()) {
       base::PeriodicTask::Args stop_args;
       stop_args.use_suspend_aware_timer = true;
@@ -48135,18 +51214,14 @@ void TracingServiceImpl::StartTracing(TracingSessionID tsid) {
       stop_args.task = std::move(stop_task);
       tracing_session->timed_stop_task.Start(stop_args);
     } else {
-      task_runner_->PostDelayedTask(std::move(stop_task), trace_duration_ms);
+      weak_runner_.PostDelayedTask(std::move(stop_task), trace_duration_ms);
     }
   }  // if (trace_duration_ms > 0).
 
   // Start the periodic drain tasks if we should to save the trace into a file.
   if (tracing_session->config.write_into_file()) {
-    task_runner_->PostDelayedTask(
-        [weak_this, tsid] {
-          if (weak_this)
-            weak_this->ReadBuffersIntoFile(tsid);
-        },
-        tracing_session->delay_to_next_write_period_ms());
+    weak_runner_.PostDelayedTask([this, tsid] { ReadBuffersIntoFile(tsid); },
+                                 DelayToNextWritePeriodMs(*tracing_session));
   }
 
   // Start the periodic flush tasks if the config specified a flush period.
@@ -48173,24 +51248,14 @@ void TracingServiceImpl::StartTracing(TracingSessionID tsid) {
   // `did_notify_all_data_source_started` is only set if a consumer is
   // connected.
   if (tracing_session->consumer_maybe_null) {
-    task_runner_->PostDelayedTask(
-        [weak_this, tsid] {
-          if (weak_this)
-            weak_this->OnAllDataSourceStartedTimeout(tsid);
-        },
+    weak_runner_.PostDelayedTask(
+        [this, tsid] { OnAllDataSourceStartedTimeout(tsid); },
         kAllDataSourceStartedTimeout);
   }
 }
 
-// static
-void TracingServiceImpl::StopOnDurationMsExpiry(
-    base::WeakPtr<TracingServiceImpl> weak_this,
-    TracingSessionID tsid) {
-  // Skip entirely the flush if the trace session doesn't exist anymore.
-  // This is to prevent misleading error messages to be logged.
-  if (!weak_this)
-    return;
-  auto* tracing_session_ptr = weak_this->GetTracingSession(tsid);
+void TracingServiceImpl::StopOnDurationMsExpiry(TracingSessionID tsid) {
+  auto* tracing_session_ptr = GetTracingSession(tsid);
   if (!tracing_session_ptr)
     return;
   // If this trace was using STOP_TRACING triggers and we've seen
@@ -48202,7 +51267,7 @@ void TracingServiceImpl::StopOnDurationMsExpiry(
     return;
   // In all other cases (START_TRACING or no triggers) we flush
   // after |trace_duration_ms| unconditionally.
-  weak_this->FlushAndDisableTracing(tsid);
+  FlushAndDisableTracing(tsid);
 }
 
 void TracingServiceImpl::StartDataSourceInstance(
@@ -48210,7 +51275,19 @@ void TracingServiceImpl::StartDataSourceInstance(
     TracingSession* tracing_session,
     TracingServiceImpl::DataSourceInstance* instance) {
   PERFETTO_DCHECK(instance->state == DataSourceInstance::CONFIGURED);
-  if (instance->will_notify_on_start) {
+
+  bool start_immediately = !instance->will_notify_on_start;
+
+  if (producer->IsAndroidProcessFrozen()) {
+    PERFETTO_DLOG(
+        "skipping waiting of data source \"%s\" on producer \"%s\" (pid=%u) "
+        "because it is frozen",
+        instance->data_source_name.c_str(), producer->name_.c_str(),
+        producer->pid());
+    start_immediately = true;
+  }
+
+  if (!start_immediately) {
     instance->state = DataSourceInstance::STARTING;
   } else {
     instance->state = DataSourceInstance::STARTED;
@@ -48303,13 +51380,8 @@ void TracingServiceImpl::DisableTracing(TracingSessionID tsid,
     return DisableTracingNotifyConsumerAndFlushFile(tracing_session);
 
   tracing_session->state = TracingSession::DISABLING_WAITING_STOP_ACKS;
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostDelayedTask(
-      [weak_this, tsid] {
-        if (weak_this)
-          weak_this->OnDisableTracingTimeout(tsid);
-      },
-      tracing_session->data_source_stop_timeout_ms());
+  weak_runner_.PostDelayedTask([this, tsid] { OnDisableTracingTimeout(tsid); },
+                               tracing_session->data_source_stop_timeout_ms());
 
   // Deliberately NOT removing the session from |tracing_session_|, it's still
   // needed to call ReadBuffers(). FreeBuffers() will erase() the session.
@@ -48364,7 +51436,7 @@ void TracingServiceImpl::OnAllDataSourceStartedTimeout(TracingSessionID tsid) {
     return;
   }
 
-  int64_t timestamp = base::GetBootTimeNs().count();
+  int64_t timestamp = clock_->GetBootTimeNs().count();
 
   protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
   packet->set_timestamp(static_cast<uint64_t>(timestamp));
@@ -48420,7 +51492,7 @@ void TracingServiceImpl::MaybeNotifyAllDataSourcesStarted(
 
   PERFETTO_DLOG("All data sources started");
 
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       tracing_session,
       protos::pbzero::TracingServiceEvent::kAllDataSourcesStartedFieldNumber,
       true /* snapshot_clocks */);
@@ -48474,10 +51546,13 @@ void TracingServiceImpl::ActivateTriggers(
   auto* producer = GetProducer(producer_id);
   PERFETTO_DCHECK(producer);
 
-  int64_t now_ns = base::GetBootTimeNs().count();
+  int64_t now_ns = clock_->GetBootTimeNs().count();
   for (const auto& trigger_name : triggers) {
     PERFETTO_DLOG("Received ActivateTriggers request for \"%s\"",
                   trigger_name.c_str());
+    android_stats::MaybeLogTriggerEvent(PerfettoTriggerAtom::kTracedTrigger,
+                                        trigger_name);
+
     base::Hasher hash;
     hash.Update(trigger_name.c_str(), trigger_name.size());
     std::string triggered_session_name;
@@ -48517,10 +51592,7 @@ void TracingServiceImpl::ActivateTriggers(
 
       // Use a random number between 0 and 1 to check if we should allow this
       // trigger through or not.
-      double trigger_rnd =
-          trigger_rnd_override_for_testing_ > 0
-              ? trigger_rnd_override_for_testing_
-              : trigger_probability_dist_(trigger_probability_rand_);
+      double trigger_rnd = random_->GetValue();
       PERFETTO_DCHECK(trigger_rnd >= 0 && trigger_rnd < 1);
       if (trigger_rnd < iter->skip_probability()) {
         MaybeLogTriggerEvent(tracing_session.config,
@@ -48546,10 +51618,11 @@ void TracingServiceImpl::ActivateTriggers(
 
       const bool triggers_already_received =
           !tracing_session.received_triggers.empty();
-      tracing_session.received_triggers.push_back(
-          {static_cast<uint64_t>(now_ns), iter->name(), producer->name_,
-           producer->uid()});
-      auto weak_this = weak_ptr_factory_.GetWeakPtr();
+      const TriggerInfo trigger = {static_cast<uint64_t>(now_ns), iter->name(),
+                                   producer->name_, producer->uid(),
+                                   iter->stop_delay_ms()};
+      MaybeSnapshotClocksIntoRingBuffer(&tracing_session);
+      tracing_session.received_triggers.push_back(trigger);
       switch (trigger_mode) {
         case TraceConfig::TriggerConfig::START_TRACING:
           // If the session has already been triggered and moved past
@@ -48585,13 +51658,13 @@ void TracingServiceImpl::ActivateTriggers(
 
           // Now that we've seen a trigger we need to stop, flush, and disable
           // this session after the configured |stop_delay_ms|.
-          task_runner_->PostDelayedTask(
-              [weak_this, tsid] {
+          weak_runner_.PostDelayedTask(
+              [this, tsid] {
                 // Skip entirely the flush if the trace session doesn't exist
                 // anymore. This is to prevent misleading error messages to be
                 // logged.
-                if (weak_this && weak_this->GetTracingSession(tsid))
-                  weak_this->FlushAndDisableTracing(tsid);
+                if (GetTracingSession(tsid))
+                  FlushAndDisableTracing(tsid);
               },
               // If this trigger is zero this will immediately executable and
               // will happen shortly.
@@ -48603,15 +51676,12 @@ void TracingServiceImpl::ActivateTriggers(
           MaybeLogUploadEvent(
               tracing_session.config, tracing_session.trace_uuid,
               PerfettoStatsdAtom::kTracedTriggerCloneSnapshot, iter->name());
-          task_runner_->PostDelayedTask(
-              [weak_this, tsid, trigger_name = iter->name()] {
-                if (!weak_this)
-                  return;
-                auto* tsess = weak_this->GetTracingSession(tsid);
+          weak_runner_.PostDelayedTask(
+              [this, tsid, trigger] {
+                auto* tsess = GetTracingSession(tsid);
                 if (!tsess || !tsess->consumer_maybe_null)
                   return;
-                tsess->consumer_maybe_null->NotifyCloneSnapshotTrigger(
-                    trigger_name);
+                tsess->consumer_maybe_null->NotifyCloneSnapshotTrigger(trigger);
               },
               iter->stop_delay_ms());
           break;
@@ -48676,7 +51746,7 @@ void TracingServiceImpl::DisableTracingNotifyConsumerAndFlushFile(
   for (auto& producer_id_and_producer : producers_)
     ScrapeSharedMemoryBuffers(tracing_session, producer_id_and_producer.second);
 
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       tracing_session,
       protos::pbzero::TracingServiceEvent::kTracingDisabledFieldNumber,
       true /* snapshot_clocks */);
@@ -48704,7 +51774,7 @@ void TracingServiceImpl::Flush(TracingSessionID tsid,
     return;
   }
 
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       tracing_session,
       protos::pbzero::TracingServiceEvent::kFlushStartedFieldNumber,
       false /* snapshot_clocks */);
@@ -48761,7 +51831,14 @@ void TracingServiceImpl::FlushDataSourceInstances(
   for (const auto& [producer_id, data_sources] : data_source_instances) {
     ProducerEndpointImpl* producer = GetProducer(producer_id);
     producer->Flush(flush_request_id, data_sources, flush_flags);
-    pending_flush.producers.insert(producer_id);
+    if (!producer->IsAndroidProcessFrozen()) {
+      pending_flush.producers.insert(producer_id);
+    } else {
+      PERFETTO_DLOG(
+          "skipping waiting flush for on producer \"%s\" (pid=%" PRIu32
+          ") because it is frozen",
+          producer->name_.c_str(), static_cast<uint32_t>(producer->pid()));
+    }
   }
 
   // If there are no producers to flush (realistically this happens only in
@@ -48769,11 +51846,9 @@ void TracingServiceImpl::FlushDataSourceInstances(
   if (data_source_instances.empty())
     timeout_ms = 0;
 
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostDelayedTask(
-      [weak_this, tsid = tracing_session->id, flush_request_id, flush_flags] {
-        if (weak_this)
-          weak_this->OnFlushTimeout(tsid, flush_request_id, flush_flags);
+  weak_runner_.PostDelayedTask(
+      [this, tsid = tracing_session->id, flush_request_id, flush_flags] {
+        OnFlushTimeout(tsid, flush_request_id, flush_flags);
       },
       timeout_ms);
 }
@@ -48789,14 +51864,11 @@ void TracingServiceImpl::NotifyFlushDoneForProducer(
       PendingFlush& pending_flush = it->second;
       pending_flush.producers.erase(producer_id);
       if (pending_flush.producers.empty()) {
-        auto weak_this = weak_ptr_factory_.GetWeakPtr();
         TracingSessionID tsid = kv.first;
         auto callback = std::move(pending_flush.callback);
-        task_runner_->PostTask([weak_this, tsid, callback]() {
-          if (weak_this) {
-            weak_this->CompleteFlush(tsid, std::move(callback),
-                                     /*success=*/true);
-          }
+        weak_runner_.PostTask([this, tsid, callback = std::move(callback)]() {
+          CompleteFlush(tsid, std::move(callback),
+                        /*success=*/true);
         });
         it = pending_flushes.erase(it);
       } else {
@@ -48826,7 +51898,7 @@ void TracingServiceImpl::OnFlushTimeout(TracingSessionID tsid,
   if ((flush_flags.reason() == FlushFlags::Reason::kTraceClone ||
        flush_flags.reason() == FlushFlags::Reason::kTraceStop) &&
       !success) {
-    int64_t timestamp = base::GetBootTimeNs().count();
+    int64_t timestamp = clock_->GetBootTimeNs().count();
 
     protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
     packet->set_timestamp(static_cast<uint64_t>(timestamp));
@@ -48879,7 +51951,7 @@ void TracingServiceImpl::CompleteFlush(TracingSessionID tsid,
   for (auto& producer_id_and_producer : producers_) {
     ScrapeSharedMemoryBuffers(tracing_session, producer_id_and_producer.second);
   }
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       tracing_session,
       protos::pbzero::TracingServiceEvent::kAllDataSourcesFlushedFieldNumber,
       true /* snapshot_clocks */);
@@ -48917,18 +51989,18 @@ void TracingServiceImpl::ScrapeSharedMemoryBuffers(
 
   // Find and copy any uncommitted chunks from the SMB.
   //
-  // In nominal conditions, the page layout of the used SMB pages should never
-  // change because the service is the only one who is supposed to modify used
-  // pages (to make them free again).
+  // In nominal conditions, the page header bitmap of the used SMB pages should
+  // never change because the service is the only one who is supposed to modify
+  // used pages (to make them free again).
   //
   // However, the code here needs to deal with the case of a malicious producer
   // altering the SMB in unpredictable ways. Thankfully the SMB size is
   // immutable, so a chunk will always point to some valid memory, even if the
   // producer alters the intended layout and chunk header concurrently.
-  // Ultimately a malicious producer altering the SMB's chunk layout while we
-  // are iterating in this function is not any different from the case of a
-  // malicious producer asking to commit a chunk made of random data, which is
-  // something this class has to deal with regardless.
+  // Ultimately a malicious producer altering the SMB's chunk header bitamp
+  // while we are iterating in this function is not any different from the case
+  // of a malicious producer asking to commit a chunk made of random data,
+  // which is something this class has to deal with regardless.
   //
   // The only legitimate mutations that can happen from sane producers,
   // concurrently to this function, are:
@@ -48940,9 +52012,10 @@ void TracingServiceImpl::ScrapeSharedMemoryBuffers(
   // num_pages() is immutable after the SMB is initialized and cannot be changed
   // even by a producer even if malicious.
   for (size_t page_idx = 0; page_idx < abi->num_pages(); page_idx++) {
-    uint32_t layout = abi->GetPageLayout(page_idx);
+    uint32_t header_bitmap = abi->GetPageHeaderBitmap(page_idx);
 
-    uint32_t used_chunks = abi->GetUsedChunks(layout);  // Returns a bitmap.
+    uint32_t used_chunks =
+        abi->GetUsedChunks(header_bitmap);  // Returns a bitmap.
     // Skip empty pages.
     if (used_chunks == 0)
       continue;
@@ -48954,13 +52027,14 @@ void TracingServiceImpl::ScrapeSharedMemoryBuffers(
         continue;
 
       SharedMemoryABI::ChunkState state =
-          SharedMemoryABI::GetChunkStateFromLayout(layout, chunk_idx);
+          SharedMemoryABI::GetChunkStateFromHeaderBitmap(header_bitmap,
+                                                         chunk_idx);
       PERFETTO_DCHECK(state == SharedMemoryABI::kChunkBeingWritten ||
                       state == SharedMemoryABI::kChunkComplete);
       bool chunk_complete = state == SharedMemoryABI::kChunkComplete;
 
       SharedMemoryABI::Chunk chunk =
-          abi->GetChunkUnchecked(page_idx, layout, chunk_idx);
+          abi->GetChunkUnchecked(page_idx, header_bitmap, chunk_idx);
 
       uint16_t packet_count;
       uint8_t flags;
@@ -49009,16 +52083,13 @@ void TracingServiceImpl::ScrapeSharedMemoryBuffers(
 void TracingServiceImpl::FlushAndDisableTracing(TracingSessionID tsid) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   PERFETTO_DLOG("Triggering final flush for %" PRIu64, tsid);
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
   Flush(
       tsid, 0,
-      [weak_this, tsid](bool success) {
+      [this, tsid](bool success) {
         // This was a DLOG up to Jun 2021 (v16, Android S).
         PERFETTO_LOG("FlushAndDisableTracing(%" PRIu64 ") done, success=%d",
                      tsid, success);
-        if (!weak_this)
-          return;
-        TracingSession* session = weak_this->GetTracingSession(tsid);
+        TracingSession* session = GetTracingSession(tsid);
         if (!session) {
           return;
         }
@@ -49028,13 +52099,13 @@ void TracingServiceImpl::FlushAndDisableTracing(TracingSessionID tsid) {
         if (session->consumer_maybe_null) {
           // If the consumer is still attached, just disable the session but
           // give it a chance to read the contents.
-          weak_this->DisableTracing(tsid);
+          DisableTracing(tsid);
         } else {
           // If the consumer detached, destroy the session. If the consumer did
           // start the session in long-tracing mode, the service will have saved
           // the contents to the passed file. If not, the contents will be
           // destroyed.
-          weak_this->FreeBuffers(tsid);
+          FreeBuffers(tsid);
         }
       },
       FlushFlags(FlushFlags::Initiator::kTraced,
@@ -49049,13 +52120,9 @@ void TracingServiceImpl::PeriodicFlushTask(TracingSessionID tsid,
     return;
 
   uint32_t flush_period_ms = tracing_session->config.flush_period_ms();
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostDelayedTask(
-      [weak_this, tsid] {
-        if (weak_this)
-          weak_this->PeriodicFlushTask(tsid, /*post_next_only=*/false);
-      },
-      flush_period_ms - static_cast<uint32_t>(base::GetWallTimeMs().count() %
+  weak_runner_.PostDelayedTask(
+      [this, tsid] { PeriodicFlushTask(tsid, /*post_next_only=*/false); },
+      flush_period_ms - static_cast<uint32_t>(clock_->GetWallTimeMs().count() %
                                               flush_period_ms));
 
   if (post_next_only)
@@ -49082,14 +52149,11 @@ void TracingServiceImpl::PeriodicClearIncrementalStateTask(
 
   uint32_t clear_period_ms =
       tracing_session->config.incremental_state_config().clear_period_ms();
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostDelayedTask(
-      [weak_this, tsid] {
-        if (weak_this)
-          weak_this->PeriodicClearIncrementalStateTask(
-              tsid, /*post_next_only=*/false);
+  weak_runner_.PostDelayedTask(
+      [this, tsid] {
+        PeriodicClearIncrementalStateTask(tsid, /*post_next_only=*/false);
       },
-      clear_period_ms - static_cast<uint32_t>(base::GetWallTimeMs().count() %
+      clear_period_ms - static_cast<uint32_t>(clock_->GetWallTimeMs().count() %
                                               clear_period_ms));
 
   if (post_next_only)
@@ -49162,12 +52226,12 @@ bool TracingServiceImpl::ReadBuffersIntoConsumer(
 
   if (has_more) {
     auto weak_consumer = consumer->weak_ptr_factory_.GetWeakPtr();
-    auto weak_this = weak_ptr_factory_.GetWeakPtr();
-    task_runner_->PostTask([weak_this, weak_consumer, tsid] {
-      if (!weak_this || !weak_consumer)
-        return;
-      weak_this->ReadBuffersIntoConsumer(tsid, weak_consumer.get());
-    });
+    weak_runner_.PostTask(
+        [this, weak_consumer = std::move(weak_consumer), tsid] {
+          if (!weak_consumer)
+            return;
+          ReadBuffersIntoConsumer(tsid, weak_consumer.get());
+        });
   }
 
   // Keep this as tail call, just in case the consumer re-enters.
@@ -49219,13 +52283,8 @@ bool TracingServiceImpl::ReadBuffersIntoFile(TracingSessionID tsid) {
     return true;
   }
 
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostDelayedTask(
-      [weak_this, tsid] {
-        if (weak_this)
-          weak_this->ReadBuffersIntoFile(tsid);
-      },
-      tracing_session->delay_to_next_write_period_ms());
+  weak_runner_.PostDelayedTask([this, tsid] { ReadBuffersIntoFile(tsid); },
+                               DelayToNextWritePeriodMs(*tracing_session));
   return true;
 }
 
@@ -49294,12 +52353,16 @@ std::vector<TracePacket> TracingServiceImpl::ReadBuffers(
 
   if (!tracing_session->config.builtin_data_sources().disable_trace_config()) {
     MaybeEmitTraceConfig(tracing_session, &packets);
+    MaybeEmitCloneTrigger(tracing_session, &packets);
     MaybeEmitReceivedTriggers(tracing_session, &packets);
   }
   if (!tracing_session->did_emit_initial_packets) {
     EmitUuid(tracing_session, &packets);
-    if (!tracing_session->config.builtin_data_sources().disable_system_info())
+    if (!tracing_session->config.builtin_data_sources().disable_system_info()) {
       EmitSystemInfo(&packets);
+      if (!relay_clients_.empty())
+        MaybeEmitRemoteSystemInfo(&packets);
+    }
   }
   tracing_session->did_emit_initial_packets = true;
 
@@ -49406,10 +52469,10 @@ std::vector<TracePacket> TracingServiceImpl::ReadBuffers(
     // We don't bother snapshotting clocks here because we wouldn't be able to
     // emit it and we shouldn't have significant drift from the last snapshot in
     // any case.
-    SnapshotLifecyleEvent(tracing_session,
-                          protos::pbzero::TracingServiceEvent::
-                              kReadTracingBuffersCompletedFieldNumber,
-                          false /* snapshot_clocks */);
+    SnapshotLifecycleEvent(tracing_session,
+                           protos::pbzero::TracingServiceEvent::
+                               kReadTracingBuffersCompletedFieldNumber,
+                           false /* snapshot_clocks */);
     EmitLifecycleEvents(tracing_session, &packets);
   }
 
@@ -49453,7 +52516,7 @@ void TracingServiceImpl::MaybeFilterPackets(TracingSession* tracing_session,
   // by the earlier call to SetFilterRoot() in EnableTracing().
   PERFETTO_DCHECK(trace_filter.config().root_msg_index() != 0);
   std::vector<protozero::MessageFilter::InputSlice> filter_input;
-  auto start = base::GetWallTimeNs();
+  auto start = clock_->GetWallTimeNs();
   for (TracePacket& packet : *packets) {
     const auto& packet_slices = packet.slices();
     const size_t input_packet_size = packet.size();
@@ -49493,7 +52556,7 @@ void TracingServiceImpl::MaybeFilterPackets(TracingSession* tracing_session,
                               filtered_packet.size, kMaxTracePacketSliceSize,
                               &packet);
   }
-  auto end = base::GetWallTimeNs();
+  auto end = clock_->GetWallTimeNs();
   tracing_session->filter_time_taken_ns +=
       static_cast<uint64_t>((end - start).count());
 }
@@ -49616,12 +52679,13 @@ void TracingServiceImpl::FreeBuffers(TracingSessionID tsid) {
   for (const auto& id_to_clone_op : pending_clones) {
     const PendingClone& clone_op = id_to_clone_op.second;
     if (clone_op.weak_consumer) {
-      task_runner_->PostTask([weak_consumer = clone_op.weak_consumer] {
-        if (weak_consumer) {
-          weak_consumer->consumer_->OnSessionCloned(
-              {false, "Original session ended", {}});
-        }
-      });
+      weak_runner_.task_runner()->PostTask(
+          [weak_consumer = clone_op.weak_consumer] {
+            if (weak_consumer) {
+              weak_consumer->consumer_->OnSessionCloned(
+                  {false, "Original session ended", {}});
+            }
+          });
     }
   }
 
@@ -49739,6 +52803,14 @@ void TracingServiceImpl::StopDataSourceInstance(ProducerEndpointImpl* producer,
                                                 DataSourceInstance* instance,
                                                 bool disable_immediately) {
   const DataSourceInstanceID ds_inst_id = instance->instance_id;
+  if (producer->IsAndroidProcessFrozen()) {
+    PERFETTO_DLOG(
+        "skipping waiting of data source \"%s\" on producer \"%s\" (pid=%u) "
+        "because it is frozen",
+        instance->data_source_name.c_str(), producer->name_.c_str(),
+        producer->pid());
+    disable_immediately = true;
+  }
   if (instance->will_notify_on_stop && !disable_immediately) {
     instance->state = DataSourceInstance::STOPPING;
   } else {
@@ -49863,7 +52935,7 @@ TracingServiceImpl::DataSourceInstance* TracingServiceImpl::SetupDataSource(
   if (relative_buffer_id >= tracing_session->num_buffers()) {
     PERFETTO_LOG(
         "The TraceConfig for DataSource %s specified a target_buffer out of "
-        "bound (%d). Skipping it.",
+        "bound (%u). Skipping it.",
         cfg_data_source.config().name().c_str(), relative_buffer_id);
     return nullptr;
   }
@@ -50119,6 +53191,25 @@ TracingServiceImpl::TracingSession* TracingServiceImpl::GetTracingSession(
 }
 
 TracingServiceImpl::TracingSession*
+TracingServiceImpl::GetTracingSessionByUniqueName(
+    const std::string& unique_session_name) {
+  PERFETTO_DCHECK_THREAD(thread_checker_);
+  if (unique_session_name.empty()) {
+    return nullptr;
+  }
+  for (auto& session_id_and_session : tracing_sessions_) {
+    TracingSession& session = session_id_and_session.second;
+    if (session.state == TracingSession::CLONED_READ_ONLY) {
+      continue;
+    }
+    if (session.config.unique_session_name() == unique_session_name) {
+      return &session;
+    }
+  }
+  return nullptr;
+}
+
+TracingServiceImpl::TracingSession*
 TracingServiceImpl::FindTracingSessionWithMaxBugreportScore() {
   TracingSession* max_session = nullptr;
   for (auto& session_id_and_session : tracing_sessions_) {
@@ -50222,9 +53313,9 @@ void TracingServiceImpl::PeriodicSnapshotTask(TracingSessionID tsid) {
   MaybeSnapshotClocksIntoRingBuffer(tracing_session);
 }
 
-void TracingServiceImpl::SnapshotLifecyleEvent(TracingSession* tracing_session,
-                                               uint32_t field_id,
-                                               bool snapshot_clocks) {
+void TracingServiceImpl::SnapshotLifecycleEvent(TracingSession* tracing_session,
+                                                uint32_t field_id,
+                                                bool snapshot_clocks) {
   // field_id should be an id of a field in TracingServiceEvent.
   auto& lifecycle_events = tracing_session->lifecycle_events;
   auto event_it =
@@ -50252,7 +53343,31 @@ void TracingServiceImpl::SnapshotLifecyleEvent(TracingSession* tracing_session,
     event->timestamps.erase_front(1 + event->timestamps.size() -
                                   event->max_size);
   }
-  event->timestamps.emplace_back(base::GetBootTimeNs().count());
+  event->timestamps.emplace_back(clock_->GetBootTimeNs().count());
+}
+
+void TracingServiceImpl::SetSingleLifecycleEvent(
+    TracingSession* tracing_session,
+    uint32_t field_id,
+    int64_t boot_timestamp_ns) {
+  // field_id should be an id of a field in TracingServiceEvent.
+  auto& lifecycle_events = tracing_session->lifecycle_events;
+  auto event_it =
+      std::find_if(lifecycle_events.begin(), lifecycle_events.end(),
+                   [field_id](const TracingSession::LifecycleEvent& event) {
+                     return event.field_id == field_id;
+                   });
+
+  TracingSession::LifecycleEvent* event;
+  if (event_it == lifecycle_events.end()) {
+    lifecycle_events.emplace_back(field_id);
+    event = &lifecycle_events.back();
+  } else {
+    event = &*event_it;
+  }
+
+  event->timestamps.clear();
+  event->timestamps.emplace_back(boot_timestamp_ns);
 }
 
 void TracingServiceImpl::MaybeSnapshotClocksIntoRingBuffer(
@@ -50295,7 +53410,8 @@ bool TracingServiceImpl::SnapshotClocks(
   // been emitted into the trace yet (see comment below).
   static constexpr int64_t kSignificantDriftNs = 10 * 1000 * 1000;  // 10 ms
 
-  TracingSession::ClockSnapshotData new_snapshot_data = CaptureClockSnapshots();
+  TracingSession::ClockSnapshotData new_snapshot_data =
+      base::CaptureClockSnapshots();
   // If we're about to update a session's latest clock snapshot that hasn't been
   // emitted into the trace yet, check whether the clocks have drifted enough to
   // warrant overriding the current snapshot values. The older snapshot would be
@@ -50501,73 +53617,79 @@ void TracingServiceImpl::MaybeEmitTraceConfig(
 void TracingServiceImpl::EmitSystemInfo(std::vector<TracePacket>* packets) {
   protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
   auto* info = packet->set_system_info();
+
+  base::SystemInfo sys_info = base::GetSystemInfo();
   info->set_tracing_service_version(base::GetVersionString());
 
-  std::optional<int32_t> tzoff = base::GetTimezoneOffsetMins();
-  if (tzoff.has_value())
-    info->set_timezone_off_mins(*tzoff);
+  if (sys_info.timezone_off_mins.has_value())
+    info->set_timezone_off_mins(*sys_info.timezone_off_mins);
 
-#if !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN) && \
-    !PERFETTO_BUILDFLAG(PERFETTO_OS_NACL)
-  struct utsname uname_info;
-  if (uname(&uname_info) == 0) {
+  if (sys_info.utsname_info.has_value()) {
     auto* utsname_info = info->set_utsname();
-    utsname_info->set_sysname(uname_info.sysname);
-    utsname_info->set_version(uname_info.version);
-    utsname_info->set_machine(uname_info.machine);
-    utsname_info->set_release(uname_info.release);
-  }
-  info->set_page_size(static_cast<uint32_t>(sysconf(_SC_PAGESIZE)));
-  info->set_num_cpus(static_cast<uint32_t>(sysconf(_SC_NPROCESSORS_CONF)));
-#endif  // !PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
-  std::string fingerprint_value = base::GetAndroidProp("ro.build.fingerprint");
-  if (!fingerprint_value.empty()) {
-    info->set_android_build_fingerprint(fingerprint_value);
-  } else {
-    PERFETTO_ELOG("Unable to read ro.build.fingerprint");
+    utsname_info->set_sysname(sys_info.utsname_info->sysname);
+    utsname_info->set_version(sys_info.utsname_info->version);
+    utsname_info->set_machine(sys_info.utsname_info->machine);
+    utsname_info->set_release(sys_info.utsname_info->release);
   }
 
-  std::string sdk_str_value = base::GetAndroidProp("ro.build.version.sdk");
-  std::optional<uint64_t> sdk_value = base::StringToUInt64(sdk_str_value);
-  if (sdk_value.has_value()) {
-    info->set_android_sdk_version(*sdk_value);
-  } else {
-    PERFETTO_ELOG("Unable to read ro.build.version.sdk");
-  }
+  if (sys_info.page_size.has_value())
+    info->set_page_size(*sys_info.page_size);
+  if (sys_info.num_cpus.has_value())
+    info->set_num_cpus(*sys_info.num_cpus);
 
-  std::string soc_model_value = base::GetAndroidProp("ro.soc.model");
-  if (!soc_model_value.empty()) {
-    info->set_android_soc_model(soc_model_value);
-  } else {
-    PERFETTO_ELOG("Unable to read ro.soc.model");
-  }
+  if (!sys_info.android_build_fingerprint.empty())
+    info->set_android_build_fingerprint(sys_info.android_build_fingerprint);
+  if (!sys_info.android_device_manufacturer.empty())
+    info->set_android_device_manufacturer(sys_info.android_device_manufacturer);
+  if (sys_info.android_sdk_version.has_value())
+    info->set_android_sdk_version(*sys_info.android_sdk_version);
+  if (!sys_info.android_soc_model.empty())
+    info->set_android_soc_model(sys_info.android_soc_model);
+  if (!sys_info.android_guest_soc_model.empty())
+    info->set_android_guest_soc_model(sys_info.android_guest_soc_model);
+  if (!sys_info.android_hardware_revision.empty())
+    info->set_android_hardware_revision(sys_info.android_hardware_revision);
+  if (!sys_info.android_storage_model.empty())
+    info->set_android_storage_model(sys_info.android_storage_model);
+  if (!sys_info.android_ram_model.empty())
+    info->set_android_ram_model(sys_info.android_ram_model);
+  if (!sys_info.android_serial_console.empty())
+    info->set_android_serial_console(sys_info.android_serial_console);
 
-  std::string hw_rev_value = base::GetAndroidProp("ro.boot.hardware.revision");
-  if (!hw_rev_value.empty()) {
-    info->set_android_hardware_revision(hw_rev_value);
-  } else {
-    PERFETTO_ELOG("Unable to read ro.boot.hardware.revision");
-  }
-
-  std::string hw_ufs_value = base::GetAndroidProp("ro.boot.hardware.ufs");
-  if (!hw_ufs_value.empty()) {
-    info->set_android_storage_model(hw_ufs_value);
-  } else {
-    PERFETTO_ELOG("Unable to read ro.boot.hardware.ufs");
-  }
-
-  std::string hw_ddr_value = base::GetAndroidProp("ro.boot.hardware.ddr");
-  if (!hw_ddr_value.empty()) {
-    info->set_android_ram_model(hw_ddr_value);
-  } else {
-    PERFETTO_ELOG("Unable to read ro.boot.hardware.ddr");
-  }
-
-#endif  // PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
   packet->set_trusted_uid(static_cast<int32_t>(uid_));
   packet->set_trusted_packet_sequence_id(kServicePacketSequenceID);
   SerializeAndAppendPacket(packets, packet.SerializeAsArray());
+}
+
+void TracingServiceImpl::MaybeEmitRemoteSystemInfo(
+    std::vector<TracePacket>* packets) {
+  std::unordered_set<MachineID> did_emit_machines;
+  for (const auto& id_and_relay_client : relay_clients_) {
+    const auto& relay_client = id_and_relay_client.second;
+    auto machine_id = relay_client->machine_id();
+    if (did_emit_machines.find(machine_id) != did_emit_machines.end())
+      continue;  // Already emitted for the machine (e.g. multiple clients).
+
+    if (relay_client->serialized_system_info().empty()) {
+      PERFETTO_DLOG("System info not provided for machine ID = %" PRIu32,
+                    machine_id);
+      continue;
+    }
+
+    // Don't emit twice for the same machine.
+    did_emit_machines.insert(machine_id);
+
+    protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
+    auto& system_info = relay_client->serialized_system_info();
+
+    packet->AppendBytes(kTracePacketSystemInfoFieldId, system_info.data(),
+                        system_info.size());
+
+    packet->set_machine_id(machine_id);
+    packet->set_trusted_uid(static_cast<int32_t>(uid_));
+    packet->set_trusted_packet_sequence_id(kServicePacketSequenceID);
+    SerializeAndAppendPacket(packets, packet.SerializeAsArray());
+  }
 }
 
 void TracingServiceImpl::EmitLifecycleEvents(
@@ -50602,6 +53724,21 @@ void TracingServiceImpl::EmitLifecycleEvents(
     timestamped_packets.emplace_back(event.timestamp, std::move(event.data));
   }
   tracing_session->last_flush_events.clear();
+
+  for (size_t i = 0; i < tracing_session->buffer_cloned_timestamps.size();
+       i++) {
+    protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
+    int64_t ts = tracing_session->buffer_cloned_timestamps[i];
+    packet->set_timestamp(static_cast<uint64_t>(ts));
+    packet->set_trusted_uid(static_cast<int32_t>(uid_));
+    packet->set_trusted_packet_sequence_id(kServicePacketSequenceID);
+
+    auto* service_event = packet->set_service_event();
+    service_event->set_buffer_cloned(static_cast<uint32_t>(i));
+
+    timestamped_packets.emplace_back(ts, packet.SerializeAsArray());
+  }
+  tracing_session->buffer_cloned_timestamps.clear();
 
   // We sort by timestamp here to ensure that the "sequence" of lifecycle
   // packets has monotonic timestamps like other sequences in the trace.
@@ -50667,6 +53804,28 @@ void TracingServiceImpl::MaybeEmitRemoteClockSync(
   tracing_session->did_emit_remote_clock_sync_ = true;
 }
 
+void TracingServiceImpl::MaybeEmitCloneTrigger(
+    TracingSession* tracing_session,
+    std::vector<TracePacket>* packets) {
+  if (tracing_session->did_emit_initial_packets)
+    return;
+
+  if (tracing_session->clone_trigger.has_value()) {
+    protozero::HeapBuffered<protos::pbzero::TracePacket> packet;
+    auto* trigger = packet->set_clone_snapshot_trigger();
+    const auto& info = tracing_session->clone_trigger.value();
+    trigger->set_trigger_name(info.trigger_name);
+    trigger->set_producer_name(info.producer_name);
+    trigger->set_trusted_producer_uid(static_cast<int32_t>(info.producer_uid));
+    trigger->set_stop_delay_ms(info.trigger_delay_ms);
+
+    packet->set_timestamp(info.boot_time_ns);
+    packet->set_trusted_uid(static_cast<int32_t>(uid_));
+    packet->set_trusted_packet_sequence_id(kServicePacketSequenceID);
+    SerializeAndAppendPacket(packets, packet.SerializeAsArray());
+  }
+}
+
 void TracingServiceImpl::MaybeEmitReceivedTriggers(
     TracingSession* tracing_session,
     std::vector<TracePacket>* packets) {
@@ -50680,6 +53839,7 @@ void TracingServiceImpl::MaybeEmitReceivedTriggers(
     trigger->set_trigger_name(info.trigger_name);
     trigger->set_producer_name(info.producer_name);
     trigger->set_trusted_producer_uid(static_cast<int32_t>(info.producer_uid));
+    trigger->set_stop_delay_ms(info.trigger_delay_ms);
 
     packet->set_timestamp(info.boot_time_ns);
     packet->set_trusted_uid(static_cast<int32_t>(uid_));
@@ -50712,12 +53872,13 @@ void TracingServiceImpl::MaybeLogTriggerEvent(const TraceConfig& cfg,
 size_t TracingServiceImpl::PurgeExpiredAndCountTriggerInWindow(
     int64_t now_ns,
     uint64_t trigger_name_hash) {
+  constexpr int64_t kOneDayInNs = 24ll * 60 * 60 * 1000 * 1000 * 1000;
   PERFETTO_DCHECK(
       std::is_sorted(trigger_history_.begin(), trigger_history_.end()));
   size_t remove_count = 0;
   size_t trigger_count = 0;
   for (const TriggerHistory& h : trigger_history_) {
-    if (h.timestamp_ns < now_ns - trigger_window_ns_) {
+    if (h.timestamp_ns < now_ns - kOneDayInNs) {
       remove_count++;
     } else if (h.name_hash == trigger_name_hash) {
       trigger_count++;
@@ -50729,33 +53890,37 @@ size_t TracingServiceImpl::PurgeExpiredAndCountTriggerInWindow(
 
 base::Status TracingServiceImpl::FlushAndCloneSession(
     ConsumerEndpointImpl* consumer,
-    TracingSessionID tsid,
-    bool skip_trace_filter,
-    bool for_bugreport) {
+    ConsumerEndpoint::CloneSessionArgs args) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   auto clone_target = FlushFlags::CloneTarget::kUnknown;
 
-  if (tsid == kBugreportSessionId) {
-    // This branch is only here to support the legacy protocol where we could
-    // clone only a single session using the magic ID kBugreportSessionId.
-    // The newer perfetto --clone-all-for-bugreport first queries the existing
-    // sessions and then issues individual clone requests specifying real
-    // session IDs, setting args.{for_bugreport,skip_trace_filter}=true.
-    PERFETTO_LOG("Looking for sessions for bugreport");
-    TracingSession* session = FindTracingSessionWithMaxBugreportScore();
-    if (!session) {
-      return base::ErrStatus(
-          "No tracing sessions eligible for bugreport found");
-    }
-    tsid = session->id;
-    clone_target = FlushFlags::CloneTarget::kBugreport;
-    skip_trace_filter = true;
-    for_bugreport = true;
-  } else if (for_bugreport) {
+  TracingSession* session = nullptr;
+  if (args.for_bugreport) {
     clone_target = FlushFlags::CloneTarget::kBugreport;
   }
+  if (args.tsid != 0) {
+    if (args.tsid == kBugreportSessionId) {
+      // This branch is only here to support the legacy protocol where we could
+      // clone only a single session using the magic ID kBugreportSessionId.
+      // The newer perfetto --clone-all-for-bugreport first queries the existing
+      // sessions and then issues individual clone requests specifying real
+      // session IDs, setting args.{for_bugreport,skip_trace_filter}=true.
+      PERFETTO_LOG("Looking for sessions for bugreport");
+      session = FindTracingSessionWithMaxBugreportScore();
+      if (!session) {
+        return base::ErrStatus(
+            "No tracing sessions eligible for bugreport found");
+      }
+      args.tsid = session->id;
+      clone_target = FlushFlags::CloneTarget::kBugreport;
+      args.skip_trace_filter = true;
+    } else {
+      session = GetTracingSession(args.tsid);
+    }
+  } else if (!args.unique_session_name.empty()) {
+    session = GetTracingSessionByUniqueName(args.unique_session_name);
+  }
 
-  TracingSession* session = GetTracingSession(tsid);
   if (!session) {
     return base::ErrStatus("Tracing session not found");
   }
@@ -50801,17 +53966,24 @@ base::Status TracingServiceImpl::FlushAndCloneSession(
     }
   }
 
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
   auto weak_consumer = consumer->GetWeakPtr();
 
   const PendingCloneID clone_id = session->last_pending_clone_id_++;
 
   auto& clone_op = session->pending_clones[clone_id];
   clone_op.pending_flush_cnt = 0;
-  clone_op.buffers =
-      std::vector<std::unique_ptr<TraceBuffer>>(session->buffers_index.size());
+  // Pre-initialize these vectors just as an optimization to avoid reallocations
+  // in DoCloneBuffers().
+  clone_op.buffers.reserve(session->buffers_index.size());
+  clone_op.buffer_cloned_timestamps.reserve(session->buffers_index.size());
   clone_op.weak_consumer = weak_consumer;
-  clone_op.skip_trace_filter = skip_trace_filter;
+  clone_op.skip_trace_filter = args.skip_trace_filter;
+  if (!args.clone_trigger_name.empty()) {
+    clone_op.clone_trigger = {
+        args.clone_trigger_boot_time_ns, args.clone_trigger_name,
+        args.clone_trigger_producer_name,
+        args.clone_trigger_trusted_producer_uid, args.clone_trigger_delay_ms};
+  }
 
   // Issue separate flush requests for separate buffer groups. The buffer marked
   // as transfer_on_clone will be flushed and cloned separately: even if they're
@@ -50829,19 +54001,17 @@ base::Status TracingServiceImpl::FlushAndCloneSession(
     }
   }
 
-  SnapshotLifecyleEvent(
+  SnapshotLifecycleEvent(
       session, protos::pbzero::TracingServiceEvent::kFlushStartedFieldNumber,
-      false /* snapshot_clocks */);
+      /*snapshot_clocks=*/true);
   clone_op.pending_flush_cnt = bufs_groups.size();
+  clone_op.clone_started_timestamp_ns = clock_->GetBootTimeNs().count();
   for (const std::set<BufferID>& buf_group : bufs_groups) {
     FlushDataSourceInstances(
         session, 0,
         GetFlushableDataSourceInstancesForBuffers(session, buf_group),
-        [tsid, clone_id, buf_group, weak_this](bool final_flush) {
-          if (!weak_this)
-            return;
-          weak_this->OnFlushDoneForClone(tsid, clone_id, buf_group,
-                                         final_flush);
+        [tsid = session->id, clone_id, buf_group, this](bool final_flush) {
+          OnFlushDoneForClone(tsid, clone_id, buf_group, final_flush);
         },
         FlushFlags(FlushFlags::Initiator::kTraced,
                    FlushFlags::Reason::kTraceClone, clone_target));
@@ -50896,7 +54066,7 @@ void TracingServiceImpl::OnFlushDoneForClone(TracingSessionID tsid,
 
   // First clone the flushed TraceBuffer(s). This can fail because of ENOMEM. If
   // it happens bail out early before creating any session.
-  if (!DoCloneBuffers(src, buf_ids, &clone_op.buffers)) {
+  if (!DoCloneBuffers(*src, buf_ids, &clone_op)) {
     result = PERFETTO_SVC_ERR("Buffer allocation failed");
   }
 
@@ -50914,7 +54084,9 @@ void TracingServiceImpl::OnFlushDoneForClone(TracingSessionID tsid,
     if (clone_op.weak_consumer) {
       result = FinishCloneSession(
           &*clone_op.weak_consumer, tsid, std::move(clone_op.buffers),
-          clone_op.skip_trace_filter, !clone_op.flush_failed, &uuid);
+          std::move(clone_op.buffer_cloned_timestamps),
+          clone_op.skip_trace_filter, !clone_op.flush_failed,
+          clone_op.clone_trigger, &uuid, clone_op.clone_started_timestamp_ns);
     }
   }  // if (result.ok())
 
@@ -50927,22 +54099,24 @@ void TracingServiceImpl::OnFlushDoneForClone(TracingSessionID tsid,
   UpdateMemoryGuardrail();
 }
 
-bool TracingServiceImpl::DoCloneBuffers(
-    TracingSession* src,
-    const std::set<BufferID>& buf_ids,
-    std::vector<std::unique_ptr<TraceBuffer>>* buf_snaps) {
-  PERFETTO_DCHECK(src->num_buffers() == src->config.buffers().size());
-  buf_snaps->resize(src->buffers_index.size());
+bool TracingServiceImpl::DoCloneBuffers(const TracingSession& src,
+                                        const std::set<BufferID>& buf_ids,
+                                        PendingClone* clone_op) {
+  PERFETTO_DCHECK(src.num_buffers() == src.config.buffers().size());
+  clone_op->buffers.resize(src.buffers_index.size());
+  clone_op->buffer_cloned_timestamps.resize(src.buffers_index.size());
 
-  for (size_t buf_idx = 0; buf_idx < src->buffers_index.size(); buf_idx++) {
-    BufferID src_buf_id = src->buffers_index[buf_idx];
+  int64_t now = clock_->GetBootTimeNs().count();
+
+  for (size_t buf_idx = 0; buf_idx < src.buffers_index.size(); buf_idx++) {
+    BufferID src_buf_id = src.buffers_index[buf_idx];
     if (buf_ids.count(src_buf_id) == 0)
       continue;
     auto buf_iter = buffers_.find(src_buf_id);
     PERFETTO_CHECK(buf_iter != buffers_.end());
     std::unique_ptr<TraceBuffer>& src_buf = buf_iter->second;
     std::unique_ptr<TraceBuffer> new_buf;
-    if (src->config.buffers()[buf_idx].transfer_on_clone()) {
+    if (src.config.buffers()[buf_idx].transfer_on_clone()) {
       const auto buf_policy = src_buf->overwrite_policy();
       const auto buf_size = src_buf->size();
       new_buf = std::move(src_buf);
@@ -50958,7 +54132,8 @@ bool TracingServiceImpl::DoCloneBuffers(
     if (!new_buf.get()) {
       return false;
     }
-    (*buf_snaps)[buf_idx] = std::move(new_buf);
+    clone_op->buffers[buf_idx] = std::move(new_buf);
+    clone_op->buffer_cloned_timestamps[buf_idx] = now;
   }
   return true;
 }
@@ -50967,9 +54142,12 @@ base::Status TracingServiceImpl::FinishCloneSession(
     ConsumerEndpointImpl* consumer,
     TracingSessionID src_tsid,
     std::vector<std::unique_ptr<TraceBuffer>> buf_snaps,
+    std::vector<int64_t> buf_cloned_timestamps,
     bool skip_trace_filter,
     bool final_flush_outcome,
-    base::Uuid* new_uuid) {
+    std::optional<TriggerInfo> clone_trigger,
+    base::Uuid* new_uuid,
+    int64_t clone_started_timestamp_ns) {
   PERFETTO_DLOG("CloneSession(%" PRIu64
                 ", skip_trace_filter=%d) started, consumer uid: %d",
                 src_tsid, skip_trace_filter, static_cast<int>(consumer->uid_));
@@ -50998,9 +54176,9 @@ base::Status TracingServiceImpl::FinishCloneSession(
   const TracingSessionID tsid = ++last_tracing_session_id_;
   TracingSession* cloned_session =
       &tracing_sessions_
-           .emplace(
-               std::piecewise_construct, std::forward_as_tuple(tsid),
-               std::forward_as_tuple(tsid, consumer, src->config, task_runner_))
+           .emplace(std::piecewise_construct, std::forward_as_tuple(tsid),
+                    std::forward_as_tuple(tsid, consumer, src->config,
+                                          weak_runner_.task_runner()))
            .first->second;
 
   // Generate a new UUID for the cloned session, but preserve the LSB. In some
@@ -51035,6 +54213,7 @@ base::Status TracingServiceImpl::FinishCloneSession(
   //    far back (see b/290799105).
   // 2. Bloating memory (see b/290798988).
   cloned_session->should_emit_stats = true;
+  cloned_session->clone_trigger = clone_trigger;
   cloned_session->received_triggers = std::move(src->received_triggers);
   src->received_triggers.clear();
   src->num_triggers_emitted_into_trace = 0;
@@ -51055,7 +54234,14 @@ base::Status TracingServiceImpl::FinishCloneSession(
         new protozero::MessageFilter(src->trace_filter->config()));
   }
 
-  SnapshotLifecyleEvent(
+  cloned_session->buffer_cloned_timestamps = std::move(buf_cloned_timestamps);
+
+  SetSingleLifecycleEvent(
+      cloned_session,
+      protos::pbzero::TracingServiceEvent::kCloneStartedFieldNumber,
+      clone_started_timestamp_ns);
+
+  SnapshotLifecycleEvent(
       cloned_session,
       protos::pbzero::TracingServiceEvent::kTracingDisabledFieldNumber,
       true /* snapshot_clocks */);
@@ -51108,8 +54294,8 @@ TracingServiceImpl::ConsumerEndpointImpl::~ConsumerEndpointImpl() {
 void TracingServiceImpl::ConsumerEndpointImpl::NotifyOnTracingDisabled(
     const std::string& error) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask([weak_this, error /* deliberate copy */] {
+  task_runner_->PostTask([weak_this = weak_ptr_factory_.GetWeakPtr(),
+                          error /* deliberate copy */] {
     if (weak_this)
       weak_this->consumer_->OnTracingDisabled(error);
   });
@@ -51190,7 +54376,7 @@ void TracingServiceImpl::ConsumerEndpointImpl::Detach(const std::string& key) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   bool success = service_->DetachConsumer(this, key);
   auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask([weak_this, success] {
+  task_runner_->PostTask([weak_this = std::move(weak_this), success] {
     if (weak_this)
       weak_this->consumer_->OnDetach(success);
   });
@@ -51199,8 +54385,7 @@ void TracingServiceImpl::ConsumerEndpointImpl::Detach(const std::string& key) {
 void TracingServiceImpl::ConsumerEndpointImpl::Attach(const std::string& key) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   bool success = service_->AttachConsumer(this, key);
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask([weak_this, success] {
+  task_runner_->PostTask([weak_this = weak_ptr_factory_.GetWeakPtr(), success] {
     if (!weak_this)
       return;
     Consumer* consumer = weak_this->consumer_;
@@ -51224,10 +54409,11 @@ void TracingServiceImpl::ConsumerEndpointImpl::GetTraceStats() {
     stats = service_->GetTraceStats(session);
   }
   auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask([weak_this, success, stats] {
-    if (weak_this)
-      weak_this->consumer_->OnTraceStats(success, stats);
-  });
+  task_runner_->PostTask(
+      [weak_this = std::move(weak_this), success, stats = std::move(stats)] {
+        if (weak_this)
+          weak_this->consumer_->OnTraceStats(success, stats);
+      });
 }
 
 void TracingServiceImpl::ConsumerEndpointImpl::ObserveEvents(
@@ -51290,14 +54476,18 @@ void TracingServiceImpl::ConsumerEndpointImpl::OnAllDataSourcesStarted() {
 }
 
 void TracingServiceImpl::ConsumerEndpointImpl::NotifyCloneSnapshotTrigger(
-    const std::string& trigger_name) {
+    const TriggerInfo& trigger) {
   if (!(observable_events_mask_ & ObservableEvents::TYPE_CLONE_TRIGGER_HIT)) {
     return;
   }
   auto* observable_events = AddObservableEvents();
   auto* clone_trig = observable_events->mutable_clone_trigger_hit();
   clone_trig->set_tracing_session_id(static_cast<int64_t>(tracing_session_id_));
-  clone_trig->set_trigger_name(trigger_name);
+  clone_trig->set_trigger_name(trigger.trigger_name);
+  clone_trig->set_producer_name(trigger.producer_name);
+  clone_trig->set_producer_uid(static_cast<uint32_t>(trigger.producer_uid));
+  clone_trig->set_boot_time_ns(trigger.boot_time_ns);
+  clone_trig->set_trigger_delay_ms(trigger.trigger_delay_ms);
 }
 
 ObservableEvents*
@@ -51305,8 +54495,7 @@ TracingServiceImpl::ConsumerEndpointImpl::AddObservableEvents() {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   if (!observable_events_) {
     observable_events_.reset(new ObservableEvents());
-    auto weak_this = weak_ptr_factory_.GetWeakPtr();
-    task_runner_->PostTask([weak_this] {
+    task_runner_->PostTask([weak_this = weak_ptr_factory_.GetWeakPtr()] {
       if (!weak_this)
         return;
 
@@ -51342,6 +54531,7 @@ void TracingServiceImpl::ConsumerEndpointImpl::QueryServiceState(
     producer->set_sdk_version(kv.second->sdk_version_);
     producer->set_uid(static_cast<int32_t>(kv.second->uid()));
     producer->set_pid(static_cast<int32_t>(kv.second->pid()));
+    producer->set_frozen(kv.second->IsAndroidProcessFrozen());
   }
 
   for (const auto& kv : service_->data_sources_) {
@@ -51423,12 +54613,10 @@ void TracingServiceImpl::ConsumerEndpointImpl::SaveTraceForBugreport(
 }
 
 void TracingServiceImpl::ConsumerEndpointImpl::CloneSession(
-    TracingSessionID tsid,
     CloneSessionArgs args) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   // FlushAndCloneSession will call OnSessionCloned after the async flush.
-  base::Status result = service_->FlushAndCloneSession(
-      this, tsid, args.skip_trace_filter, args.for_bugreport);
+  base::Status result = service_->FlushAndCloneSession(this, std::move(args));
 
   if (!result.ok()) {
     consumer_->OnSessionCloned({false, result.message(), {}});
@@ -51452,13 +54640,12 @@ TracingServiceImpl::ProducerEndpointImpl::ProducerEndpointImpl(
     : id_(id),
       client_identity_(client_identity),
       service_(service),
-      task_runner_(task_runner),
       producer_(producer),
       name_(producer_name),
       sdk_version_(sdk_version),
       in_process_(in_process),
       smb_scraping_enabled_(smb_scraping_enabled),
-      weak_ptr_factory_(this) {}
+      weak_runner_(task_runner) {}
 
 TracingServiceImpl::ProducerEndpointImpl::~ProducerEndpointImpl() {
   service_->DisconnectProducer(id_);
@@ -51604,7 +54791,7 @@ void TracingServiceImpl::ProducerEndpointImpl::SetupSharedMemory(
     inproc_shmem_arbiter_.reset(new SharedMemoryArbiterImpl(
         shared_memory_->start(), shared_memory_->size(),
         SharedMemoryABI::ShmemMode::kDefault,
-        shared_buffer_page_size_kb_ * 1024, this, task_runner_));
+        shared_buffer_page_size_kb_ * 1024, this, weak_runner_.task_runner()));
     inproc_shmem_arbiter_->SetDirectSMBPatchingSupportedByService();
   }
 
@@ -51633,11 +54820,8 @@ void TracingServiceImpl::ProducerEndpointImpl::StopDataSource(
   // should send the Producer a TearDownTracing if all its data sources have
   // been disabled (see b/77532839 and aosp/655179 PS1).
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask([weak_this, ds_inst_id] {
-    if (weak_this)
-      weak_this->producer_->StopDataSource(ds_inst_id);
-  });
+  weak_runner_.PostTask(
+      [this, ds_inst_id] { producer_->StopDataSource(ds_inst_id); });
 }
 
 SharedMemoryArbiter*
@@ -51676,11 +54860,7 @@ void TracingServiceImpl::ProducerEndpointImpl::NotifyFlushComplete(
 }
 
 void TracingServiceImpl::ProducerEndpointImpl::OnTracingSetup() {
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask([weak_this] {
-    if (weak_this)
-      weak_this->producer_->OnTracingSetup();
-  });
+  weak_runner_.PostTask([this] { producer_->OnTracingSetup(); });
 }
 
 void TracingServiceImpl::ProducerEndpointImpl::Flush(
@@ -51688,14 +54868,10 @@ void TracingServiceImpl::ProducerEndpointImpl::Flush(
     const std::vector<DataSourceInstanceID>& data_sources,
     FlushFlags flush_flags) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask(
-      [weak_this, flush_request_id, data_sources, flush_flags] {
-        if (weak_this) {
-          weak_this->producer_->Flush(flush_request_id, data_sources.data(),
-                                      data_sources.size(), flush_flags);
-        }
-      });
+  weak_runner_.PostTask([this, flush_request_id, data_sources, flush_flags] {
+    producer_->Flush(flush_request_id, data_sources.data(), data_sources.size(),
+                     flush_flags);
+  });
 }
 
 void TracingServiceImpl::ProducerEndpointImpl::SetupDataSource(
@@ -51703,10 +54879,8 @@ void TracingServiceImpl::ProducerEndpointImpl::SetupDataSource(
     const DataSourceConfig& config) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
   allowed_target_buffers_.insert(static_cast<BufferID>(config.target_buffer()));
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask([weak_this, ds_id, config] {
-    if (weak_this)
-      weak_this->producer_->SetupDataSource(ds_id, std::move(config));
+  weak_runner_.PostTask([this, ds_id, config] {
+    producer_->SetupDataSource(ds_id, std::move(config));
   });
 }
 
@@ -51714,10 +54888,8 @@ void TracingServiceImpl::ProducerEndpointImpl::StartDataSource(
     DataSourceInstanceID ds_id,
     const DataSourceConfig& config) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask([weak_this, ds_id, config] {
-    if (weak_this)
-      weak_this->producer_->StartDataSource(ds_id, std::move(config));
+  weak_runner_.PostTask([this, ds_id, config] {
+    producer_->StartDataSource(ds_id, std::move(config));
   });
 }
 
@@ -51744,19 +54916,55 @@ void TracingServiceImpl::ProducerEndpointImpl::OnFreeBuffers(
 void TracingServiceImpl::ProducerEndpointImpl::ClearIncrementalState(
     const std::vector<DataSourceInstanceID>& data_sources) {
   PERFETTO_DCHECK_THREAD(thread_checker_);
-  auto weak_this = weak_ptr_factory_.GetWeakPtr();
-  task_runner_->PostTask([weak_this, data_sources] {
-    if (weak_this) {
-      base::StringView producer_name(weak_this->name_);
-      weak_this->producer_->ClearIncrementalState(data_sources.data(),
-                                                  data_sources.size());
-    }
+  weak_runner_.PostTask([this, data_sources] {
+    base::StringView producer_name(name_);
+    producer_->ClearIncrementalState(data_sources.data(), data_sources.size());
   });
 }
 
 void TracingServiceImpl::ProducerEndpointImpl::Sync(
     std::function<void()> callback) {
-  task_runner_->PostTask(callback);
+  weak_runner_.task_runner()->PostTask(callback);
+}
+
+bool TracingServiceImpl::ProducerEndpointImpl::IsAndroidProcessFrozen() {
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  if (in_process_ || uid() == base::kInvalidUid || pid() == base::kInvalidPid)
+    return false;
+
+  // As per aosp/3406861, there are three possible mount points for the cgroup.
+  // Look at all of them.
+  // - Historically everything was in /uid_xxx/pid_yyy (and still is if
+  //   PRODUCT_CGROUP_V2_SYS_APP_ISOLATION_ENABLED = false)
+  // - cgroup isolation introduces /apps /system subdirectories.
+  base::StackString<255> path_v1(
+      "/sys/fs/cgroup/uid_%" PRIu32 "/pid_%" PRIu32 "/cgroup.freeze",
+      static_cast<uint32_t>(uid()), static_cast<uint32_t>(pid()));
+  base::StackString<255> path_v2_app(
+      "/sys/fs/cgroup/apps/uid_%" PRIu32 "/pid_%" PRIu32 "/cgroup.freeze",
+      static_cast<uint32_t>(uid()), static_cast<uint32_t>(pid()));
+  base::StackString<255> path_v2_system(
+      "/sys/fs/cgroup/system/uid_%" PRIu32 "/pid_%" PRIu32 "/cgroup.freeze",
+      static_cast<uint32_t>(uid()), static_cast<uint32_t>(pid()));
+  const char* paths[] = {path_v1.c_str(), path_v2_app.c_str(),
+                         path_v2_system.c_str()};
+
+  for (const char* path : paths) {
+    char frozen = '0';
+    auto fd = base::OpenFile(path, O_RDONLY);
+    ssize_t rsize = 0;
+    if (fd) {
+      rsize = base::Read(*fd, &frozen, sizeof(frozen));
+      if (rsize > 0) {
+        return frozen == '1';
+      }
+    }
+  }
+  PERFETTO_DLOG("Failed to read cgroup.freeze from [%s, %s, %s]",
+                path_v1.c_str(), path_v2_app.c_str(), path_v2_system.c_str());
+
+#endif
+  return false;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -51791,13 +54999,15 @@ TracingServiceImpl::TracingSession::TracingSession(
 TracingServiceImpl::RelayEndpointImpl::RelayEndpointImpl(
     RelayClientID relay_client_id,
     TracingServiceImpl* service)
-    : relay_client_id_(relay_client_id), service_(service) {}
+    : relay_client_id_(relay_client_id),
+      service_(service),
+      serialized_system_info_({}) {}
 TracingServiceImpl::RelayEndpointImpl::~RelayEndpointImpl() = default;
 
 void TracingServiceImpl::RelayEndpointImpl::SyncClocks(
     SyncMode sync_mode,
-    ClockSnapshotVector client_clocks,
-    ClockSnapshotVector host_clocks) {
+    base::ClockSnapshotVector client_clocks,
+    base::ClockSnapshotVector host_clocks) {
   // We keep only the most recent 5 clock sync snapshots.
   static constexpr size_t kNumSyncClocks = 5;
   if (synced_clocks_.size() >= kNumSyncClocks)
@@ -51905,7 +55115,8 @@ TracingService* InProcessTracingBackend::GetOrCreateService(
 // gen_amalgamated expanded: #include "protos/perfetto/ipc/consumer_port.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/trace_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/data_source_config.gen.h"
-// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/histogram_samples.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/track_event/track_event_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/test_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/sys_stats/sys_stats_config.gen.h"
@@ -51921,9 +55132,11 @@ TracingService* InProcessTracingBackend::GetOrCreateService(
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptor_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptors/console_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/inode_file/inode_file_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/gpu/gpu_renderstages_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/gpu/vulkan_memory_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/gpu/gpu_counter_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/ftrace/ftrace_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/system_metrics.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/etw/etw_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/chrome/v8_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/chrome/chrome_config.gen.h"
@@ -51935,6 +55148,8 @@ TracingService* InProcessTracingBackend::GetOrCreateService(
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/pixel_modem_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/packages_list_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/network_trace_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/kernel_wakelocks_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/app_wakelock_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_sdk_sysprop_guard_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_system_property_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_polled_state_config.gen.h"
@@ -52049,8 +55264,14 @@ CloneSessionRequest& CloneSessionRequest::operator=(CloneSessionRequest&&) = def
 bool CloneSessionRequest::operator==(const CloneSessionRequest& other) const {
   return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
    && ::protozero::internal::gen_helpers::EqualsField(session_id_, other.session_id_)
+   && ::protozero::internal::gen_helpers::EqualsField(unique_session_name_, other.unique_session_name_)
    && ::protozero::internal::gen_helpers::EqualsField(skip_trace_filter_, other.skip_trace_filter_)
-   && ::protozero::internal::gen_helpers::EqualsField(for_bugreport_, other.for_bugreport_);
+   && ::protozero::internal::gen_helpers::EqualsField(for_bugreport_, other.for_bugreport_)
+   && ::protozero::internal::gen_helpers::EqualsField(clone_trigger_name_, other.clone_trigger_name_)
+   && ::protozero::internal::gen_helpers::EqualsField(clone_trigger_producer_name_, other.clone_trigger_producer_name_)
+   && ::protozero::internal::gen_helpers::EqualsField(clone_trigger_trusted_producer_uid_, other.clone_trigger_trusted_producer_uid_)
+   && ::protozero::internal::gen_helpers::EqualsField(clone_trigger_boot_time_ns_, other.clone_trigger_boot_time_ns_)
+   && ::protozero::internal::gen_helpers::EqualsField(clone_trigger_delay_ms_, other.clone_trigger_delay_ms_);
 }
 
 bool CloneSessionRequest::ParseFromArray(const void* raw, size_t size) {
@@ -52066,11 +55287,29 @@ bool CloneSessionRequest::ParseFromArray(const void* raw, size_t size) {
       case 1 /* session_id */:
         field.get(&session_id_);
         break;
+      case 4 /* unique_session_name */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &unique_session_name_);
+        break;
       case 2 /* skip_trace_filter */:
         field.get(&skip_trace_filter_);
         break;
       case 3 /* for_bugreport */:
         field.get(&for_bugreport_);
+        break;
+      case 5 /* clone_trigger_name */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &clone_trigger_name_);
+        break;
+      case 6 /* clone_trigger_producer_name */:
+        ::protozero::internal::gen_helpers::DeserializeString(field, &clone_trigger_producer_name_);
+        break;
+      case 7 /* clone_trigger_trusted_producer_uid */:
+        field.get(&clone_trigger_trusted_producer_uid_);
+        break;
+      case 8 /* clone_trigger_boot_time_ns */:
+        field.get(&clone_trigger_boot_time_ns_);
+        break;
+      case 9 /* clone_trigger_delay_ms */:
+        field.get(&clone_trigger_delay_ms_);
         break;
       default:
         field.SerializeAndAppendTo(&unknown_fields_);
@@ -52098,6 +55337,11 @@ void CloneSessionRequest::Serialize(::protozero::Message* msg) const {
     ::protozero::internal::gen_helpers::SerializeVarInt(1, session_id_, msg);
   }
 
+  // Field 4: unique_session_name
+  if (_has_field_[4]) {
+    ::protozero::internal::gen_helpers::SerializeString(4, unique_session_name_, msg);
+  }
+
   // Field 2: skip_trace_filter
   if (_has_field_[2]) {
     ::protozero::internal::gen_helpers::SerializeTinyVarInt(2, skip_trace_filter_, msg);
@@ -52106,6 +55350,31 @@ void CloneSessionRequest::Serialize(::protozero::Message* msg) const {
   // Field 3: for_bugreport
   if (_has_field_[3]) {
     ::protozero::internal::gen_helpers::SerializeTinyVarInt(3, for_bugreport_, msg);
+  }
+
+  // Field 5: clone_trigger_name
+  if (_has_field_[5]) {
+    ::protozero::internal::gen_helpers::SerializeString(5, clone_trigger_name_, msg);
+  }
+
+  // Field 6: clone_trigger_producer_name
+  if (_has_field_[6]) {
+    ::protozero::internal::gen_helpers::SerializeString(6, clone_trigger_producer_name_, msg);
+  }
+
+  // Field 7: clone_trigger_trusted_producer_uid
+  if (_has_field_[7]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(7, clone_trigger_trusted_producer_uid_, msg);
+  }
+
+  // Field 8: clone_trigger_boot_time_ns
+  if (_has_field_[8]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(8, clone_trigger_boot_time_ns_, msg);
+  }
+
+  // Field 9: clone_trigger_delay_ms
+  if (_has_field_[9]) {
+    ::protozero::internal::gen_helpers::SerializeVarInt(9, clone_trigger_delay_ms_, msg);
   }
 
   protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
@@ -53675,7 +56944,8 @@ void EnableTracingRequest::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated expanded: #include "protos/perfetto/common/gpu_counter_descriptor.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/common/ftrace_descriptor.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/data_source_config.gen.h"
-// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/histogram_samples.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/system_info/system_info_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/track_event/track_event_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/test_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/sys_stats/sys_stats_config.gen.h"
@@ -53691,9 +56961,11 @@ void EnableTracingRequest::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptor_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/interceptors/console_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/inode_file/inode_file_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/gpu/gpu_renderstages_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/gpu/vulkan_memory_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/gpu/gpu_counter_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/ftrace/ftrace_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/chrome/system_metrics.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/etw/etw_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/chrome/v8_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/chrome/chrome_config.gen.h"
@@ -53705,6 +56977,8 @@ void EnableTracingRequest::Serialize(::protozero::Message* msg) const {
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/pixel_modem_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/packages_list_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/network_trace_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/kernel_wakelocks_config.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/config/android/app_wakelock_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_sdk_sysprop_guard_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_system_property_config.gen.h"
 // gen_amalgamated expanded: #include "protos/perfetto/config/android/android_polled_state_config.gen.h"
@@ -55408,6 +58682,7 @@ void InitializeConnectionRequest::Serialize(::protozero::Message* msg) const {
 #pragma GCC diagnostic ignored "-Wfloat-equal"
 #endif
 // gen_amalgamated expanded: #include "protos/perfetto/ipc/relay_port.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/common/system_info.gen.h"
 
 namespace perfetto {
 namespace protos {
@@ -55586,6 +58861,107 @@ void SyncClockRequest_Clock::Serialize(::protozero::Message* msg) const {
   // Field 2: timestamp
   if (_has_field_[2]) {
     ::protozero::internal::gen_helpers::SerializeVarInt(2, timestamp_, msg);
+  }
+
+  protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
+}
+
+
+InitRelayResponse::InitRelayResponse() = default;
+InitRelayResponse::~InitRelayResponse() = default;
+InitRelayResponse::InitRelayResponse(const InitRelayResponse&) = default;
+InitRelayResponse& InitRelayResponse::operator=(const InitRelayResponse&) = default;
+InitRelayResponse::InitRelayResponse(InitRelayResponse&&) noexcept = default;
+InitRelayResponse& InitRelayResponse::operator=(InitRelayResponse&&) = default;
+
+bool InitRelayResponse::operator==(const InitRelayResponse& other) const {
+  return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_);
+}
+
+bool InitRelayResponse::ParseFromArray(const void* raw, size_t size) {
+  unknown_fields_.clear();
+  bool packed_error = false;
+
+  ::protozero::ProtoDecoder dec(raw, size);
+  for (auto field = dec.ReadField(); field.valid(); field = dec.ReadField()) {
+    if (field.id() < _has_field_.size()) {
+      _has_field_.set(field.id());
+    }
+    switch (field.id()) {
+      default:
+        field.SerializeAndAppendTo(&unknown_fields_);
+        break;
+    }
+  }
+  return !packed_error && !dec.bytes_left();
+}
+
+std::string InitRelayResponse::SerializeAsString() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsString();
+}
+
+std::vector<uint8_t> InitRelayResponse::SerializeAsArray() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsArray();
+}
+
+void InitRelayResponse::Serialize(::protozero::Message* msg) const {
+  protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
+}
+
+
+InitRelayRequest::InitRelayRequest() = default;
+InitRelayRequest::~InitRelayRequest() = default;
+InitRelayRequest::InitRelayRequest(const InitRelayRequest&) = default;
+InitRelayRequest& InitRelayRequest::operator=(const InitRelayRequest&) = default;
+InitRelayRequest::InitRelayRequest(InitRelayRequest&&) noexcept = default;
+InitRelayRequest& InitRelayRequest::operator=(InitRelayRequest&&) = default;
+
+bool InitRelayRequest::operator==(const InitRelayRequest& other) const {
+  return ::protozero::internal::gen_helpers::EqualsField(unknown_fields_, other.unknown_fields_)
+   && ::protozero::internal::gen_helpers::EqualsField(system_info_, other.system_info_);
+}
+
+bool InitRelayRequest::ParseFromArray(const void* raw, size_t size) {
+  unknown_fields_.clear();
+  bool packed_error = false;
+
+  ::protozero::ProtoDecoder dec(raw, size);
+  for (auto field = dec.ReadField(); field.valid(); field = dec.ReadField()) {
+    if (field.id() < _has_field_.size()) {
+      _has_field_.set(field.id());
+    }
+    switch (field.id()) {
+      case 1 /* system_info */:
+        (*system_info_).ParseFromArray(field.data(), field.size());
+        break;
+      default:
+        field.SerializeAndAppendTo(&unknown_fields_);
+        break;
+    }
+  }
+  return !packed_error && !dec.bytes_left();
+}
+
+std::string InitRelayRequest::SerializeAsString() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsString();
+}
+
+std::vector<uint8_t> InitRelayRequest::SerializeAsArray() const {
+  ::protozero::internal::gen_helpers::MessageSerializer msg;
+  Serialize(msg.get());
+  return msg.SerializeAsArray();
+}
+
+void InitRelayRequest::Serialize(::protozero::Message* msg) const {
+  // Field 1: system_info
+  if (_has_field_[1]) {
+    (*system_info_).Serialize(msg->BeginNestedMessage<::protozero::Message>(1));
   }
 
   protozero::internal::gen_helpers::SerializeUnknownFields(unknown_fields_, msg);
@@ -56623,7 +59999,7 @@ class PERFETTO_EXPORT_COMPONENT UnixSocket {
   }
 #endif
 
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
   // Process ID of the peer, as returned by the kernel. If the client
   // disconnects and the socket goes into the kDisconnected state, it
@@ -56712,8 +60088,11 @@ class PERFETTO_EXPORT_COMPONENT UnixSocket {
 
 #include <sys/socket.h>
 
-#ifdef AF_VSOCK
-// Use system vm_socket.h if avaialbe.
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+// Requires the QNX Advanced Virtualization Framework
+#include <vm_sockets.h>
+#elif defined(AF_VSOCK)
+// Use system vm_socket.h if available.
 #include <linux/vm_sockets.h>
 #else  // defined(AF_SOCK)
 // Fallback and use the stripped copy from the UAPI vm_sockets.h.
@@ -56764,6 +60143,7 @@ struct sockaddr_vm {
 #include <sys/stat.h>
 #include <sys/types.h>
 // gen_amalgamated expanded: #include "perfetto/base/compiler.h"
+// gen_amalgamated expanded: #include "perfetto/ext/base/android_utils.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/string_utils.h"
 
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
@@ -56805,6 +60185,10 @@ struct sockaddr_vm {
 // gen_amalgamated expanded: #include "src/base/vm_sockets.h"
 #endif
 
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+#include <sys/time.h>
+#endif
+
 namespace perfetto {
 namespace base {
 
@@ -56827,6 +60211,15 @@ using CBufLenType = socklen_t;
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
 constexpr char kVsockNamePrefix[] = "vsock://";
+#endif
+
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+bool IsVirtualized() {
+  static bool is_virtualized = [] {
+    return base::GetAndroidProp("ro.traced.hypervisor") == "true";
+  }();
+  return is_virtualized;
+}
 #endif
 
 // A wrapper around variable-size sockaddr structs.
@@ -56889,7 +60282,7 @@ inline int MkSockType(SockType type) {
 SockaddrAny MakeSockAddr(SockFamily family, const std::string& socket_name) {
   switch (family) {
     case SockFamily::kUnix: {
-      struct sockaddr_un saddr {};
+      struct sockaddr_un saddr{};
       const size_t name_len = socket_name.size();
       if (name_len + 1 /* for trailing \0 */ >= sizeof(saddr.sun_path)) {
         errno = ENAMETOOLONG;
@@ -56912,7 +60305,7 @@ SockaddrAny MakeSockAddr(SockFamily family, const std::string& socket_name) {
           __builtin_offsetof(sockaddr_un, sun_path) + name_len + 1);
 
       // Abstract sockets do NOT require a trailing null terminator (which is
-      // instad mandatory for filesystem sockets). Any byte up to `size`,
+      // instead mandatory for filesystem sockets). Any byte up to `size`,
       // including '\0' will become part of the socket name.
       if (saddr.sun_path[0] == '\0')
         --size;
@@ -56923,7 +60316,7 @@ SockaddrAny MakeSockAddr(SockFamily family, const std::string& socket_name) {
       auto parts = SplitString(socket_name, ":");
       PERFETTO_CHECK(parts.size() == 2);
       struct addrinfo* addr_info = nullptr;
-      struct addrinfo hints {};
+      struct addrinfo hints{};
       hints.ai_family = AF_INET;
       PERFETTO_CHECK(getaddrinfo(parts[0].c_str(), parts[1].c_str(), &hints,
                                  &addr_info) == 0);
@@ -56941,7 +60334,7 @@ SockaddrAny MakeSockAddr(SockFamily family, const std::string& socket_name) {
       auto port = SplitString(parts[1], ":");
       PERFETTO_CHECK(port.size() == 1);
       struct addrinfo* addr_info = nullptr;
-      struct addrinfo hints {};
+      struct addrinfo hints{};
       hints.ai_family = AF_INET6;
       PERFETTO_CHECK(getaddrinfo(address[0].c_str(), port[0].c_str(), &hints,
                                  &addr_info) == 0);
@@ -56963,6 +60356,13 @@ SockaddrAny MakeSockAddr(SockFamily family, const std::string& socket_name) {
       addr.svm_family = AF_VSOCK;
       addr.svm_cid = *base::StringToUInt32(parts[0]);
       addr.svm_port = *base::StringToUInt32(parts[1]);
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+      if (IsVirtualized()) {
+        // VM-to-VM VSOCK communication requires messages to be
+        // routed through the host.
+        addr.svm_flags = VMADDR_FLAG_TO_HOST;
+      }
+#endif
       SockaddrAny res(&addr, sizeof(addr));
       return res;
 #else
@@ -57082,8 +60482,9 @@ UnixSocketRaw::UnixSocketRaw(ScopedSocketHandle fd,
   setsockopt(*fd_, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
 #endif
 
-  if (family == SockFamily::kInet || family == SockFamily::kInet6 ||
-      family == SockFamily::kVsock) {
+// QNX doesn't support setting SO_REUSEADDR option when using vsocks.
+#if !PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+  if (family == SockFamily::kVsock) {
     int flag = 1;
     // The reinterpret_cast<const char*> is needed for Windows, where the 4th
     // arg is a const char* (on other POSIX system is a const void*).
@@ -57091,9 +60492,15 @@ UnixSocketRaw::UnixSocketRaw(ScopedSocketHandle fd,
                                reinterpret_cast<const char*>(&flag),
                                sizeof(flag)));
   }
+#endif
 
   if (family == SockFamily::kInet || family == SockFamily::kInet6) {
     int flag = 1;
+    // The reinterpret_cast<const char*> is needed for Windows, where the 4th
+    // arg is a const char* (on other POSIX system is a const void*).
+    PERFETTO_CHECK(!setsockopt(*fd_, SOL_SOCKET, SO_REUSEADDR,
+                               reinterpret_cast<const char*>(&flag),
+                               sizeof(flag)));
     // Disable Nagle's algorithm, optimize for low-latency.
     // See https://github.com/google/perfetto/issues/70.
     setsockopt(*fd_, IPPROTO_TCP, TCP_NODELAY,
@@ -57197,6 +60604,26 @@ bool UnixSocketRaw::Connect(const std::string& socket_name) {
   bool continue_async = WSAGetLastError() == WSAEWOULDBLOCK;
 #else
   bool continue_async = errno == EINPROGRESS;
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+  // QNX doesn't support the SO_ERROR socket option for vsock.
+  // Therefore block the connect call by polling the socket
+  // until it is writable.
+  bool is_blocking_call = family_ == SockFamily::kVsock;
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  // For VM-to-VM communication block until the socket is writable.
+  // Not blocking leads to race condition where no error is found
+  // with SO_ERROR socket option but the socket is still not writable
+  // so subsequent socket calls fail.
+  bool is_blocking_call = family_ == SockFamily::kVsock && IsVirtualized();
+#else
+  bool is_blocking_call = false;
+#endif
+  if (is_blocking_call && res < 0 && continue_async) {
+    pollfd pfd{*fd_, POLLOUT, 0};
+    if (PERFETTO_EINTR(poll(&pfd, 1 /*nfds*/, 3000 /*timeout*/)) <= 0)
+      return false;
+    return (pfd.revents & POLLOUT) != 0;
+  }
 #endif
   if (res && !continue_async)
     return false;
@@ -57405,12 +60832,19 @@ bool UnixSocketRaw::SetTxTimeout(uint32_t timeout_ms) {
   DWORD timeout = timeout_ms;
   ignore_result(tx_timeout_ms_);
 #else
-  struct timeval timeout {};
+  struct timeval timeout{};
   uint32_t timeout_sec = timeout_ms / 1000;
   timeout.tv_sec = static_cast<decltype(timeout.tv_sec)>(timeout_sec);
   timeout.tv_usec = static_cast<decltype(timeout.tv_usec)>(
       (timeout_ms - (timeout_sec * 1000)) * 1000);
 #endif
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+  if (family() == SockFamily::kVsock) {
+    // QNX doesn't support SO_SNDTIMEO for vsocks.
+    return true;
+  }
+#endif
+
   return setsockopt(*fd_, SOL_SOCKET, SO_SNDTIMEO,
                     reinterpret_cast<const char*>(&timeout),
                     sizeof(timeout)) == 0;
@@ -57421,7 +60855,7 @@ bool UnixSocketRaw::SetRxTimeout(uint32_t timeout_ms) {
 #if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
   DWORD timeout = timeout_ms;
 #else
-  struct timeval timeout {};
+  struct timeval timeout{};
   uint32_t timeout_sec = timeout_ms / 1000;
   timeout.tv_sec = static_cast<decltype(timeout.tv_sec)>(timeout_sec);
   timeout.tv_usec = static_cast<decltype(timeout.tv_usec)>(
@@ -57433,7 +60867,7 @@ bool UnixSocketRaw::SetRxTimeout(uint32_t timeout_ms) {
 }
 
 std::string UnixSocketRaw::GetSockAddr() const {
-  struct sockaddr_storage stg {};
+  struct sockaddr_storage stg{};
   socklen_t slen = sizeof(stg);
   PERFETTO_CHECK(
       getsockname(*fd_, reinterpret_cast<struct sockaddr*>(&stg), &slen) == 0);
@@ -57468,7 +60902,7 @@ std::string UnixSocketRaw::GetSockAddr() const {
                           PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID))
   if (stg.ss_family == AF_VSOCK) {
     auto* saddr = reinterpret_cast<struct sockaddr_vm*>(&stg);
-    base::StackString<255> addr_and_port("%s%d:%d", kVsockNamePrefix,
+    base::StackString<255> addr_and_port("%s%u:%u", kVsockNamePrefix,
                                          saddr->svm_cid, saddr->svm_port);
     return addr_and_port.ToStdString();
   }
@@ -57658,7 +61092,12 @@ void UnixSocket::ReadPeerCredentialsPosix() {
     return;
   PERFETTO_CHECK(peer_cred_mode_ != SockPeerCredMode::kIgnore);
 
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+  int fd = sock_raw_.fd();
+  int res = getpeereid(fd, &peer_uid_, nullptr);
+  PERFETTO_CHECK(res == 0);
+  // There is no pid when obtaining peer credentials for QNX
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
   struct ucred user_cred;
   socklen_t len = sizeof(user_cred);
@@ -57723,7 +61162,7 @@ void UnixSocket::OnEvent() {
       // re-posted immediately. In both cases, not doing a Recv() in
       // OnDataAvailable, leads to something bad (getting stuck on Windows,
       // getting in a hot loop on Linux), so doesn't feel we should worry too
-      // much about this. If we wanted to keep the behavrior consistent, here
+      // much about this. If we wanted to keep the behavior consistent, here
       // we should do something like: `if (sock_raw_)
       // sock_raw_.SetBlocking(false)` (Note that the socket might be closed
       // by the time we come back here, hence the if part).
@@ -57768,11 +61207,22 @@ void UnixSocket::OnEvent() {
 
   if (state_ == State::kConnecting) {
     PERFETTO_DCHECK(sock_raw_);
-    int sock_err = EINVAL;
-    socklen_t err_len = sizeof(sock_err);
-    int res =
-        getsockopt(sock_raw_.fd(), SOL_SOCKET, SO_ERROR, &sock_err, &err_len);
-
+    int res = 0, sock_err = 0;
+    bool is_error_opt_supported = true;
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+    // QNX doesn't support the SO_ERROR socket option for vsock.
+    // Since, we make the connect call blocking, it is fine to skip
+    // the error check and simply continue with the connection flow.
+    if (sock_raw_.family() == SockFamily::kVsock) {
+      is_error_opt_supported = false;
+    }
+#endif
+    if (is_error_opt_supported) {
+      sock_err = EINVAL;
+      socklen_t err_len = sizeof(sock_err);
+      res =
+          getsockopt(sock_raw_.fd(), SOL_SOCKET, SO_ERROR, &sock_err, &err_len);
+    }
     if (res == 0 && sock_err == EINPROGRESS)
       return;  // Not connected yet, just a spurious FD watch wakeup.
     if (res == 0 && sock_err == 0) {
@@ -59936,7 +63386,7 @@ uid_t HostImpl::ClientConnection::GetPosixPeerUid() const {
 }
 
 pid_t HostImpl::ClientConnection::GetLinuxPeerPid() const {
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX) || \
     PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
   if (sock->family() == base::SockFamily::kUnix)
     return sock->peer_pid_linux();
@@ -61006,6 +64456,7 @@ void ProducerPortProxy::UpdateDataSource(const UpdateDataSourceRequest& request,
 // gen_amalgamated expanded: #include "perfetto/ext/ipc/service_proxy.h"
 
 // gen_amalgamated expanded: #include "protos/perfetto/ipc/relay_port.gen.h"
+// gen_amalgamated expanded: #include "protos/perfetto/common/system_info.gen.h"
 
 namespace perfetto {
 namespace protos {
@@ -61024,6 +64475,9 @@ class RelayPort : public ::perfetto::ipc::Service {
   const ::perfetto::ipc::ServiceDescriptor& GetDescriptor() override;
 
   // Methods from the .proto file
+  using DeferredInitRelayResponse = ::perfetto::ipc::Deferred<InitRelayResponse>;
+  virtual void InitRelay(const InitRelayRequest&, DeferredInitRelayResponse) = 0;
+
   using DeferredSyncClockResponse = ::perfetto::ipc::Deferred<SyncClockResponse>;
   virtual void SyncClock(const SyncClockRequest&, DeferredSyncClockResponse) = 0;
 
@@ -61039,6 +64493,9 @@ class RelayPortProxy : public ::perfetto::ipc::ServiceProxy {
   const ::perfetto::ipc::ServiceDescriptor& GetDescriptor() override;
 
   // Methods from the .proto file
+  using DeferredInitRelayResponse = ::perfetto::ipc::Deferred<InitRelayResponse>;
+  void InitRelay(const InitRelayRequest&, DeferredInitRelayResponse, int fd = -1);
+
   using DeferredSyncClockResponse = ::perfetto::ipc::Deferred<SyncClockResponse>;
   void SyncClock(const SyncClockRequest&, DeferredSyncClockResponse, int fd = -1);
 
@@ -61061,6 +64518,12 @@ namespace gen {
 ::perfetto::ipc::ServiceDescriptor* RelayPort::NewDescriptor() {
   auto* desc = new ::perfetto::ipc::ServiceDescriptor();
   desc->service_name = "RelayPort";
+
+  desc->methods.emplace_back(::perfetto::ipc::ServiceDescriptor::Method{
+     "InitRelay",
+     &_IPC_Decoder<InitRelayRequest>,
+     &_IPC_Decoder<InitRelayResponse>,
+     &_IPC_Invoker<RelayPort, InitRelayRequest, InitRelayResponse, &RelayPort::InitRelay>});
 
   desc->methods.emplace_back(::perfetto::ipc::ServiceDescriptor::Method{
      "SyncClock",
@@ -61094,6 +64557,11 @@ const ::perfetto::ipc::ServiceDescriptor& RelayPortProxy::GetDescriptor() {
   return RelayPort::GetDescriptorStatic();
 }
 
+void RelayPortProxy::InitRelay(const InitRelayRequest& request, DeferredInitRelayResponse reply, int fd) {
+  BeginInvoke("InitRelay", request, ::perfetto::ipc::DeferredBase(std::move(reply)),
+              fd);
+}
+
 void RelayPortProxy::SyncClock(const SyncClockRequest& request, DeferredSyncClockResponse reply, int fd) {
   BeginInvoke("SyncClock", request, ::perfetto::ipc::DeferredBase(std::move(reply)),
               fd);
@@ -61122,6 +64590,7 @@ void RelayPortProxy::SyncClock(const SyncClockRequest& request, DeferredSyncCloc
 
 // gen_amalgamated expanded: #include "perfetto/base/build_config.h"
 // gen_amalgamated expanded: #include "perfetto/base/logging.h"
+// gen_amalgamated expanded: #include "perfetto/ext/base/android_utils.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/string_utils.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/utils.h"
 // gen_amalgamated expanded: #include "perfetto/ext/ipc/basic_types.h"
@@ -61190,9 +64659,18 @@ const char* GetProducerSocket() {
   return name;
 }
 
-const char* GetRelaySocket() {
+std::string GetRelaySocket() {
   // The relay socket is optional and is connected only when the env var is set.
-  return getenv("PERFETTO_RELAY_SOCK_NAME");
+  // In Android, if the env var isn't set then we check the
+  // |traced_relay.relay_port| system property.
+  const char* name = getenv("PERFETTO_RELAY_SOCK_NAME");
+  if (name != nullptr)
+    return std::string(name);
+#if PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
+  return base::GetAndroidProp("traced_relay.relay_port");
+#else
+  return std::string();
+#endif
 }
 
 std::vector<std::string> TokenizeProducerSockets(
@@ -61298,7 +64776,7 @@ base::ScopedFile CreateMemfd(const char* name, unsigned int flags);
 
 #define PERFETTO_MEMFD_ENABLED()             \
   PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
-      PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX)
+      PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX_BUT_NOT_QNX)
 
 #if PERFETTO_MEMFD_ENABLED()
 
@@ -61640,10 +65118,12 @@ class SharedMemoryWindows : public SharedMemory {
   // Create a brand new SHM region.
   enum Flags { kNone = 0, kInheritableHandles };
   static std::unique_ptr<SharedMemoryWindows> Create(
-      size_t size, Flags flags=Flags::kNone);
+      size_t size,
+      Flags flags = Flags::kNone);
   static std::unique_ptr<SharedMemoryWindows> Attach(const std::string& key);
   static std::unique_ptr<SharedMemoryWindows> AttachToHandleWithKey(
-      base::ScopedPlatformHandle fd, const std::string& key);
+      base::ScopedPlatformHandle fd,
+      const std::string& key);
   ~SharedMemoryWindows() override;
   const std::string& key() const { return key_; }
   const base::ScopedPlatformHandle& handle() const { return handle_; }
@@ -61703,8 +65183,8 @@ class SharedMemoryWindows : public SharedMemory {
 namespace perfetto {
 
 // static
-std::unique_ptr<SharedMemoryWindows> SharedMemoryWindows::Create(
-    size_t size, Flags flags) {
+std::unique_ptr<SharedMemoryWindows> SharedMemoryWindows::Create(size_t size,
+                                                                 Flags flags) {
   base::ScopedPlatformHandle shmem_handle;
   std::random_device rnd_dev;
   uint64_t rnd_key = (static_cast<uint64_t>(rnd_dev()) << 32) | rnd_dev();
@@ -61717,8 +65197,7 @@ std::unique_ptr<SharedMemoryWindows> SharedMemoryWindows::Create(
 
   shmem_handle.reset(CreateFileMappingA(
       INVALID_HANDLE_VALUE,  // Use paging file.
-      &security_attributes,
-      PAGE_READWRITE,
+      &security_attributes, PAGE_READWRITE,
       static_cast<DWORD>(size >> 32),  // maximum object size (high-order DWORD)
       static_cast<DWORD>(size),        // maximum object size (low-order DWORD)
       key.c_str()));
@@ -61770,7 +65249,8 @@ std::unique_ptr<SharedMemoryWindows> SharedMemoryWindows::Attach(
 
 // static
 std::unique_ptr<SharedMemoryWindows> SharedMemoryWindows::AttachToHandleWithKey(
-    base::ScopedPlatformHandle shmem_handle, const std::string& key) {
+    base::ScopedPlatformHandle shmem_handle,
+    const std::string& key) {
   void* start =
       MapViewOfFile(*shmem_handle, FILE_MAP_ALL_ACCESS, /*offsetHigh=*/0,
                     /*offsetLow=*/0, /*dwNumberOfBytesToMap=*/0);
@@ -61948,7 +65428,7 @@ class ConsumerIPCClientImpl : public TracingService::ConsumerEndpoint,
                          QueryServiceStateCallback) override;
   void QueryCapabilities(QueryCapabilitiesCallback) override;
   void SaveTraceForBugreport(SaveTraceForBugreportCallback) override;
-  void CloneSession(TracingSessionID, CloneSessionArgs) override;
+  void CloneSession(CloneSessionArgs) override;
 
   // ipc::ServiceProxy::EventListener implementation.
   // These methods are invoked by the IPC layer, which knows nothing about
@@ -62287,7 +65767,7 @@ void ConsumerIPCClientImpl::Attach(const std::string& key) {
           const TraceConfig& trace_config = response->trace_config();
 
           // If attached successfully, also attach to the end-of-trace
-          // notificaton callback, via EnableTracing(attach_notification_only).
+          // notification callback, via EnableTracing(attach_notification_only).
           protos::gen::EnableTracingRequest enable_req;
           enable_req.set_attach_notification_only(true);
           ipc::Deferred<protos::gen::EnableTracingResponse> enable_resp;
@@ -62469,17 +65949,37 @@ void ConsumerIPCClientImpl::SaveTraceForBugreport(
   consumer_port_.SaveTraceForBugreport(req, std::move(async_response));
 }
 
-void ConsumerIPCClientImpl::CloneSession(TracingSessionID tsid,
-                                         CloneSessionArgs args) {
+void ConsumerIPCClientImpl::CloneSession(CloneSessionArgs args) {
   if (!connected_) {
     PERFETTO_DLOG("Cannot CloneSession(), not connected to tracing service");
     return;
   }
 
   protos::gen::CloneSessionRequest req;
-  req.set_session_id(tsid);
+  if (args.tsid) {
+    req.set_session_id(args.tsid);
+  }
+  if (!args.unique_session_name.empty()) {
+    req.set_unique_session_name(args.unique_session_name);
+  }
   req.set_skip_trace_filter(args.skip_trace_filter);
   req.set_for_bugreport(args.for_bugreport);
+  if (!args.clone_trigger_name.empty()) {
+    req.set_clone_trigger_name(args.clone_trigger_name);
+  }
+  if (!args.clone_trigger_producer_name.empty()) {
+    req.set_clone_trigger_producer_name(args.clone_trigger_producer_name);
+  }
+  if (args.clone_trigger_trusted_producer_uid != 0) {
+    req.set_clone_trigger_trusted_producer_uid(
+        static_cast<int32_t>(args.clone_trigger_trusted_producer_uid));
+  }
+  if (args.clone_trigger_boot_time_ns != 0) {
+    req.set_clone_trigger_boot_time_ns(args.clone_trigger_boot_time_ns);
+  }
+  if (args.clone_trigger_delay_ms != 0) {
+    req.set_clone_trigger_delay_ms(args.clone_trigger_delay_ms);
+  }
   ipc::Deferred<protos::gen::CloneSessionResponse> async_response;
   auto weak_this = weak_ptr_factory_.GetWeakPtr();
 
@@ -63114,10 +66614,8 @@ void ProducerIPCClientImpl::OnServiceRequest(
       PERFETTO_CHECK(!ipc_shared_memory);
       // Need to create an emulated shmem buffer when the transport deosn't
       // support it.
-      // TODO(chinglinyu): Let the tracing service decide on the shmem size and
-      // propagate the size in InitializeConnectionResponse.
       ipc_shared_memory = InProcessSharedMemory::Create(
-          /*size=*/InProcessSharedMemory::kDefaultSize);
+          /*size=*/InProcessSharedMemory::kShmemEmulationSize);
     }
     if (ipc_shared_memory) {
       auto shmem_mode = use_shmem_emulation_
@@ -63404,7 +66902,7 @@ class Host;
 
 // Implements the Consumer port of the IPC service. This class proxies requests
 // and responses between the core service logic (|svc_|) and remote Consumer(s)
-// on the IPC socket, through the methods overriddden from ConsumerPort.
+// on the IPC socket, through the methods overridden from ConsumerPort.
 class ConsumerIPCService : public protos::gen::ConsumerPort {
  public:
   explicit ConsumerIPCService(TracingService* core_service);
@@ -63874,8 +67372,29 @@ void ConsumerIPCService::CloneSession(
   ConsumerEndpoint::CloneSessionArgs args;
   args.skip_trace_filter = req.skip_trace_filter();
   args.for_bugreport = req.for_bugreport();
-  remote_consumer->service_endpoint->CloneSession(req.session_id(),
-                                                  std::move(args));
+  if (req.has_session_id()) {
+    args.tsid = req.session_id();
+  }
+  if (req.has_unique_session_name()) {
+    args.unique_session_name = req.unique_session_name();
+  }
+  if (req.has_clone_trigger_name()) {
+    args.clone_trigger_name = req.clone_trigger_name();
+  }
+  if (req.has_clone_trigger_producer_name()) {
+    args.clone_trigger_producer_name = req.clone_trigger_producer_name();
+  }
+  if (req.has_clone_trigger_trusted_producer_uid()) {
+    args.clone_trigger_trusted_producer_uid =
+        static_cast<uid_t>(req.clone_trigger_trusted_producer_uid());
+  }
+  if (req.has_clone_trigger_boot_time_ns()) {
+    args.clone_trigger_boot_time_ns = req.clone_trigger_boot_time_ns();
+  }
+  if (req.has_clone_trigger_delay_ms()) {
+    args.clone_trigger_delay_ms = req.clone_trigger_delay_ms();
+  }
+  remote_consumer->service_endpoint->CloneSession(std::move(args));
 }
 
 // Called by the service in response to
@@ -64082,7 +67601,7 @@ class Host;
 
 // Implements the Producer port of the IPC service. This class proxies requests
 // and responses between the core service logic (|svc_|) and remote Producer(s)
-// on the IPC socket, through the methods overriddden from ProducerPort.
+// on the IPC socket, through the methods overridden from ProducerPort.
 class ProducerIPCService : public protos::gen::ProducerPort {
  public:
   explicit ProducerIPCService(TracingService* core_service);
@@ -64772,6 +68291,8 @@ class RelayIPCService : public protos::gen::RelayPort {
   ~RelayIPCService() override = default;
 
   void OnClientDisconnected() override;
+  void InitRelay(const protos::gen::InitRelayRequest&,
+                 DeferredInitRelayResponse) override;
   void SyncClock(const protos::gen::SyncClockRequest&,
                  DeferredSyncClockResponse) override;
 
@@ -64824,9 +68345,9 @@ class RelayIPCService : public protos::gen::RelayPort {
 #include <utility>
 
 // gen_amalgamated expanded: #include "perfetto/base/logging.h"
+// gen_amalgamated expanded: #include "perfetto/ext/base/clock_snapshots.h"
 // gen_amalgamated expanded: #include "perfetto/ext/ipc/service.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/tracing_service.h"
-// gen_amalgamated expanded: #include "perfetto/tracing/core/clock_snapshots.h"
 // gen_amalgamated expanded: #include "perfetto/tracing/core/forward_decls.h"
 
 namespace perfetto {
@@ -64844,7 +68365,7 @@ TracingService::RelayEndpoint* RelayIPCService::GetRelayEndpoint(
 
 void RelayIPCService::OnClientDisconnected() {
   auto client_id = ipc::Service::client_info().client_id();
-  PERFETTO_DLOG("Relay endpoint %" PRIu64 "disconnected ", client_id);
+  PERFETTO_DLOG("Relay endpoint %" PRIu64 " disconnected ", client_id);
 
   auto* endpoint = GetRelayEndpoint(client_id);
   if (!endpoint)
@@ -64854,15 +68375,35 @@ void RelayIPCService::OnClientDisconnected() {
   relay_endpoints_.Erase(client_id);
 }
 
+void RelayIPCService::InitRelay(const protos::gen::InitRelayRequest& req,
+                                DeferredInitRelayResponse resp) {
+  // Send the response to client to reduce RTT.
+  auto async_resp = ipc::AsyncResult<protos::gen::InitRelayResponse>::Create();
+  resp.Resolve(std::move(async_resp));
+
+  // Handle the request in the core service.
+  auto machine_id = ipc::Service::client_info().machine_id();
+  auto client_id = ipc::Service::client_info().client_id();
+  auto* endpoint = GetRelayEndpoint(client_id);
+  if (!endpoint) {
+    auto ep = core_service_->ConnectRelayClient(
+        std::make_pair(machine_id, client_id));
+    endpoint = ep.get();
+    relay_endpoints_.Insert(client_id, std::move(ep));
+  }
+
+  endpoint->CacheSystemInfo(req.system_info().SerializeAsArray());
+}
+
 void RelayIPCService::SyncClock(const protos::gen::SyncClockRequest& req,
                                 DeferredSyncClockResponse resp) {
-  auto host_clock_snapshots = CaptureClockSnapshots();
+  auto host_clock_snapshots = base::CaptureClockSnapshots();
 
   // Send the response to client to reduce RTT.
   auto async_resp = ipc::AsyncResult<protos::gen::SyncClockResponse>::Create();
   resp.Resolve(std::move(async_resp));
 
-  ClockSnapshotVector client_clock_snapshots;
+  base::ClockSnapshotVector client_clock_snapshots;
   for (size_t i = 0; i < req.clocks().size(); i++) {
     auto& client_clock = req.clocks()[i];
     client_clock_snapshots.emplace_back(client_clock.clock_id(),
@@ -64909,14 +68450,13 @@ void RelayIPCService::SyncClock(const protos::gen::SyncClockRequest& req,
 #ifndef INCLUDE_PERFETTO_EXT_TRACING_IPC_SERVICE_IPC_HOST_H_
 #define INCLUDE_PERFETTO_EXT_TRACING_IPC_SERVICE_IPC_HOST_H_
 
+#include <list>
 #include <memory>
 
 // gen_amalgamated expanded: #include "perfetto/base/export.h"
-// gen_amalgamated expanded: #include "perfetto/ext/base/scoped_file.h"
 // gen_amalgamated expanded: #include "perfetto/ext/base/unix_socket.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/basic_types.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/tracing_service.h"
-// gen_amalgamated expanded: #include "perfetto/tracing/default_socket.h"
 
 namespace perfetto {
 namespace base {
@@ -64926,6 +68466,32 @@ class TaskRunner;
 namespace ipc {
 class Host;
 }  // namespace ipc
+
+// The argument passed to ServiceIPCHost::Start. Can be either:
+// 1. a socket name (e.g., "/dev/unix/socket" for AF_UNIX, "127.0.0.1:1234" for
+//    TCP, "vsock://1:1234")
+// 2. A FD of a pre-bound socket. This handles the case of Android in-tree
+//    builds where init creates the socket and passes the FD in env var
+//    (See perfetto.rc).
+// 3. A pre-existing ipc::Host object.
+struct ListenEndpoint {
+  explicit ListenEndpoint(const char* socket_name);
+  explicit ListenEndpoint(std::string socket_name);
+  explicit ListenEndpoint(base::ScopedSocketHandle);
+  explicit ListenEndpoint(std::unique_ptr<ipc::Host>);
+  ~ListenEndpoint();
+
+  // Allow move but not copy.
+  ListenEndpoint(ListenEndpoint&&) noexcept;
+  ListenEndpoint& operator=(ListenEndpoint&&);
+  ListenEndpoint(const ListenEndpoint&) noexcept = delete;
+  ListenEndpoint& operator=(const ListenEndpoint&) noexcept = delete;
+
+  // Only one of these is ever set.
+  std::string sock_name;
+  base::ScopedSocketHandle sock_handle;
+  std::unique_ptr<ipc::Host> ipc_host;
+};
 
 // Creates an instance of the service (business logic + UNIX socket transport).
 // Exposed to:
@@ -64939,29 +68505,32 @@ class PERFETTO_EXPORT_COMPONENT ServiceIPCHost {
       TracingService::InitOpts = {});
   virtual ~ServiceIPCHost();
 
-  // The overload to wrap the multi-value producer socket name in the
-  // single-value variant for compatibility in tests.
-  bool Start(const char* producer_socket_name,
-             const char* consumer_socket_name) {
-    return Start(TokenizeProducerSockets(producer_socket_name),
-                 consumer_socket_name);
-  }
   // Start listening on the Producer & Consumer ports. Returns false in case of
   // failure (e.g., something else is listening on |socket_name|).
-  virtual bool Start(const std::vector<std::string>& producer_socket_names,
-                     const char* consumer_socket_name) = 0;
+  virtual bool Start(std::list<ListenEndpoint> producer_sockets,
+                     ListenEndpoint consumer_socket) = 0;
+
+  virtual TracingService* service() const = 0;
+
+  // The methods below are for API compatibility with other projects that use
+  // some of the old flavours of Start(), back in the days when we supported
+  // only one socket or fd.
 
   // Like the above, but takes two file descriptors to already bound sockets.
   // This is used when building as part of the Android tree, where init opens
   // and binds the socket beore exec()-ing us.
-  virtual bool Start(base::ScopedSocketHandle producer_socket_fd,
-                     base::ScopedSocketHandle consumer_socket_fd) = 0;
+  // Note: An internal Google project uses this (b/390202952).
+  bool Start(base::ScopedSocketHandle producer_socket_fd,
+             base::ScopedSocketHandle consumer_socket_fd);
 
   // Allows callers to supply preconstructed Hosts.
-  virtual bool Start(std::unique_ptr<ipc::Host> producer_host,
-                     std::unique_ptr<ipc::Host> consumer_host) = 0;
+  bool Start(std::unique_ptr<ipc::Host> producer_host,
+             std::unique_ptr<ipc::Host> consumer_host);
 
-  virtual TracingService* service() const = 0;
+  // Used by tests. producer_socket_name can be a comma-separated list of N
+  // endpoints to listen onto.
+  bool Start(const char* producer_socket_names,
+             const char* consumer_socket_name);
 
  protected:
   ServiceIPCHost();
@@ -65014,12 +68583,8 @@ class ServiceIPCHostImpl : public ServiceIPCHost {
   ~ServiceIPCHostImpl() override;
 
   // ServiceIPCHost implementation.
-  bool Start(const std::vector<std::string>& producer_socket_names,
-             const char* consumer_socket_name) override;
-  bool Start(base::ScopedSocketHandle producer_socket_fd,
-             base::ScopedSocketHandle consumer_socket_fd) override;
-  bool Start(std::unique_ptr<ipc::Host> producer_host,
-             std::unique_ptr<ipc::Host> consumer_host) override;
+  bool Start(std::list<ListenEndpoint> producer_sockets,
+             ListenEndpoint consumer_socket) override;
 
   TracingService* service() const override;
 
@@ -65063,10 +68628,13 @@ class ServiceIPCHostImpl : public ServiceIPCHost {
 
 // gen_amalgamated expanded: #include "src/tracing/ipc/service/service_ipc_host_impl.h"
 
+#include <list>
+
 // gen_amalgamated expanded: #include "perfetto/base/logging.h"
 // gen_amalgamated expanded: #include "perfetto/base/task_runner.h"
 // gen_amalgamated expanded: #include "perfetto/ext/ipc/host.h"
 // gen_amalgamated expanded: #include "perfetto/ext/tracing/core/tracing_service.h"
+// gen_amalgamated expanded: #include "perfetto/tracing/default_socket.h"
 // gen_amalgamated expanded: #include "src/tracing/ipc/service/consumer_ipc_service.h"
 // gen_amalgamated expanded: #include "src/tracing/ipc/service/producer_ipc_service.h"
 // gen_amalgamated expanded: #include "src/tracing/ipc/service/relay_ipc_service.h"
@@ -65081,7 +68649,22 @@ namespace perfetto {
 
 namespace {
 constexpr uint32_t kProducerSocketTxTimeoutMs = 10;
+
+std::unique_ptr<ipc::Host> CreateIpcHost(base::TaskRunner* task_runner,
+                                         ListenEndpoint ep) {
+  if (!ep.sock_name.empty()) {
+    PERFETTO_DCHECK(!ep.sock_handle && !ep.ipc_host);
+    return ipc::Host::CreateInstance(ep.sock_name.c_str(), task_runner);
+  }
+  if (ep.sock_handle) {
+    PERFETTO_DCHECK(!ep.ipc_host);
+    return ipc::Host::CreateInstance(std::move(ep.sock_handle), task_runner);
+  }
+  PERFETTO_DCHECK(ep.ipc_host);
+  return std::move(ep.ipc_host);
 }
+
+}  // namespace
 
 // TODO(fmayer): implement per-uid connection limit (b/69093705).
 
@@ -65100,41 +68683,16 @@ ServiceIPCHostImpl::ServiceIPCHostImpl(base::TaskRunner* task_runner,
 
 ServiceIPCHostImpl::~ServiceIPCHostImpl() {}
 
-bool ServiceIPCHostImpl::Start(
-    const std::vector<std::string>& producer_socket_names,
-    const char* consumer_socket_name) {
+bool ServiceIPCHostImpl::Start(std::list<ListenEndpoint> producer_sockets,
+                               ListenEndpoint consumer_socket) {
   PERFETTO_CHECK(!svc_);  // Check if already started.
 
   // Initialize the IPC transport.
-  for (const auto& producer_socket_name : producer_socket_names)
+  for (auto& sock : producer_sockets) {
     producer_ipc_ports_.emplace_back(
-        ipc::Host::CreateInstance(producer_socket_name.c_str(), task_runner_));
-  consumer_ipc_port_ =
-      ipc::Host::CreateInstance(consumer_socket_name, task_runner_);
-  return DoStart();
-}
-
-bool ServiceIPCHostImpl::Start(base::ScopedSocketHandle producer_socket_fd,
-                               base::ScopedSocketHandle consumer_socket_fd) {
-  PERFETTO_CHECK(!svc_);  // Check if already started.
-
-  // Initialize the IPC transport.
-  producer_ipc_ports_.emplace_back(
-      ipc::Host::CreateInstance(std::move(producer_socket_fd), task_runner_));
-  consumer_ipc_port_ =
-      ipc::Host::CreateInstance(std::move(consumer_socket_fd), task_runner_);
-  return DoStart();
-}
-
-bool ServiceIPCHostImpl::Start(std::unique_ptr<ipc::Host> producer_host,
-                               std::unique_ptr<ipc::Host> consumer_host) {
-  PERFETTO_CHECK(!svc_);  // Check if already started.
-  PERFETTO_DCHECK(producer_host);
-  PERFETTO_DCHECK(consumer_host);
-
-  // Initialize the IPC transport.
-  producer_ipc_ports_.emplace_back(std::move(producer_host));
-  consumer_ipc_port_ = std::move(consumer_host);
+        CreateIpcHost(task_runner_, std::move(sock)));
+  }
+  consumer_ipc_port_ = CreateIpcHost(task_runner_, std::move(consumer_socket));
 
   return DoStart();
 }
@@ -65171,7 +68729,7 @@ bool ServiceIPCHostImpl::DoStart() {
   for (auto& producer_ipc_port : producer_ipc_ports_)
     producer_ipc_port->SetSocketSendTimeoutMs(kProducerSocketTxTimeoutMs);
 
-  // TODO(fmayer): add a test that destroyes the ServiceIPCHostImpl soon after
+  // TODO(fmayer): add a test that destroys the ServiceIPCHostImpl soon after
   // Start() and checks that no spurious callbacks are issued.
   for (auto& producer_ipc_port : producer_ipc_ports_) {
     bool producer_service_exposed = producer_ipc_port->ExposeService(
@@ -65209,6 +68767,44 @@ void ServiceIPCHostImpl::Shutdown() {
 // Definitions for the base class ctor/dtor.
 ServiceIPCHost::ServiceIPCHost() = default;
 ServiceIPCHost::~ServiceIPCHost() = default;
+
+// Definitions for ListenEndpoint, declared in service_ipc_host.h.
+ListenEndpoint::ListenEndpoint(const char* socket_name)
+    : sock_name(socket_name) {}
+ListenEndpoint::ListenEndpoint(std::string socket_name)
+    : sock_name(std::move(socket_name)) {}
+ListenEndpoint::ListenEndpoint(base::ScopedSocketHandle sh)
+    : sock_handle(std::move(sh)) {}
+ListenEndpoint::ListenEndpoint(std::unique_ptr<ipc::Host> ih)
+    : ipc_host(std::move(ih)) {}
+ListenEndpoint::ListenEndpoint(ListenEndpoint&&) noexcept = default;
+ListenEndpoint& ListenEndpoint::operator=(ListenEndpoint&&) = default;
+ListenEndpoint::~ListenEndpoint() = default;
+
+// Definitions for overloads of Start, declared in service_ipc_host.h.
+
+bool ServiceIPCHost::Start(const char* producer_socket_names,
+                           const char* consumer_socket_name) {
+  std::list<ListenEndpoint> eps;
+  for (const auto& sock_name : TokenizeProducerSockets(producer_socket_names)) {
+    eps.emplace_back(ListenEndpoint(sock_name));
+  }
+  return Start(std::move(eps), ListenEndpoint(consumer_socket_name));
+}
+
+bool ServiceIPCHost::Start(base::ScopedSocketHandle producer_socket_fd,
+                           base::ScopedSocketHandle consumer_socket_fd) {
+  std::list<ListenEndpoint> eps;
+  eps.emplace_back(ListenEndpoint(std::move(producer_socket_fd)));
+  return Start(std::move(eps), ListenEndpoint(std::move(consumer_socket_fd)));
+}
+
+bool ServiceIPCHost::Start(std::unique_ptr<ipc::Host> producer_host,
+                           std::unique_ptr<ipc::Host> consumer_host) {
+  std::list<ListenEndpoint> eps;
+  eps.emplace_back(ListenEndpoint(std::move(producer_host)));
+  return Start(std::move(eps), ListenEndpoint(std::move(consumer_host)));
+}
 
 }  // namespace perfetto
 // gen_amalgamated begin source: src/tracing/internal/system_tracing_backend.cc
@@ -65313,315 +68909,4 @@ std::unique_ptr<ConsumerEndpoint> SystemConsumerTracingBackend::ConnectConsumer(
 
 }  // namespace internal
 }  // namespace perfetto
-// gen_amalgamated begin source: src/tracing/platform_posix.cc
-/*
- * Copyright (C) 2019 The Android Open Source Project
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-// gen_amalgamated expanded: #include "perfetto/base/build_config.h"
-
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) ||   \
-    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID) || \
-    PERFETTO_BUILDFLAG(PERFETTO_OS_FUCHSIA) || \
-    PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
-
-// gen_amalgamated expanded: #include "perfetto/ext/base/file_utils.h"
-// gen_amalgamated expanded: #include "perfetto/ext/base/thread_task_runner.h"
-// gen_amalgamated expanded: #include "perfetto/tracing/internal/tracing_tls.h"
-// gen_amalgamated expanded: #include "perfetto/tracing/platform.h"
-// gen_amalgamated expanded: #include "perfetto/tracing/trace_writer_base.h"
-
-#include <pthread.h>
-#include <stdlib.h>
-
-namespace perfetto {
-
-namespace {
-
-class PlatformPosix : public Platform {
- public:
-  PlatformPosix();
-  ~PlatformPosix() override;
-
-  ThreadLocalObject* GetOrCreateThreadLocalObject() override;
-
-  std::unique_ptr<base::TaskRunner> CreateTaskRunner(
-      const CreateTaskRunnerArgs&) override;
-  std::string GetCurrentProcessName() override;
-  void Shutdown() override;
-
- private:
-  pthread_key_t tls_key_{};
-};
-
-PlatformPosix* g_instance = nullptr;
-
-using ThreadLocalObject = Platform::ThreadLocalObject;
-
-PlatformPosix::PlatformPosix() {
-  PERFETTO_CHECK(!g_instance);
-  g_instance = this;
-  auto tls_dtor = [](void* obj) {
-    // The Posix TLS implementation resets the key before calling this dtor.
-    // Here we re-reset it to the object we are about to delete. This is to
-    // handle re-entrant usages of tracing in the PostTask done during the dtor
-    // (see comments in TracingTLS::~TracingTLS()). Chromium's platform
-    // implementation (which does NOT use this platform impl) has a similar
-    // workaround (https://crrev.com/c/2748300).
-    pthread_setspecific(g_instance->tls_key_, obj);
-    delete static_cast<ThreadLocalObject*>(obj);
-    pthread_setspecific(g_instance->tls_key_, nullptr);
-  };
-  PERFETTO_CHECK(pthread_key_create(&tls_key_, tls_dtor) == 0);
-}
-
-PlatformPosix::~PlatformPosix() {
-  // pthread_key_delete doesn't call destructors, so do it manually for the
-  // calling thread.
-  void* tls_ptr = pthread_getspecific(tls_key_);
-  delete static_cast<ThreadLocalObject*>(tls_ptr);
-
-  pthread_key_delete(tls_key_);
-  g_instance = nullptr;
-}
-
-void PlatformPosix::Shutdown() {
-  PERFETTO_CHECK(g_instance == this);
-  delete this;
-  PERFETTO_CHECK(!g_instance);
-  // We're not clearing out the instance in GetDefaultPlatform() since it's not
-  // possible to re-initialize Perfetto after calling this function anyway.
-}
-
-ThreadLocalObject* PlatformPosix::GetOrCreateThreadLocalObject() {
-  // In chromium this should be implemented using base::ThreadLocalStorage.
-  void* tls_ptr = pthread_getspecific(tls_key_);
-
-  // This is needed to handle re-entrant calls during TLS dtor.
-  // See comments in platform.cc and aosp/1712371 .
-  ThreadLocalObject* tls = static_cast<ThreadLocalObject*>(tls_ptr);
-  if (!tls) {
-    tls = ThreadLocalObject::CreateInstance().release();
-    pthread_setspecific(tls_key_, tls);
-  }
-  return tls;
-}
-
-std::unique_ptr<base::TaskRunner> PlatformPosix::CreateTaskRunner(
-    const CreateTaskRunnerArgs& args) {
-  return std::unique_ptr<base::TaskRunner>(new base::ThreadTaskRunner(
-      base::ThreadTaskRunner::CreateAndStart(args.name_for_debugging)));
-}
-
-std::string PlatformPosix::GetCurrentProcessName() {
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_LINUX) || \
-    PERFETTO_BUILDFLAG(PERFETTO_OS_ANDROID)
-  std::string cmdline;
-  base::ReadFile("/proc/self/cmdline", &cmdline);
-  return cmdline.substr(0, cmdline.find('\0'));
-#elif PERFETTO_BUILDFLAG(PERFETTO_OS_APPLE)
-  return std::string(getprogname());
-#else
-  return "unknown_producer";
-#endif
-}
-
-}  // namespace
-
-// static
-Platform* Platform::GetDefaultPlatform() {
-  static PlatformPosix* instance = new PlatformPosix();
-  return instance;
-}
-
-}  // namespace perfetto
-#endif  // OS_LINUX || OS_ANDROID || OS_APPLE || OS_FUCHSIA
-// gen_amalgamated begin source: src/tracing/platform_windows.cc
-/*
- * Copyright (C) 2021 The Android Open Source Project
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *      http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
-// gen_amalgamated expanded: #include "perfetto/base/build_config.h"
-
-#if PERFETTO_BUILDFLAG(PERFETTO_OS_WIN)
-
-#include <Windows.h>
-
-// gen_amalgamated expanded: #include "perfetto/ext/base/thread_task_runner.h"
-// gen_amalgamated expanded: #include "perfetto/tracing/internal/tracing_tls.h"
-// gen_amalgamated expanded: #include "perfetto/tracing/platform.h"
-
-// Thread Termination Callbacks.
-// Windows doesn't support a per-thread destructor with its
-// TLS primitives. So, we build it manually by inserting a
-// function to be called on each thread's exit.
-// This magic is from chromium's base/threading/thread_local_storage_win.cc
-// which in turn is from http://www.codeproject.com/threads/tls.asp.
-
-#ifdef _WIN64
-#pragma comment(linker, "/INCLUDE:_tls_used")
-#pragma comment(linker, "/INCLUDE:perfetto_thread_callback_base")
-#else
-#pragma comment(linker, "/INCLUDE:__tls_used")
-#pragma comment(linker, "/INCLUDE:_perfetto_thread_callback_base")
-#endif
-
-namespace perfetto {
-
-namespace {
-
-class PlatformWindows : public Platform {
- public:
-  static PlatformWindows* instance;
-  PlatformWindows();
-  ~PlatformWindows() override;
-
-  ThreadLocalObject* GetOrCreateThreadLocalObject() override;
-  std::unique_ptr<base::TaskRunner> CreateTaskRunner(
-      const CreateTaskRunnerArgs&) override;
-  std::string GetCurrentProcessName() override;
-  void OnThreadExit();
-
- private:
-  DWORD tls_key_{};
-};
-
-using ThreadLocalObject = Platform::ThreadLocalObject;
-
-// static
-PlatformWindows* PlatformWindows::instance = nullptr;
-
-PlatformWindows::PlatformWindows() {
-  instance = this;
-  tls_key_ = ::TlsAlloc();
-  PERFETTO_CHECK(tls_key_ != TLS_OUT_OF_INDEXES);
-}
-
-PlatformWindows::~PlatformWindows() {
-  ::TlsFree(tls_key_);
-  instance = nullptr;
-}
-
-void PlatformWindows::OnThreadExit() {
-  auto tls = static_cast<ThreadLocalObject*>(::TlsGetValue(tls_key_));
-  if (tls) {
-    // At this point we rely on the TLS object to be still set to the TracingTLS
-    // we are deleting. See comments in TracingTLS::~TracingTLS().
-    delete tls;
-  }
-}
-
-ThreadLocalObject* PlatformWindows::GetOrCreateThreadLocalObject() {
-  void* tls_ptr = ::TlsGetValue(tls_key_);
-
-  auto* tls = static_cast<ThreadLocalObject*>(tls_ptr);
-  if (!tls) {
-    tls = ThreadLocalObject::CreateInstance().release();
-    ::TlsSetValue(tls_key_, tls);
-  }
-  return tls;
-}
-
-std::unique_ptr<base::TaskRunner> PlatformWindows::CreateTaskRunner(
-    const CreateTaskRunnerArgs& args) {
-  return std::unique_ptr<base::TaskRunner>(new base::ThreadTaskRunner(
-      base::ThreadTaskRunner::CreateAndStart(args.name_for_debugging)));
-}
-
-std::string PlatformWindows::GetCurrentProcessName() {
-  char buf[MAX_PATH];
-  auto len = ::GetModuleFileNameA(nullptr /*current*/, buf, sizeof(buf));
-  std::string name(buf, static_cast<size_t>(len));
-  size_t sep = name.find_last_of('\\');
-  if (sep != std::string::npos)
-    name = name.substr(sep + 1);
-  return name;
-}
-
-}  // namespace
-
-// static
-Platform* Platform::GetDefaultPlatform() {
-  static PlatformWindows* thread_safe_init_instance = new PlatformWindows();
-  return thread_safe_init_instance;
-}
-
-}  // namespace perfetto
-
-// -----------------------
-// Thread-local destructor
-// -----------------------
-
-// .CRT$XLA to .CRT$XLZ is an array of PIMAGE_TLS_CALLBACK pointers that are
-// called automatically by the OS loader code (not the CRT) when the module is
-// loaded and on thread creation. They are NOT called if the module has been
-// loaded by a LoadLibrary() call. It must have implicitly been loaded at
-// process startup.
-// See VC\crt\src\tlssup.c for reference.
-
-// extern "C" suppresses C++ name mangling so we know the symbol name for the
-// linker /INCLUDE:symbol pragma above.
-extern "C" {
-// The linker must not discard perfetto_thread_callback_base. (We force a
-// reference to this variable with a linker /INCLUDE:symbol pragma to ensure
-// that.) If this variable is discarded, the OnThreadExit function will never be
-// called.
-
-void NTAPI PerfettoOnThreadExit(PVOID, DWORD, PVOID);
-void NTAPI PerfettoOnThreadExit(PVOID, DWORD reason, PVOID) {
-  if (reason == DLL_THREAD_DETACH || reason == DLL_PROCESS_DETACH) {
-    if (perfetto::PlatformWindows::instance)
-      perfetto::PlatformWindows::instance->OnThreadExit();
-  }
-}
-
-#ifdef _WIN64
-
-// .CRT section is merged with .rdata on x64 so it must be constant data.
-#pragma const_seg(".CRT$XLP")
-
-// When defining a const variable, it must have external linkage to be sure the
-// linker doesn't discard it.
-extern const PIMAGE_TLS_CALLBACK perfetto_thread_callback_base;
-const PIMAGE_TLS_CALLBACK perfetto_thread_callback_base = PerfettoOnThreadExit;
-
-// Reset the default section.
-#pragma const_seg()
-
-#else  // _WIN64
-
-#pragma data_seg(".CRT$XLP")
-PIMAGE_TLS_CALLBACK perfetto_thread_callback_base = PerfettoOnThreadExit;
-// Reset the default section.
-#pragma data_seg()
-
-#endif  // _WIN64
-
-}  // extern "C"
-
-#endif  // OS_WIN
 

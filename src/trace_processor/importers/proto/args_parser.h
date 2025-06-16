@@ -31,17 +31,17 @@ class ArgsParser : public util::ProtoToArgsParser::Delegate {
   using Key = util::ProtoToArgsParser::Key;
 
   ArgsParser(int64_t packet_timestamp,
-                      ArgsTracker::BoundInserter& inserter,
-                      TraceStorage& storage,
-                      PacketSequenceStateGeneration* sequence_state = nullptr,
-                      bool support_json = false);
+             ArgsTracker::BoundInserter& inserter,
+             TraceStorage& storage,
+             PacketSequenceStateGeneration* sequence_state = nullptr,
+             bool support_json = false);
   ~ArgsParser() override;
   void AddInteger(const Key&, int64_t) override;
   void AddUnsignedInteger(const Key&, uint64_t) override;
   void AddString(const Key&, const protozero::ConstChars&) override;
   void AddString(const Key&, const std::string&) override;
   void AddDouble(const Key&, double) override;
-  void AddPointer(const Key&, const void*) override;
+  void AddPointer(const Key&, uint64_t) override;
   void AddBoolean(const Key&, bool) override;
   void AddBytes(const Key&, const protozero::ConstBytes&) override;
   bool AddJson(const Key&, const protozero::ConstChars&) override;

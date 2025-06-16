@@ -83,7 +83,7 @@ base::StatusOr<protozero::ConstBytes> ValidateSingleNonEmptyMessage(
                                                       single_field.size);
 
   if (single.type() != schema_type) {
-    return base::ErrStatus("Message field has wrong wire type %d",
+    return base::ErrStatus("Message field has wrong wire type %u",
                            single.type());
   }
 
@@ -207,7 +207,7 @@ base::Status ProtoBuilder::AppendSingleLong(const FieldDescriptor& field,
     default: {
       return base::ErrStatus(
           "Tried to write value of type long into field %s (in proto type %s) "
-          "which has type %d",
+          "which has type %u",
           field.name().c_str(), descriptor_->full_name().c_str(), field.type());
     }
   }
@@ -230,7 +230,7 @@ base::Status ProtoBuilder::AppendSingleDouble(const FieldDescriptor& field,
     default: {
       return base::ErrStatus(
           "Tried to write value of type double into field %s (in proto type "
-          "%s) which has type %d",
+          "%s) which has type %u",
           field.name().c_str(), descriptor_->full_name().c_str(), field.type());
     }
   }
@@ -272,7 +272,7 @@ base::Status ProtoBuilder::AppendSingleString(const FieldDescriptor& field,
     default: {
       return base::ErrStatus(
           "Tried to write value of type string into field %s (in proto type "
-          "%s) which has type %d",
+          "%s) which has type %u",
           field.name().c_str(), descriptor_->full_name().c_str(), field.type());
     }
   }
@@ -284,7 +284,7 @@ base::Status ProtoBuilder::AppendSingleBytes(const FieldDescriptor& field,
                                              size_t size) {
   using FieldDescriptorProto = protos::pbzero::FieldDescriptorProto;
   if (field.type() == FieldDescriptorProto::TYPE_MESSAGE) {
-    // If we have an zero sized bytes, we still want to propogate that the field
+    // If we have an zero sized bytes, we still want to propagate that the field
     // message was set but empty.
     if (size == 0) {
       // ptr can be null and passing nullptr to AppendBytes feels dangerous so
@@ -316,7 +316,7 @@ base::Status ProtoBuilder::AppendSingleBytes(const FieldDescriptor& field,
 
   return base::ErrStatus(
       "Tried to write value of type bytes into field %s (in proto type %s) "
-      "which has type %d",
+      "which has type %u",
       field.name().c_str(), descriptor_->full_name().c_str(), field.type());
 }
 
@@ -526,7 +526,7 @@ void RepeatedField::Step(sqlite3_context* ctx, int argc, sqlite3_value** argv) {
 
   // We use a double indirection here so we can use new and delete without
   // needing to do dangerous dances with placement new and checking
-  // initalization.
+  // initialization.
   auto** builder_ptr_ptr = static_cast<RepeatedFieldBuilder**>(
       sqlite3_aggregate_context(ctx, sizeof(RepeatedFieldBuilder*)));
 
@@ -610,7 +610,7 @@ base::Status BuildProto::Run(BuildProto::Context* ctx,
   std::vector<uint8_t> raw = builder.SerializeToProtoBuilderResult();
   if (raw.empty()) {
     // Passing nullptr to SQLite feels dangerous so just pass an empty string
-    // and zero as the size so we don't deref nullptr accidentially somewhere.
+    // and zero as the size so we don't deref nullptr accidentally somewhere.
     destructors.bytes_destructor = sqlite::utils::kSqliteStatic;
     out = SqlValue::Bytes("", 0);
     return base::OkStatus();

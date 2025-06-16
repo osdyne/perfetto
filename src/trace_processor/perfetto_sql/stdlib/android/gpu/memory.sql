@@ -16,15 +16,15 @@
 INCLUDE PERFETTO MODULE linux.memory.general;
 
 -- Counter for GPU memory per process with duration.
-CREATE PERFETTO TABLE android_gpu_memory_per_process(
+CREATE PERFETTO TABLE android_gpu_memory_per_process (
   -- Timestamp
-  ts INT,
+  ts TIMESTAMP,
   -- Duration
-  dur INT,
+  dur DURATION,
   -- Upid of the process
-  upid INT,
+  upid JOINID(process.id),
   -- GPU memory
-  gpu_memory INT
+  gpu_memory LONG
 ) AS
 SELECT
   ts,
@@ -32,4 +32,5 @@ SELECT
   upid,
   cast_int!(value) AS gpu_memory
 FROM _all_counters_per_process
-WHERE name = 'GPU Memory';
+WHERE
+  name = 'GPU Memory';

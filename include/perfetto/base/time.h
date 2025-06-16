@@ -17,6 +17,7 @@
 #ifndef INCLUDE_PERFETTO_BASE_TIME_H_
 #define INCLUDE_PERFETTO_BASE_TIME_H_
 
+#include <stdint.h>
 #include <time.h>
 
 #include <chrono>
@@ -186,6 +187,33 @@ inline TimeNanos GetBootTimeNs() {
   return TimeNanos(0);
 }
 
+#elif PERFETTO_BUILDFLAG(PERFETTO_OS_QNX)
+
+constexpr clockid_t kWallTimeClockSource = CLOCK_MONOTONIC;
+
+inline TimeNanos GetTimeInternalNs(clockid_t clk_id) {
+  struct timespec ts = {};
+  PERFETTO_CHECK(clock_gettime(clk_id, &ts) == 0);
+  return FromPosixTimespec(ts);
+}
+
+inline TimeNanos GetWallTimeNs() {
+  return GetTimeInternalNs(kWallTimeClockSource);
+}
+
+inline TimeNanos GetWallTimeRawNs() {
+  return GetTimeInternalNs(CLOCK_MONOTONIC);
+}
+
+inline TimeNanos GetThreadCPUTimeNs() {
+  return GetTimeInternalNs(CLOCK_THREAD_CPUTIME_ID);
+}
+
+// TODO: Clock that counts time during suspend is not implemented on QNX.
+inline TimeNanos GetBootTimeNs() {
+  return GetWallTimeNs();
+}
+
 #else  // posix
 
 constexpr clockid_t kWallTimeClockSource = CLOCK_MONOTONIC;
@@ -238,7 +266,7 @@ inline TimeSeconds GetWallTimeS() {
 }
 
 inline struct timespec ToPosixTimespec(TimeMillis time) {
-  struct timespec ts {};
+  struct timespec ts{};
   const long time_s = static_cast<long>(time.count() / 1000);
   ts.tv_sec = time_s;
   ts.tv_nsec = (static_cast<long>(time.count()) - time_s * 1000L) * 1000000L;
@@ -268,7 +296,7 @@ inline int64_t MkTime(int year, int month, int day, int h, int m, int s) {
   PERFETTO_DCHECK(year >= 1900);
   PERFETTO_DCHECK(month > 0 && month <= 12);
   PERFETTO_DCHECK(day > 0 && day <= 31);
-  struct tm tms {};
+  struct tm tms{};
   tms.tm_year = year - 1900;
   tms.tm_mon = month - 1;
   tms.tm_mday = day;

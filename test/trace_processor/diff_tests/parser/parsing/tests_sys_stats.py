@@ -17,6 +17,7 @@ from python.generators.diff_tests.testing import Csv, TextProto
 from python.generators.diff_tests.testing import DiffTestBlueprint
 from python.generators.diff_tests.testing import TestSuite
 
+
 class ParsingSysStats(TestSuite):
 
   def test_cpuidle_stats(self):
@@ -50,15 +51,19 @@ class ParsingSysStats(TestSuite):
         }
         """),
         query="""
-        SELECT ts, cct.name, value, cct.cpu
+        SELECT
+          ts,
+          EXTRACT_ARG(t.dimension_arg_set_id, 'state') as state,
+          value,
+          EXTRACT_ARG(t.dimension_arg_set_id, 'cpu') as cpu
         FROM counter c
-        JOIN cpu_counter_track cct on c.track_id = cct.id
+        JOIN track t on c.track_id = t.id
         ORDER BY ts;
         """,
         out=Csv("""
-        "ts","name","value","cpu"
-        71625871363623,"cpuidle.C8",486626084.000000,0
-        71626000387166,"cpuidle.C8",486636254.000000,0
+        "ts","state","value","cpu"
+        71625871363623,"C8",486626084.000000,0
+        71626000387166,"C8",486636254.000000,0
         """))
 
   def test_thermal_zones(self):

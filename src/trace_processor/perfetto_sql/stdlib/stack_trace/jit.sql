@@ -13,20 +13,19 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
-
 -- Represents a jitted code snippet.
 -- TODO(carlscab): Make public
 CREATE PERFETTO VIEW _jit_code (
   -- Unique jit code id.
-  jit_code_id UINT,
+  jit_code_id LONG,
   -- Time this code was created / allocated.
-  create_ts LONG,
+  create_ts TIMESTAMP,
   -- Time this code was destroyed / deallocated. This is a upper bound, as we
   -- can only detect deletions indirectly when new code is allocated overlapping
   -- existing one.
-  estimated_delete_ts LONG,
+  estimated_delete_ts TIMESTAMP,
   -- Thread that generated the code.
-  utid UINT,
+  utid JOINID(thread.id),
   -- Start address for the generated code.
   start_address LONG,
   -- Size in bytes of the generated code.
@@ -51,12 +50,11 @@ FROM __intrinsic_jit_code;
 -- TODO(carlscab): Make public
 CREATE PERFETTO VIEW _jit_frame (
   -- Jitted code snipped the frame is in (joins with _jit_code.jit_code_id).
-  jit_code_id UINT,
+  jit_code_id LONG,
   -- Jitted frame (joins with stack_profile_frame.id).
-  frame_id UINT
+  frame_id LONG
 ) AS
 SELECT
   jit_code_id,
   frame_id
-FROM
-  __intrinsic_jit_frame;
+FROM __intrinsic_jit_frame;

@@ -48,6 +48,8 @@ android_startup {
         debuggable: false
       }
       pid: 3
+      android_user_id: 0
+      is_kernel_task: false
     }
     event_timestamps {
       intent_received: 100
@@ -77,9 +79,15 @@ android_startup {
       }
       launch_dur: 7
       trace_thread_sections {
+        thread_section {
+          start_timestamp: 103
+          end_timestamp: 107
+          thread_name: "com.google.android.calendar"
+          process_pid: 3
+          thread_tid: 3
+        }
         start_timestamp: 103
         end_timestamp: 107
-        thread_name: "com.google.android.calendar"
       }
     }
   }
@@ -133,6 +141,8 @@ android_startup {
         debuggable: false
       }
       pid: 4
+      android_user_id: 0
+      is_kernel_task: false
     }
     event_timestamps {
       intent_received: 200
@@ -162,9 +172,15 @@ android_startup {
       }
       launch_dur: 7
       trace_thread_sections {
+        thread_section {
+          start_timestamp: 203
+          end_timestamp: 207
+          thread_name: "com.google.android.calendar"
+          process_pid: 4
+          thread_tid: 4
+        }
         start_timestamp: 203
         end_timestamp: 207
-        thread_name: "com.google.android.calendar"
       }
     }
   }
