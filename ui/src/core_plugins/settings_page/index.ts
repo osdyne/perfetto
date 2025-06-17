@@ -12,36 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import m from 'mithril';
+// import m from 'mithril';
 import {App} from '../../public/app';
 import {PerfettoPlugin} from '../../public/plugin';
 import {Trace} from '../../public/trace';
-import {SettingsPage} from './settings_page';
+// import {SettingsPage} from './settings_page';
 
 export default class implements PerfettoPlugin {
   static readonly id = 'perfetto.SettingsPage';
 
-  static onActivate(app: App) {
-    app.sidebar.addMenuItem({
-      section: 'support',
-      sortOrder: 3,
-      text: 'Settings',
-      href: '#!/settings',
-      icon: 'settings',
-    });
+  static onActivate(_app: App) {
+    // app.sidebar.addMenuItem({
+    //   section: 'support',
+    //   sortOrder: 3,
+    //   text: 'Settings',
+    //   href: '#!/settings',
+    //   icon: 'settings',
+    // });
 
-    app.pages.registerPage({
-      route: '/settings',
-      render: () => m(SettingsPage),
-    });
+    // app.pages.registerPage({
+    //   route: '/settings',
+    //   render: () => m(SettingsPage),
+    // });
 
-    app.commands.registerCommand({
-      id: 'perfetto.SettingsPage#openSettings',
-      name: 'Open Settings',
-      callback: () => {
-        app.navigate('#!/settings');
-      },
-    });
+    // app.commands.registerCommand({
+    //   id: 'perfetto.SettingsPage#openSettings',
+    //   name: 'Open Settings',
+    //   callback: () => {
+    //     app.navigate('#!/settings');
+    //   },
+    // });
   }
 
   async onTraceLoad(_: Trace) {

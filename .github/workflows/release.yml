@@ -2,7 +2,8 @@ on:
   push:
     tags:
       - 'v*'
-    branch: [otv]
+    branches:
+      - otv
 
 jobs:
   release:

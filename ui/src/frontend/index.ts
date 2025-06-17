@@ -29,7 +29,7 @@ import {initCssConstants} from './css_constants';
 import {registerDebugGlobals} from './debug';
 import {maybeShowErrorDialog} from './error_dialog';
 import {installFileDropHandler} from './file_drop_handler';
-import {globals} from './globals';
+// import {globals} from './globals';
 import {HomePage} from './home_page';
 import {postMessageHandler} from './post_message_handler';
 import {Route, Router} from '../core/router';
@@ -263,7 +263,7 @@ function onCssLoaded() {
   // Initialize plugins, now that we are ready to go.
   const pluginManager = AppImpl.instance.plugins;
   CORE_PLUGINS.forEach((p) => pluginManager.registerPlugin(p));
-  NON_CORE_PLUGINS.forEach((p) => pluginManager.registerPlugin(p));
+  NON_CORE_PLUGINS.filter(({ id }: { id: string }) => id.startsWith("dev.perfetto")).forEach((p) => pluginManager.registerPlugin(p));
   const route = Router.parseUrl(window.location.href);
   const overrides = (route.args.enablePlugins ?? '').split(',');
   pluginManager.activatePlugins(overrides);

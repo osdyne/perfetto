@@ -548,25 +548,25 @@ function registerGlobalSidebarEntries() {
     action: toggleHelp,
     icon: 'help',
   });
-  app.sidebar.addMenuItem({
-    section: 'support',
-    text: 'Documentation',
-    href: 'https://perfetto.dev/docs',
-    icon: 'find_in_page',
-  });
-  app.sidebar.addMenuItem({
-    section: 'support',
-    sortOrder: 4,
-    text: 'Report a bug',
-    href: getBugReportUrl(),
-    icon: 'bug_report',
-  });
+  // app.sidebar.addMenuItem({
+  //   section: 'support',
+  //   text: 'Documentation',
+  //   href: 'https://perfetto.dev/docs',
+  //   icon: 'find_in_page',
+  // });
+  // app.sidebar.addMenuItem({
+  //   section: 'support',
+  //   sortOrder: 4,
+  //   text: 'Report a bug',
+  //   href: getBugReportUrl(),
+  //   icon: 'bug_report',
+  // });
 }
 
 function registerTraceMenuItems(trace: TraceImpl) {
-  const downloadDisabled = trace.traceInfo.downloadable
-    ? false
-    : 'Cannot download external trace';
+  // const downloadDisabled = trace.traceInfo.downloadable
+  //   ? false
+  //   : 'Cannot download external trace';
 
   const traceTitle = trace?.traceInfo.traceTitle;
   traceTitle &&
@@ -620,14 +620,14 @@ function registerTraceMenuItems(trace: TraceImpl) {
   //     icon: 'file_download',
   //     disabled: downloadDisabled,
   //   });
-  trace.sidebar.addMenuItem({
-    section: 'support',
-    sortOrder: 5,
-    text: () =>
-      isMetatracingEnabled() ? 'Finalize metatrace' : 'Record metatrace',
-    action: () => toggleMetatrace(trace.engine),
-    icon: () => (isMetatracingEnabled() ? 'download' : 'fiber_smart_record'),
-  });
+  // trace.sidebar.addMenuItem({
+  //   section: 'support',
+  //   sortOrder: 5,
+  //   text: () =>
+  //     isMetatracingEnabled() ? 'Finalize metatrace' : 'Record metatrace',
+  //   action: () => toggleMetatrace(trace.engine),
+  //   icon: () => (isMetatracingEnabled() ? 'download' : 'fiber_smart_record'),
+  // });
 }
 
 // Used to deal with fields like the entry name, which can be either a direct

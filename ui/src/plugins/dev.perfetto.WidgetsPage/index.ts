@@ -25,12 +25,12 @@ export default class implements PerfettoPlugin {
       route: '/widgets',
       render: () => m(WidgetsPage, {app}),
     });
-    app.sidebar.addMenuItem({
-      section: 'navigation',
-      text: 'Widgets',
-      href: '#!/widgets',
-      icon: 'widgets',
-      sortOrder: 99,
-    });
+    // app.sidebar.addMenuItem({
+    //   section: 'navigation',
+    //   text: 'Widgets',
+    //   href: '#!/widgets',
+    //   icon: 'widgets',
+    //   sortOrder: 99,
+    // });
   }
 }

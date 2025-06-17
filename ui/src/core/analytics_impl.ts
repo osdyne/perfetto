@@ -128,7 +128,7 @@ class AnalyticsImpl implements AnalyticsInternal {
   // This is callled only after the script that sets isInternalUser loads.
   // It is fine to call updatePath() and log*() functions before initialize().
   // The gtag() function internally enqueues all requests into |dataLayer|.
-  initialize(isInternalUser: boolean) {
+  initialize(_isInternalUser: boolean) {
     if (this.initialized_) return;
   }
   /*
@@ -163,7 +163,7 @@ class AnalyticsImpl implements AnalyticsInternal {
     this.updatePath(route);
   } */
 
-  updatePath(path: string) {
+  updatePath(_path: string) {
     return;
     // gtagGlobals.gtag('event', 'page_view', {
     //   page_path: route,
@@ -176,7 +176,7 @@ class AnalyticsImpl implements AnalyticsInternal {
     gtagGlobals.gtag('event', event, {event_category: category});
   }
 
-  logError(err: ErrorDetails) {
+  logError(_err: ErrorDetails) {
     return;
     // let stack = '';
     // for (const entry of err.stack) {

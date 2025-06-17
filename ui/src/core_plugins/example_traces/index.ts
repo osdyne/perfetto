@@ -39,11 +39,12 @@ export default class implements PerfettoPlugin {
         openTraceUrl(ctx, EXAMPLE_ANDROID_TRACE_URL);
       },
     });
-    ctx.sidebar.addMenuItem({
-      section: 'example_traces',
-      commandId: OPEN_EXAMPLE_ANDROID_TRACE_COMMAND_ID,
-      icon: 'description',
-    });
+
+    // ctx.sidebar.addMenuItem({
+    //   section: 'example_traces',
+    //   commandId: OPEN_EXAMPLE_ANDROID_TRACE_COMMAND_ID,
+    //   icon: 'description',
+    // });
 
     const OPEN_EXAMPLE_CHROME_TRACE_COMMAND_ID =
       'perfetto.CoreCommands#openExampleChromeTrace';
@@ -54,10 +55,10 @@ export default class implements PerfettoPlugin {
         openTraceUrl(ctx, EXAMPLE_CHROME_TRACE_URL);
       },
     });
-    ctx.sidebar.addMenuItem({
-      section: 'example_traces',
-      commandId: OPEN_EXAMPLE_CHROME_TRACE_COMMAND_ID,
-      icon: 'description',
-    });
+    // ctx.sidebar.addMenuItem({
+    //   section: 'example_traces',
+    //   commandId: OPEN_EXAMPLE_CHROME_TRACE_COMMAND_ID,
+    //   icon: 'description',
+    // });
   }
 }
