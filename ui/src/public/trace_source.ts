@@ -71,3 +71,7 @@ export interface PostedTrace {
   // }
   pluginArgs?: {[pluginId: string]: {[key: string]: unknown}};
 }
+
+export interface PostedUpdateToTrace {
+  update: ArrayBuffer;
+}

@@ -161,7 +161,7 @@ class TraceContext implements Disposable {
  */
 export class TraceImpl implements Trace {
   private appImpl: AppImpl;
-  private traceCtx: TraceContext;
+  public traceCtx: TraceContext;
 
   // This is not the original Engine base, rather an EngineProxy based on the
   // same engineBase.

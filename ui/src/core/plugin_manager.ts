@@ -203,6 +203,12 @@ export class PluginManager {
     }
   }
 
+  async onTraceUpdate(traceCore: TraceImpl) {
+        for (const [id, plugin] of this._plugins.entries()) {
+      await doPluginTraceUpdate(plugin, traceCore);
+    }
+  }
+
   async onTraceReady(): Promise<void> {
     const pluginsShuffled = Array.from(this._plugins.values())
       .map((plugin) => ({plugin, sort: Math.random()}))
@@ -252,6 +258,23 @@ async function doPluginTraceLoad(
 
   const startTime = performance.now();
   await Promise.resolve(plugin.onTraceLoad?.(trace));
+  const loadTime = performance.now() - startTime;
+  pluginDetails.previousOnTraceLoadTimeMillis = loadTime;
+
+  raf.scheduleFullRedraw();
+}
+
+async function doPluginTraceUpdate(
+  pluginDetails: PluginDetails,
+  traceCore: TraceImpl,
+): Promise<void> {
+  const {plugin} = pluginDetails;
+  const trace = traceCore.forkForPlugin(pluginDetails.app.pluginId);
+
+  pluginDetails.trace = trace;
+
+  const startTime = performance.now();
+  await Promise.resolve(plugin.onTraceUpdate?.(trace));
   const loadTime = performance.now() - startTime;
   pluginDetails.previousOnTraceLoadTimeMillis = loadTime;
 

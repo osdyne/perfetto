@@ -52,6 +52,9 @@ import {TraceSource} from '../public/trace_source';
 import {ThreadDesc} from '../public/threads';
 import {Router} from '../core/router';
 
+let currentEngine: EngineBase | null = null;
+let currentTrace: TraceImpl | null = null;
+
 const METRICS = [
   'android_ion',
   'android_lmk',
@@ -148,8 +151,17 @@ export async function loadTrace(
 ): Promise<TraceImpl> {
   updateStatus(app, 'Opening trace');
   const engineId = `${++lastEngineId}`;
-  const engine = await createEngine(app, engineId);
-  return await loadTraceIntoEngine(app, traceSource, engine);
+  currentEngine = await createEngine(app, engineId);
+  return await loadTraceIntoEngine(app, traceSource, currentEngine);
+}
+
+export async function updateTrace(_app: AppImpl, traceUpdate: TraceSource) {
+  if (currentTrace === null || currentEngine === null) {
+    return
+  }
+
+  await updateEngineData(currentEngine, traceUpdate);
+  await updateTimeline();
 }
 
 async function createEngine(
@@ -182,6 +194,55 @@ async function createEngine(
     engine.enableMetatrace(assertExists(getEnabledMetatracingCategories()));
   }
   return engine;
+}
+
+async function updateEngineData(engine: EngineBase, traceSource: TraceSource): Promise<SerializedAppState  | undefined> {
+  let traceStream: TraceStream | undefined;
+  let serializedAppState: SerializedAppState | undefined;
+  if (traceSource.type === 'FILE') {
+    traceStream = new TraceFileStream(traceSource.file);
+  } else if (traceSource.type === 'ARRAY_BUFFER') {
+    traceStream = new TraceBufferStream(traceSource.buffer);
+  } else if (traceSource.type === 'URL') {
+    traceStream = new TraceHttpStream(traceSource.url);
+    serializedAppState = traceSource.serializedAppState;
+  } else if (traceSource.type === 'HTTP_RPC') {
+    traceStream = undefined;
+  } else {
+    throw new Error(`Unknown source: ${JSON.stringify(traceSource)}`);
+  }
+
+  // |traceStream| can be undefined in the case when we are using the external
+  // HTTP+RPC endpoint and the trace processor instance has already loaded
+  // a trace (because it was passed as a cmdline argument to
+  // trace_processor_shell). In this case we don't want the UI to load any
+  // file/stream and we just want to jump to the loading phase.
+  if (traceStream !== undefined) {
+    for (;;) {
+      const res = await traceStream.readChunk();
+      await engine.parse(res.data);
+      if (res.eof) break;
+    }
+    // await engine.notifyEof();
+  }
+
+  return serializedAppState;
+}
+
+async function updateTimeline () {
+  if (currentTrace === null || currentEngine === null) {
+    return;
+  }
+
+  const traceTime = await getTraceTimeBounds(currentEngine);
+  const visibleTimeSpan = await computeVisibleTime(
+    traceTime.start,
+    traceTime.end,
+    false,
+    currentEngine,
+  );
+
+  currentTrace.timeline.updateVisibleTime(visibleTimeSpan);
 }
 
 async function loadTraceIntoEngine(
@@ -236,51 +297,51 @@ async function loadTraceIntoEngine(
   }
 
   const traceDetails = await getTraceInfo(engine, traceSource);
-  const trace = TraceImpl.createInstanceForCore(app, engine, traceDetails);
-  app.setActiveTrace(trace);
+  currentTrace = TraceImpl.createInstanceForCore(app, engine, traceDetails);
+  app.setActiveTrace(currentTrace);
 
   const visibleTimeSpan = await computeVisibleTime(
     traceDetails.start,
     traceDetails.end,
-    trace.traceInfo.traceType === 'json',
+    currentTrace.traceInfo.traceType === 'json',
     engine,
   );
 
-  trace.timeline.updateVisibleTime(visibleTimeSpan);
+  currentTrace.timeline.updateVisibleTime(visibleTimeSpan);
 
   const cacheUuid = traceDetails.cached ? traceDetails.uuid : '';
   Router.navigate(`#!/viewer?local_cache_key=${cacheUuid}`);
 
   // Make sure the helper views are available before we start adding tracks.
-  await initialiseHelperViews(trace);
-  await includeSummaryTables(trace);
+  await initialiseHelperViews(currentTrace);
+  await includeSummaryTables(currentTrace);
 
   await defineMaxLayoutDepthSqlFunction(engine);
 
   if (serializedAppState !== undefined) {
-    deserializeAppStatePhase1(serializedAppState, trace);
+    deserializeAppStatePhase1(serializedAppState, currentTrace);
   }
 
-  await app.plugins.onTraceLoad(trace, (id) => {
+  await app.plugins.onTraceLoad(currentTrace, (id) => {
     updateStatus(app, `Running plugin: ${id}`);
   });
 
   updateStatus(app, 'Loading tracks');
-  await decideTracks(trace);
+  await decideTracks(currentTrace);
 
-  decideTabs(trace);
+  decideTabs(currentTrace);
 
-  await listThreads(trace);
+  await listThreads(currentTrace);
 
   // Trace Processor doesn't support the reliable range feature for JSON
   // traces.
   if (
-    trace.traceInfo.traceType !== 'json' &&
+    currentTrace.traceInfo.traceType !== 'json' &&
     ENABLE_CHROME_RELIABLE_RANGE_ANNOTATION_FLAG.get()
   ) {
     const reliableRangeStart = await computeTraceReliableRangeStart(engine);
     if (reliableRangeStart > 0) {
-      trace.notes.addNote({
+      currentTrace.notes.addNote({
         timestamp: reliableRangeStart,
         color: '#ff0000',
         text: 'Reliable Range Start',
@@ -293,12 +354,12 @@ async function loadTraceIntoEngine(
     // the final phase of app state restore.
     // TODO(primiano): this can probably be removed once we refactor tracks
     // to be URI based and can deal with non-existing URIs.
-    deserializeAppStatePhase2(serializedAppState, trace);
+    deserializeAppStatePhase2(serializedAppState, currentTrace);
   }
 
-  await trace.plugins.onTraceReady();
+  await currentTrace.plugins.onTraceReady();
 
-  return trace;
+  return currentTrace;
 }
 
 function decideTabs(trace: TraceImpl) {

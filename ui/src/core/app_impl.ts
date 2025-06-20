@@ -24,8 +24,8 @@ import {NewEngineMode} from '../trace_processor/engine';
 import {RouteArgs} from '../public/route_schema';
 import {SqlPackage} from '../public/extra_sql_packages';
 import {SerializedAppState} from '../public/state_serialization_schema';
-import {PostedTrace, TraceSource} from '../public/trace_source';
-import {loadTrace} from './load_trace';
+import {PostedTrace, PostedUpdateToTrace, TraceSource} from '../public/trace_source';
+import {loadTrace, updateTrace} from './load_trace';
 import {CORE_PLUGIN_ID} from './plugin_manager';
 
 // The args that frontend/index.ts passes when calling AppImpl.initialize().
@@ -90,7 +90,7 @@ export class AppContext {
 export class AppImpl implements App {
   private appCtx: AppContext;
   readonly pluginId: string;
-  private currentTrace?: TraceImpl;
+  public currentTrace?: TraceImpl;
 
   private constructor(appCtx: AppContext, pluginId: string) {
     this.appCtx = appCtx;
@@ -174,6 +174,10 @@ export class AppImpl implements App {
 
   openTraceFromHttpRpc(): void {
     this.openTrace({type: 'HTTP_RPC'});
+  }
+
+  async updateTraceFromBuffer(update: PostedUpdateToTrace) {
+      await updateTrace(this, { type: 'ARRAY_BUFFER', title: "update", buffer: update.update });
   }
 
   private async openTrace(src: TraceSource) {

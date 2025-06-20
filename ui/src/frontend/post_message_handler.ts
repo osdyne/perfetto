@@ -14,7 +14,7 @@
 
 import m from 'mithril';
 import {Time} from '../base/time';
-import {PostedTrace} from '../public/trace_source';
+import {PostedTrace, PostedUpdateToTrace} from '../public/trace_source';
 import {showModal} from '../widgets/modal';
 import {initCssConstants} from './css_constants';
 import {toggleHelp} from './help_modal';
@@ -49,7 +49,7 @@ export function isTrustedOrigin(origin: string): boolean {
   if (origin === 'null') return false;
   if (TRUSTED_ORIGINS.includes(origin)) return true;
   if (isUserTrustedOrigin(origin)) return true;
-  if (origin.startsWith("vscode-webview://")) {
+  if (origin.startsWith('vscode-webview://')) {
     return true;
   }
   const hostname = new URL(origin).hostname;
@@ -176,8 +176,14 @@ export function postMessageHandler(messageEvent: MessageEvent) {
     return;
   }
 
+  if (isPostedUpdate(messageEvent.data)) {
+    AppImpl.instance.updateTraceFromBuffer(messageEvent.data.perfetto);
+    return;
+  }
+
   let postedTrace: PostedTrace;
   let keepApiOpen = false;
+
   if (isPostedTraceWrapped(messageEvent.data)) {
     postedTrace = sanitizePostedTrace(messageEvent.data.perfetto);
     if (postedTrace.keepApiOpen) {
@@ -257,6 +263,7 @@ function sanitizePostedTrace(postedTrace: PostedTrace): PostedTrace {
     title: sanitizeString(postedTrace.title),
     buffer: postedTrace.buffer,
     keepApiOpen: postedTrace.keepApiOpen,
+    uuid: postedTrace.uuid,
   };
   if (postedTrace.url !== undefined) {
     result.url = sanitizeString(postedTrace.url);
@@ -316,4 +323,18 @@ function isPostedTraceWrapped(obj: any): obj is PostedTraceWrapped {
     wrapped.perfetto.buffer !== undefined &&
     wrapped.perfetto.title !== undefined
   );
+}
+
+interface PostedUpdateToTraceWrapped {
+  perfetto: PostedUpdateToTrace;
+}
+
+function isPostedUpdate(obj: unknown): boolean {
+  const wrapped = obj as PostedUpdateToTraceWrapped;
+
+  if (wrapped.perfetto === undefined) {
+    return false;
+  }
+
+  return wrapped.perfetto.update !== undefined;
 }
