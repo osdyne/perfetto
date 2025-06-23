@@ -160,8 +160,17 @@ export async function updateTrace(_app: AppImpl, traceUpdate: TraceSource) {
     return
   }
 
-  await updateEngineData(currentEngine, traceUpdate);
+  const appState = await updateEngineData(traceUpdate);
   await updateTimeline();
+
+  if (appState !== undefined) {
+    // Wait that plugins have completed their actions and then proceed with
+    // the final phase of app state restore.
+    // TODO(primiano): this can probably be removed once we refactor tracks
+    // to be URI based and can deal with non-existing URIs.
+    deserializeAppStatePhase2(appState, currentTrace);
+  }
+
 }
 
 async function createEngine(
@@ -196,7 +205,11 @@ async function createEngine(
   return engine;
 }
 
-async function updateEngineData(engine: EngineBase, traceSource: TraceSource): Promise<SerializedAppState  | undefined> {
+async function updateEngineData(traceSource: TraceSource): Promise<SerializedAppState  | undefined> {
+  if (currentEngine === null) {
+    return;
+  }
+
   let traceStream: TraceStream | undefined;
   let serializedAppState: SerializedAppState | undefined;
   if (traceSource.type === 'FILE') {
@@ -220,10 +233,10 @@ async function updateEngineData(engine: EngineBase, traceSource: TraceSource): P
   if (traceStream !== undefined) {
     for (;;) {
       const res = await traceStream.readChunk();
-      await engine.parse(res.data);
+      await currentEngine.parse(res.data);
       if (res.eof) break;
     }
-    // await engine.notifyEof();
+    await currentEngine.notifyEof();
   }
 
   return serializedAppState;
@@ -234,12 +247,12 @@ async function updateTimeline () {
     return;
   }
 
-  const traceTime = await getTraceTimeBounds(currentEngine);
+  const traceTime = await getTraceTimeBounds(currentTrace.engine);
   const visibleTimeSpan = await computeVisibleTime(
     traceTime.start,
     traceTime.end,
     false,
-    currentEngine,
+    currentTrace.engine,
   );
 
   currentTrace.timeline.updateVisibleTime(visibleTimeSpan);

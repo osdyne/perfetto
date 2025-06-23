@@ -522,14 +522,14 @@ void TraceProcessorImpl::Flush() {
 }
 
 base::Status TraceProcessorImpl::NotifyEndOfFile() {
-  if (notify_eof_called_) {
-    const char kMessage[] =
-        "NotifyEndOfFile should only be called once. Try calling Flush instead "
-        "if trying to commit the contents of the trace to tables.";
-    PERFETTO_ELOG(kMessage);
-    return base::ErrStatus(kMessage);
-  }
-  notify_eof_called_ = true;
+  // if (notify_eof_called_) {
+  //   const char kMessage[] =
+  //       "NotifyEndOfFile should only be called once. Try calling Flush instead "
+  //       "if trying to commit the contents of the trace to tables.";
+  //   PERFETTO_ELOG(kMessage);
+  //   return base::ErrStatus(kMessage);
+  // }
+  // notify_eof_called_ = true;
 
   if (current_trace_name_.empty())
     current_trace_name_ = "Unnamed trace";
@@ -537,7 +537,7 @@ base::Status TraceProcessorImpl::NotifyEndOfFile() {
   // Last opportunity to flush all pending data.
   Flush();
 
-  RETURN_IF_ERROR(TraceProcessorStorageImpl::NotifyEndOfFile());
+  // RETURN_IF_ERROR(TraceProcessorStorageImpl::NotifyEndOfFile());
   context_.storage->ShrinkToFitTables();
 
   // Rebuild the bounds table once everything has been completed: we do this
@@ -548,7 +548,7 @@ base::Status TraceProcessorImpl::NotifyEndOfFile() {
   BuildBoundsTable(engine_->sqlite_engine()->db(),
                    GetTraceTimestampBoundsNs(*context_.storage));
 
-  TraceProcessorStorageImpl::DestroyContext();
+  // TraceProcessorStorageImpl::DestroyContext();
   return base::OkStatus();
 }
 

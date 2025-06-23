@@ -352,11 +352,11 @@ base::Status Rpc::Parse(const uint8_t* data, size_t len) {
   PERFETTO_TP_TRACE(
       metatrace::Category::API_TIMELINE, "RPC_PARSE",
       [&](metatrace::Record* r) { r->AddArg("length", std::to_string(len)); });
-  if (eof_) {
-    // Reset the trace processor state if another trace has been previously
-    // loaded. Use the same TraceProcessor Config.
-    ResetTraceProcessorInternal(trace_processor_config_);
-  }
+  // if (eof_) {
+  //   // Reset the trace processor state if another trace has been previously
+  //   // loaded. Use the same TraceProcessor Config.
+  //   ResetTraceProcessorInternal(trace_processor_config_);
+  // }
 
   eof_ = false;
   bytes_parsed_ += len;

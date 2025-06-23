@@ -231,7 +231,7 @@ export class AppImpl implements App {
     // is performed by openTrace() in this file. However in some rare cases we
     // might end up loading a trace while another one is still loading, and this
     // covers races in that case.
-    this.closeCurrentTrace();
+    // this.closeCurrentTrace();
     this.currentTrace = traceImpl;
   }
 
