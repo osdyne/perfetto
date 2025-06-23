@@ -177,7 +177,10 @@ export class AppImpl implements App {
   }
 
   async updateTraceFromBuffer(update: PostedUpdateToTrace) {
-      await updateTrace(this, { type: 'ARRAY_BUFFER', title: "update", buffer: update.update });
+    // TODO: error handling?
+    if (this.currentTrace) {
+      await updateTrace(this.currentTrace, { type: 'ARRAY_BUFFER', title: "update", buffer: update.update });
+    }
   }
 
   private async openTrace(src: TraceSource) {

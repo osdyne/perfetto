@@ -132,6 +132,8 @@ export abstract class EngineBase implements Engine, Disposable {
   private _numRequestsPending = 0;
   private _failed: Optional<string> = undefined;
 
+  private updateListeners: (() => void)[] = [];
+
   // TraceController sets this to raf.scheduleFullRedraw().
   onResponseReceived?: () => void;
 
@@ -313,7 +315,14 @@ export abstract class EngineBase implements Engine, Disposable {
     const rpc = TraceProcessorRpc.create();
     rpc.request = TPM.TPM_FINALIZE_TRACE_DATA;
     this.rpcSendRequest(rpc);
-    return asyncRes; // Linearize with the worker.
+    return asyncRes.then(() => {
+      this.updateListeners.forEach(listener => listener());
+    }); // Linearize with the worker.
+  }
+
+  registerUpdateListener(listener: () => void) {
+    console.log(this)
+    this.updateListeners.push(listener);
   }
 
   // Updates the TraceProcessor Config. This method creates a new

@@ -48,7 +48,8 @@ export class FlowManager {
     private engine: Engine,
     private trackMgr: TrackManager,
     private selectionMgr: SelectionManager,
-  ) {}
+  ) {
+  }
 
   // TODO(primiano): the only reason why this is not done in the constructor is
   // because when loading the UI with no trace, we initialize globals with a

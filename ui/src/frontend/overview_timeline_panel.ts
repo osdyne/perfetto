@@ -59,12 +59,18 @@ export class OverviewTimelinePanel implements Panel {
       trace,
       () => new OverviewDataLoader(trace),
     );
+
+    // TODO: should belong in the engine proxy
+    this.trace.traceCtx.engine.registerUpdateListener(async () => {
+      await this.overviewData.beginLoad();
+    });
   }
 
   // Must explicitly type now; arguments types are no longer auto-inferred.
   // https://github.com/Microsoft/TypeScript/issues/1373
   onupdate({dom}: m.CVnodeDOM) {
     this.width = dom.getBoundingClientRect().width;
+
     const traceTime = this.trace.traceInfo;
     if (this.width > TRACK_SHELL_WIDTH) {
       const pxBounds = {left: TRACK_SHELL_WIDTH, right: this.width};
@@ -340,6 +346,7 @@ class OverviewDataLoader {
       this.trace.traceInfo.start,
       this.trace.traceInfo.end,
     );
+
     const engine = this.trace.engine;
     const stepSize = Duration.max(1n, traceSpan.duration / 100n);
     const hasSchedSql = 'select ts from sched limit 1';
@@ -360,9 +367,9 @@ class OverviewDataLoader {
     ) {
       const progress = start - traceSpan.start;
       const ratio = Number(progress) / Number(traceSpan.duration);
-      this.trace.omnibox.showStatusMessage(
-        'Loading overview ' + `${Math.round(ratio * 100)}%`,
-      );
+      // this.trace.omnibox.showStatusMessage(
+      //   'Loading overview ' + `${Math.round(ratio * 100)}%`,
+      // );
       const end = Time.add(start, stepSize);
       // The (async() => {})() queues all the 100 async promises in one batch.
       // Without that, we would wait for each step to be rendered before
