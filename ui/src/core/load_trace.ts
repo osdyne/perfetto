@@ -157,7 +157,7 @@ export async function loadTrace(
 }
 
 export async function updateTrace(trace: TraceImpl, traceUpdate: TraceSource) {
-  await updateEngineData(trace, traceUpdate);
+  await apppendEngineData(trace, traceUpdate);
   const traceInfo = await getTraceInfo(trace.engine, traceUpdate);
   const timeline = new TimelineImpl(traceInfo);
   trace.traceCtx.traceInfo = traceInfo;
@@ -198,7 +198,7 @@ async function createEngine(
   return engine;
 }
 
-async function updateEngineData(trace: TraceImpl, traceSource: TraceSource): Promise<SerializedAppState  | undefined> {
+async function apppendEngineData(trace: TraceImpl, traceSource: TraceSource): Promise<SerializedAppState  | undefined> {
   let traceStream: TraceStream | undefined;
   let serializedAppState: SerializedAppState | undefined;
   if (traceSource.type === 'FILE') {
@@ -222,10 +222,11 @@ async function updateEngineData(trace: TraceImpl, traceSource: TraceSource): Pro
   if (traceStream !== undefined) {
     for (;;) {
       const res = await traceStream.readChunk();
-      await trace.traceCtx.engine.parse(res.data);
+      await trace.traceCtx.engine.append(res.data);
       if (res.eof) break;
     }
-    await trace.traceCtx.engine.notifyEof();
+
+    // await trace.traceCtx.engine.notifyEof();
   }
 
   return serializedAppState;
