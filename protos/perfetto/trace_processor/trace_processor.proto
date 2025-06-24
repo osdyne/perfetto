@@ -93,7 +93,7 @@ message TraceProcessorRpc {
     reserved "TPM_REGISTER_SQL_MODULE";
 
     TPM_UNSPECIFIED = 0;
-    TPM_APPEND_TRACE_DATA = 1;
+    TPM_PARSE_TRACE_DATA = 1;
     TPM_FINALIZE_TRACE_DATA = 2;
     TPM_QUERY_STREAMING = 3;
     // Previously: TPM_QUERY_RAW_DEPRECATED
@@ -105,6 +105,7 @@ message TraceProcessorRpc {
     TPM_GET_STATUS = 10;
     TPM_RESET_TRACE_PROCESSOR = 11;
     TPM_REGISTER_SQL_PACKAGE = 13;
+    TPM_APPEND_TRACE_DATA = 14;
   }
 
   oneof type {
@@ -126,7 +127,7 @@ message TraceProcessorRpc {
   oneof args {
     // TraceProcessorMethod request args.
 
-    // For TPM_APPEND_TRACE_DATA.
+    // For TPM_PARSE_TRACE_DATA and TPM_APPEND_TRACE_DATA
     bytes append_trace_data = 101;
     // For TPM_QUERY_STREAMING.
     QueryArgs query_args = 103;
@@ -140,7 +141,7 @@ message TraceProcessorRpc {
     RegisterSqlPackageArgs register_sql_package_args = 108;
 
     // TraceProcessorMethod response args.
-    // For TPM_APPEND_TRACE_DATA.
+    // For TPM_PARSE_TRACE_DATA.
     AppendTraceDataResult append_result = 201;
     // For TPM_QUERY_STREAMING.
     QueryResult query_result = 203;

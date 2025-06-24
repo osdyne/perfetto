@@ -132,6 +132,8 @@ export abstract class EngineBase implements Engine, Disposable {
   private _numRequestsPending = 0;
   private _failed: Optional<string> = undefined;
 
+  private updateListeners: (() => void)[] = [];
+
   // TraceController sets this to raf.scheduleFullRedraw().
   onResponseReceived?: () => void;
 
@@ -208,6 +210,7 @@ export abstract class EngineBase implements Engine, Disposable {
     let isFinalResponse = true;
 
     switch (rpc.response) {
+      case TPM.TPM_PARSE_TRACE_DATA:
       case TPM.TPM_APPEND_TRACE_DATA:
         const appendResult = assertExists(rpc.appendResult);
         const pendingPromise = assertExists(this.pendingParses.shift());
@@ -299,10 +302,23 @@ export abstract class EngineBase implements Engine, Disposable {
     const asyncRes = defer<void>();
     this.pendingParses.push(asyncRes);
     const rpc = TraceProcessorRpc.create();
-    rpc.request = TPM.TPM_APPEND_TRACE_DATA;
+    rpc.request = TPM.TPM_PARSE_TRACE_DATA;
     rpc.appendTraceData = data;
     this.rpcSendRequest(rpc);
     return asyncRes; // Linearize with the worker.
+  }
+
+  // Append trace data into the engine, also invokes a flush
+  append(data: Uint8Array): Promise<void> {
+    const asyncRes = defer<void>();
+    this.pendingParses.push(asyncRes);
+    const rpc = TraceProcessorRpc.create();
+    rpc.request = TPM.TPM_APPEND_TRACE_DATA;
+    rpc.appendTraceData = data;
+    this.rpcSendRequest(rpc);
+    return asyncRes.then(() => {
+      this.updateListeners.forEach(listener => listener());
+    });
   }
 
   // Notify the engine that we reached the end of the trace.
@@ -314,6 +330,10 @@ export abstract class EngineBase implements Engine, Disposable {
     rpc.request = TPM.TPM_FINALIZE_TRACE_DATA;
     this.rpcSendRequest(rpc);
     return asyncRes; // Linearize with the worker.
+  }
+
+  registerUpdateListener(listener: () => void) {
+    this.updateListeners.push(listener);
   }
 
   // Updates the TraceProcessor Config. This method creates a new
