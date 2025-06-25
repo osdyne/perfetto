@@ -289,6 +289,8 @@ function main() {
   (window as {} as IdleDetectorWindow).waitForPerfettoIdle = (ms?: number) => {
     return new IdleDetector().waitForPerfettoIdle(ms);
   };
+
+  dispatchEvent(new CustomEvent("perfetto_loaded", { detail: AppImpl.instance }));
 }
 
 function onCssLoaded() {
