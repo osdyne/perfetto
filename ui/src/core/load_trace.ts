@@ -51,6 +51,7 @@ import {SerializedAppState} from '../public/state_serialization_schema';
 import {TraceSource} from '../public/trace_source';
 import {ThreadDesc} from '../public/threads';
 import {Router} from '../core/router';
+import { TimelineImpl } from './timeline';
 
 const METRICS = [
   'android_ion',
@@ -150,6 +151,50 @@ export async function loadTrace(
   const engineId = `${++lastEngineId}`;
   const engine = await createEngine(app, engineId);
   return await loadTraceIntoEngine(app, traceSource, engine);
+}
+
+async function apppendEngineData(trace: TraceImpl, traceSource: TraceSource): Promise<SerializedAppState  | undefined> {
+  let traceStream: TraceStream | undefined;
+  let serializedAppState: SerializedAppState | undefined;
+  if (traceSource.type === 'FILE') {
+    traceStream = new TraceFileStream(traceSource.file);
+  } else if (traceSource.type === 'ARRAY_BUFFER') {
+    traceStream = new TraceBufferStream(traceSource.buffer);
+  } else if (traceSource.type === 'URL') {
+    traceStream = new TraceHttpStream(traceSource.url);
+    serializedAppState = traceSource.serializedAppState;
+  } else if (traceSource.type === 'HTTP_RPC') {
+    traceStream = undefined;
+  } else {
+    throw new Error(`Unknown source: ${JSON.stringify(traceSource)}`);
+  }
+
+  // |traceStream| can be undefined in the case when we are using the external
+  // HTTP+RPC endpoint and the trace processor instance has already loaded
+  // a trace (because it was passed as a cmdline argument to
+  // trace_processor_shell). In this case we don't want the UI to load any
+  // file/stream and we just want to jump to the loading phase.
+  if (traceStream !== undefined) {
+    for (;;) {
+      const res = await traceStream.readChunk();
+      await trace.traceCtx.engine.stream(res.data);
+      if (res.eof) break;
+    }
+  }
+
+  return serializedAppState;
+}
+
+
+
+export async function streamTrace(trace: TraceImpl, traceUpdate: TraceSource) {
+  await apppendEngineData(trace, traceUpdate);
+  const traceInfo = await getTraceInfo(trace.engine, traceUpdate);
+  const timeline = new TimelineImpl(traceInfo);
+  trace.traceCtx.traceInfo = traceInfo;
+  trace.traceCtx.timeline = timeline;
+  trace.traceCtx.trackMgr.flushOldTracks();
+  raf.scheduleRedraw();
 }
 
 async function createEngine(

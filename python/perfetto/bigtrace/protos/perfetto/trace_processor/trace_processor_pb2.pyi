@@ -24,7 +24,7 @@ class TraceProcessorRpc(_message.Message):
     class TraceProcessorMethod(int, metaclass=_enum_type_wrapper.EnumTypeWrapper):
         __slots__ = ()
         TPM_UNSPECIFIED: _ClassVar[TraceProcessorRpc.TraceProcessorMethod]
-        TPM_PARSE_TRACE_DATA: _ClassVar[TraceProcessorRpc.TraceProcessorMethod]
+        TPM_APPEND_TRACE_DATA: _ClassVar[TraceProcessorRpc.TraceProcessorMethod]
         TPM_FINALIZE_TRACE_DATA: _ClassVar[TraceProcessorRpc.TraceProcessorMethod]
         TPM_QUERY_STREAMING: _ClassVar[TraceProcessorRpc.TraceProcessorMethod]
         TPM_COMPUTE_METRIC: _ClassVar[TraceProcessorRpc.TraceProcessorMethod]
@@ -35,7 +35,7 @@ class TraceProcessorRpc(_message.Message):
         TPM_GET_STATUS: _ClassVar[TraceProcessorRpc.TraceProcessorMethod]
         TPM_RESET_TRACE_PROCESSOR: _ClassVar[TraceProcessorRpc.TraceProcessorMethod]
     TPM_UNSPECIFIED: TraceProcessorRpc.TraceProcessorMethod
-    TPM_PARSE_TRACE_DATA: TraceProcessorRpc.TraceProcessorMethod
+    TPM_APPEND_TRACE_DATA: TraceProcessorRpc.TraceProcessorMethod
     TPM_FINALIZE_TRACE_DATA: TraceProcessorRpc.TraceProcessorMethod
     TPM_QUERY_STREAMING: TraceProcessorRpc.TraceProcessorMethod
     TPM_COMPUTE_METRIC: TraceProcessorRpc.TraceProcessorMethod

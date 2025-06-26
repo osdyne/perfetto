@@ -210,7 +210,7 @@ export abstract class EngineBase implements Engine, Disposable {
     let isFinalResponse = true;
 
     switch (rpc.response) {
-      case TPM.TPM_PARSE_TRACE_DATA:
+      case TPM.TPM_STREAM_TRACE_DATA:
       case TPM.TPM_APPEND_TRACE_DATA:
         const appendResult = assertExists(rpc.appendResult);
         const pendingPromise = assertExists(this.pendingParses.shift());
@@ -302,18 +302,18 @@ export abstract class EngineBase implements Engine, Disposable {
     const asyncRes = defer<void>();
     this.pendingParses.push(asyncRes);
     const rpc = TraceProcessorRpc.create();
-    rpc.request = TPM.TPM_PARSE_TRACE_DATA;
+    rpc.request = TPM.TPM_APPEND_TRACE_DATA;
     rpc.appendTraceData = data;
     this.rpcSendRequest(rpc);
     return asyncRes; // Linearize with the worker.
   }
 
-  // Append trace data into the engine, also invokes a flush
-  append(data: Uint8Array): Promise<void> {
+  // stream trace data into the engine, also invokes a flush
+  stream(data: Uint8Array): Promise<void> {
     const asyncRes = defer<void>();
     this.pendingParses.push(asyncRes);
     const rpc = TraceProcessorRpc.create();
-    rpc.request = TPM.TPM_APPEND_TRACE_DATA;
+    rpc.request = TPM.TPM_STREAM_TRACE_DATA;
     rpc.appendTraceData = data;
     this.rpcSendRequest(rpc);
     return asyncRes.then(() => {

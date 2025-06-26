@@ -36,5 +36,10 @@ util::Status TraceProcessorStorage::Parse(std::unique_ptr<uint8_t[]> buf,
   return Parse(TraceBlobView(TraceBlob::TakeOwnership(std::move(buf), size)));
 }
 
+util::Status TraceProcessorStorage::Stream(std::unique_ptr<uint8_t[]> buf,
+                                          size_t size) {
+  return Stream(TraceBlobView(TraceBlob::TakeOwnership(std::move(buf), size)));
+}
+
 }  // namespace trace_processor
 }  // namespace perfetto

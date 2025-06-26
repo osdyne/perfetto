@@ -195,7 +195,7 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
   const int req_type = static_cast<int>(req.request());
   static const char kErrFieldNotSet[] = "RPC error: request field not set";
   switch (req_type) {
-    case RpcProto::TPM_PARSE_TRACE_DATA: {
+    case RpcProto::TPM_APPEND_TRACE_DATA: {
       Response resp(tx_seq_id_++, req_type);
       auto* result = resp->set_append_result();
       if (!req.has_append_trace_data()) {
@@ -216,14 +216,14 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
       resp.Send(rpc_response_fn_);
       break;
     }
-    case RpcProto::TPM_APPEND_TRACE_DATA: {
-            Response resp(tx_seq_id_++, req_type);
+    case RpcProto::TPM_STREAM_TRACE_DATA: {
+      Response resp(tx_seq_id_++, req_type);
       auto* result = resp->set_append_result();
       if (!req.has_append_trace_data()) {
         result->set_error(kErrFieldNotSet);
       } else {
         protozero::ConstBytes byte_range = req.append_trace_data();
-        base::Status res = Append(byte_range.data, byte_range.size);
+        base::Status res = Stream(byte_range.data, byte_range.size);
         if (!res.ok()) {
           result->set_error(res.message());
         }
@@ -367,6 +367,7 @@ base::Status Rpc::Parse(const uint8_t* data, size_t len) {
   PERFETTO_TP_TRACE(
       metatrace::Category::API_TIMELINE, "RPC_PARSE",
       [&](metatrace::Record* r) { r->AddArg("length", std::to_string(len)); });
+
   if (eof_) {
     // Reset the trace processor state if another trace has been previously
     // loaded. Use the same TraceProcessor Config.
@@ -386,12 +387,20 @@ base::Status Rpc::Parse(const uint8_t* data, size_t len) {
   return trace_processor_->Parse(std::move(data_copy), len);
 }
 
-base::Status Rpc::Append(const uint8_t* data, size_t len) {
+base::Status Rpc::Stream(const uint8_t* data, size_t len) {
   PERFETTO_TP_TRACE(
       metatrace::Category::API_TIMELINE, "RPC_APPEND",
       [&](metatrace::Record* r) { r->AddArg("length", std::to_string(len)); });
+  if (!eof_) {
+    // Reset the trace processor state if another trace has been previously
+    // loaded. Use the same TraceProcessor Config.
+    ResetTraceProcessorInternal(trace_processor_config_);
+    eof_ = true;
+  }
+
 
   bytes_parsed_ += len;
+  // TODO: remove?
   MaybePrintProgress();
 
   if (len == 0)
@@ -400,8 +409,9 @@ base::Status Rpc::Append(const uint8_t* data, size_t len) {
   // TraceProcessor needs take ownership of the memory chunk.
   std::unique_ptr<uint8_t[]> data_copy(new uint8_t[len]);
   memcpy(data_copy.get(), data, len);
-  base::Status status = trace_processor_->Parse(std::move(data_copy), len);
+  base::Status status = trace_processor_->Stream(std::move(data_copy), len);
   trace_processor_->Flush();
+
   return status;
 }
 

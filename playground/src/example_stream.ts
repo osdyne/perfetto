@@ -15,7 +15,7 @@ window.addEventListener('perfetto_loaded', async (event: Event) => {
 
   for (let i = 0; i <= 16; i++) {
     const buffer = await loadFile(chunkPath(i));
-    app.appendTraceFromBuffer({ buffer, title: 'Stream' });
+    app.streamTraceFromBuffer({ buffer, title: 'Stream' });
     await timeout(1);
   }
 });

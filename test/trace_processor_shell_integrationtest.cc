@@ -45,7 +45,7 @@ TEST(TraceProcessorShellIntegrationTest, StdioSimpleRequestResponse) {
 
   auto* rpc = req.add_msg();
   rpc->set_append_trace_data(kSimpleSystrace.data(), kSimpleSystrace.size());
-  rpc->set_request(TraceProcessorRpc::TPM_PARSE_TRACE_DATA);
+  rpc->set_request(TraceProcessorRpc::TPM_APPEND_TRACE_DATA);
 
   rpc = req.add_msg();
   rpc->set_request(TraceProcessorRpc::TPM_FINALIZE_TRACE_DATA);
@@ -69,7 +69,7 @@ TEST(TraceProcessorShellIntegrationTest, StdioSimpleRequestResponse) {
 
   ASSERT_THAT(stream.msg(),
               ElementsAre(Property(&TraceProcessorRpc::response,
-                                   TraceProcessorRpc::TPM_PARSE_TRACE_DATA),
+                                   TraceProcessorRpc::TPM_APPEND_TRACE_DATA),
                           Property(&TraceProcessorRpc::response,
                                    TraceProcessorRpc::TPM_FINALIZE_TRACE_DATA),
                           Property(&TraceProcessorRpc::response,
