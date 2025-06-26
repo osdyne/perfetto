@@ -542,7 +542,7 @@ base::Status TraceProcessorImpl::NotifyEndOfFile() {
   // Last opportunity to flush all pending data.
   Flush();
 
-  RETURN_IF_ERROR(TraceProcessorStorageImpl::NotifyEndOfFile());
+  // RETURN_IF_ERROR(TraceProcessorStorageImpl::NotifyEndOfFile());
   context_.storage->ShrinkToFitTables();
 
   // Rebuild the bounds table once everything has been completed: we do this
@@ -553,7 +553,7 @@ base::Status TraceProcessorImpl::NotifyEndOfFile() {
   BuildBoundsTable(engine_->sqlite_engine()->db(),
                    GetTraceTimestampBoundsNs(*context_.storage));
 
-  TraceProcessorStorageImpl::DestroyContext();
+  // TraceProcessorStorageImpl::DestroyContext();
   return base::OkStatus();
 }
 
