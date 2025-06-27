@@ -216,21 +216,6 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
       resp.Send(rpc_response_fn_);
       break;
     }
-    case RpcProto::TPM_STREAM_TRACE_DATA: {
-      Response resp(tx_seq_id_++, req_type);
-      auto* result = resp->set_append_result();
-      if (!req.has_append_trace_data()) {
-        result->set_error(kErrFieldNotSet);
-      } else {
-        protozero::ConstBytes byte_range = req.append_trace_data();
-        base::Status res = Stream(byte_range.data, byte_range.size);
-        if (!res.ok()) {
-          result->set_error(res.message());
-        }
-      }
-      resp.Send(rpc_response_fn_);
-      break;
-    }
     case RpcProto::TPM_QUERY_STREAMING: {
       if (!req.has_query_args()) {
         Response resp(tx_seq_id_++, req_type);
@@ -349,6 +334,29 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
       resp.Send(rpc_response_fn_);
       break;
     }
+    // OTV Trace Stream Extension
+    case RpcProto::TPM_STREAM_TRACE_DATA: {
+      Response resp(tx_seq_id_++, req_type);
+      auto* result = resp->set_append_result();
+      if (!req.has_append_trace_data()) {
+        result->set_error(kErrFieldNotSet);
+      } else {
+        protozero::ConstBytes byte_range = req.append_trace_data();
+        base::Status res = Stream(byte_range.data, byte_range.size);
+        if (!res.ok()) {
+          result->set_error(res.message());
+        }
+      }
+      resp.Send(rpc_response_fn_);
+      break;
+    }
+
+    case RpcProto::TPM_BEGIN_TRACE_STREAM: {
+      Response resp(tx_seq_id_++, req_type);
+      NotifyBeginOfStream();
+      resp.Send(rpc_response_fn_);
+      break;
+    }
     default: {
       // This can legitimately happen if the client is newer. We reply with a
       // generic "unkown request" response, so the client can do feature
@@ -391,16 +399,8 @@ base::Status Rpc::Stream(const uint8_t* data, size_t len) {
   PERFETTO_TP_TRACE(
       metatrace::Category::API_TIMELINE, "RPC_APPEND",
       [&](metatrace::Record* r) { r->AddArg("length", std::to_string(len)); });
-  if (!eof_) {
-    // Reset the trace processor state if another trace has been previously
-    // loaded. Use the same TraceProcessor Config.
-    ResetTraceProcessorInternal(trace_processor_config_);
-    eof_ = true;
-  }
-
 
   bytes_parsed_ += len;
-  // TODO: remove?
   MaybePrintProgress();
 
   if (len == 0)
@@ -410,7 +410,6 @@ base::Status Rpc::Stream(const uint8_t* data, size_t len) {
   std::unique_ptr<uint8_t[]> data_copy(new uint8_t[len]);
   memcpy(data_copy.get(), data, len);
   base::Status status = trace_processor_->Stream(std::move(data_copy), len);
-  trace_processor_->Flush();
 
   return status;
 }
@@ -421,6 +420,14 @@ base::Status Rpc::NotifyEndOfFile() {
 
   eof_ = true;
   RETURN_IF_ERROR(trace_processor_->NotifyEndOfFile());
+  MaybePrintProgress();
+  return base::OkStatus();
+}
+
+base::Status Rpc::NotifyBeginOfStream() {
+  PERFETTO_TP_TRACE(metatrace::Category::API_TIMELINE,
+                    "RPC_NOTIFY_BEGIN_OF_STREAM");
+  RETURN_IF_ERROR(trace_processor_->NotifyBeginOfStream());
   MaybePrintProgress();
   return base::OkStatus();
 }

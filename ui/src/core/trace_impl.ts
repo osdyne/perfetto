@@ -152,6 +152,15 @@ class TraceContext implements Disposable {
   [Symbol.dispose]() {
     this.trash.dispose();
   }
+
+  /**
+   * OTV Trace Streaming Extension
+   */
+  update(traceInfo: TraceInfo) {
+    this.traceInfo = traceInfo;
+    this.timeline = new TimelineImpl(traceInfo);
+    this.trackMgr.flushOldTracks();
+  }
 }
 
 /**

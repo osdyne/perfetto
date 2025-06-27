@@ -103,40 +103,6 @@ base::Status TraceProcessorStorageImpl::Parse(TraceBlobView blob) {
   return status;
 }
 
-base::Status TraceProcessorStorageImpl::Stream(TraceBlobView blob) {
-  if (blob.size() == 0)
-    return base::OkStatus();
-  if (unrecoverable_parse_error_)
-    return base::ErrStatus(
-        "Failed unrecoverably while parsing in a previous Parse call");
-  if (!parser_) {
-    active_file_ = context_.trace_file_tracker->StartNewFile();
-    auto parser = std::make_unique<ForwardingTraceParser>(&context_);
-    parser_ = parser.get();
-    context_.chunk_readers.push_back(std::move(parser));
-  }
-
-  auto scoped_trace = context_.storage->TraceExecutionTimeIntoStats(
-      stats::parse_trace_duration_ns);
-
-  if (hash_input_size_remaining_ > 0 && !context_.uuid_found_in_trace) {
-    const size_t hash_size = std::min(hash_input_size_remaining_, blob.size());
-    hash_input_size_remaining_ -= hash_size;
-
-    trace_hash_.Update(reinterpret_cast<const char*>(blob.data()), hash_size);
-    base::Uuid uuid(static_cast<int64_t>(trace_hash_.digest()), 0);
-    const StringId id_for_uuid =
-        context_.storage->InternString(base::StringView(uuid.ToPrettyString()));
-    context_.metadata_tracker->SetMetadata(metadata::trace_uuid,
-                                           Variadic::String(id_for_uuid));
-  }
-
-  active_file_->AddSize(blob.size());
-  base::Status status = parser_->Parse(std::move(blob));
-  unrecoverable_parse_error_ |= !status.ok();
-  return status;
-}
-
 void TraceProcessorStorageImpl::Flush() {
   if (unrecoverable_parse_error_)
     return;
@@ -175,6 +141,73 @@ base::Status TraceProcessorStorageImpl::NotifyEndOfFile() {
     perf_importer::DsoTracker::GetOrCreate(&context_).SymbolizeFrames();
   }
   return base::OkStatus();
+}
+
+// OTV Trace Streaming Extension
+base::Status TraceProcessorStorageImpl::NotifyBeginOfStream() {
+ if (!parser_) {
+    return base::OkStatus();
+  }
+  if (unrecoverable_parse_error_) {
+    return base::ErrStatus("Unrecoverable parsing error already occurred");
+  }
+  Flush();
+  RETURN_IF_ERROR(parser_->NotifyEndOfFile());
+  PERFETTO_CHECK(active_file_.has_value());
+  active_file_->SetTraceType(parser_->trace_type());
+
+  // NotifyEndOfFile might have pushed packets to the sorter.
+  Flush();
+  for (std::unique_ptr<ProtoImporterModule>& module : context_.modules) {
+    module->NotifyEndOfFile();
+  }
+  if (context_.content_analyzer) {
+    PacketAnalyzer::Get(&context_)->NotifyEndOfFile();
+  }
+
+  context_.event_tracker->FlushPendingEvents();
+  context_.slice_tracker->FlushPendingSlices();
+  context_.args_tracker->Flush();
+  context_.process_tracker->NotifyEndOfFile();
+  if (context_.perf_dso_tracker) {
+    perf_importer::DsoTracker::GetOrCreate(&context_).SymbolizeFrames();
+  }
+
+  return base::OkStatus();
+}
+
+base::Status TraceProcessorStorageImpl::Stream(TraceBlobView blob) {
+  if (blob.size() == 0)
+    return base::OkStatus();
+  if (unrecoverable_parse_error_)
+    return base::ErrStatus(
+        "Failed unrecoverably while parsing in a previous Parse call");
+  if (!parser_) {
+    active_file_ = context_.trace_file_tracker->StartNewFile();
+    auto parser = std::make_unique<ForwardingTraceParser>(&context_);
+    parser_ = parser.get();
+    context_.chunk_readers.push_back(std::move(parser));
+  }
+
+  auto scoped_trace = context_.storage->TraceExecutionTimeIntoStats(
+      stats::parse_trace_duration_ns);
+
+  if (hash_input_size_remaining_ > 0 && !context_.uuid_found_in_trace) {
+    const size_t hash_size = std::min(hash_input_size_remaining_, blob.size());
+    hash_input_size_remaining_ -= hash_size;
+
+    trace_hash_.Update(reinterpret_cast<const char*>(blob.data()), hash_size);
+    base::Uuid uuid(static_cast<int64_t>(trace_hash_.digest()), 0);
+    const StringId id_for_uuid =
+        context_.storage->InternString(base::StringView(uuid.ToPrettyString()));
+    context_.metadata_tracker->SetMetadata(metadata::trace_uuid,
+                                           Variadic::String(id_for_uuid));
+  }
+
+  active_file_->AddSize(blob.size());
+  base::Status status = parser_->Parse(std::move(blob));
+  unrecoverable_parse_error_ |= !status.ok();
+  return status;
 }
 
 void TraceProcessorStorageImpl::DestroyContext() {

@@ -61,6 +61,7 @@ class PERFETTO_EXPORT_COMPONENT TraceProcessorStorage {
   // Calls Flush and finishes all of the actions required for parsing the trace.
   // Calling this function multiple times is undefined behaviour.
   virtual base::Status NotifyEndOfFile() = 0;
+  virtual base::Status NotifyBeginOfStream() = 0;
 };
 
 }  // namespace perfetto::trace_processor
