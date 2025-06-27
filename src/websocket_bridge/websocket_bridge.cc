@@ -93,6 +93,8 @@ void WSBridge::Main(int, char**) {
       {"/adb", adb_socket_endpoint.c_str(), base::SockFamily::kInet});
 
   base::HttpServer srv(&task_runner_, this);
+  srv.AddAllowedOrigin("http://localhost:5173");
+  srv.AddAllowedOrigin("http://127.0.0.1:5173");
   srv.AddAllowedOrigin("http://localhost:10000");
   srv.AddAllowedOrigin("http://127.0.0.1:10000");
   srv.AddAllowedOrigin("https://ui.perfetto.dev");
