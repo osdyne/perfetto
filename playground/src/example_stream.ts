@@ -13,8 +13,9 @@ import { AppImpl } from '../../ui/src/core/app_impl';
 window.addEventListener('perfetto_loaded', async (event: Event) => {
   const { detail: app } = event as CustomEvent<AppImpl>;
 
-  for (let i = 0; i <= 16; i++) {
+  for (let i = -1; i <= 16; i++) {
     const buffer = await loadFile(chunkPath(i));
+    console.log(chunkPath(i), buffer);
     app.streamTraceFromBuffer({ buffer, title: 'Stream' });
     await timeout(1);
   }

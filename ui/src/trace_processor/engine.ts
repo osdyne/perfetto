@@ -639,6 +639,11 @@ export class EngineProxy implements Engine, Disposable {
   [Symbol.dispose]() {
     this._isAlive = false;
   }
+
+  // OTV Trace Streaming Extension
+  onUpdate(listener: () => void) {
+    this.engine.registerUpdateListener(listener);
+  }
 }
 
 // Capture stack trace and attach to the given error object

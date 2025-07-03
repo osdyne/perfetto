@@ -613,6 +613,7 @@ async function getTraceInfo(
           clock_name in ('REALTIME', 'REALTIME_COARSE')
         `;
   const result = await engine.query(query);
+
   const it = result.iter({
     ts: LONG,
     clockValue: LONG,
@@ -906,6 +907,6 @@ async function loadStreamIntoEngine(
   }
 
   await trace.plugins.onTraceReady();
-
+  app.omnibox.reset();
   return trace;
 }

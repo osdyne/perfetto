@@ -9,7 +9,7 @@
     "start:playground": "vite playground/",
     "start:perfetto": "ui/build --serve --watch --serve-port 10000",
     "build": "ui/build",
-    "clean": "rm -rf dist/* && mkdir -p dist",
+    "clean": "rm -rf dist/* && rm -rf ui/out/* && mkdir -p dist",
     "bundle:ui": "cp -R ./out/ui/ui/dist ./dist/ui && rm -rf ./dist/ui/dist ./dist/ui/out",
     "bundle:wasm": "cp -R ./out/ui/wasm ./dist/wasm && rm -rf ./dist/wasm/gen ./dist/wasm/obj ./dist/wasm/toolchain.ninja",
     "bundle": "npm run clean && npm run bundle:ui && npm run bundle:wasm"

@@ -59,6 +59,10 @@ export class OverviewTimelinePanel implements Panel {
       trace,
       () => new OverviewDataLoader(trace),
     );
+
+    this.trace.engine.onUpdate(async () => {
+      await this.overviewData.beginLoad();
+    });
   }
 
   // Must explicitly type now; arguments types are no longer auto-inferred.
@@ -358,11 +362,11 @@ class OverviewDataLoader {
       start < traceSpan.end;
       start = Time.add(start, stepSize)
     ) {
-      const progress = start - traceSpan.start;
-      const ratio = Number(progress) / Number(traceSpan.duration);
-      this.trace.omnibox.showStatusMessage(
-        'Loading overview ' + `${Math.round(ratio * 100)}%`,
-      );
+      // const progress = start - traceSpan.start;
+      // const ratio = Number(progress) / Number(traceSpan.duration);
+      // this.trace.omnibox.showStatusMessage(
+      //   'Loading overview ' + `${Math.round(ratio * 100)}%`,
+      // );
       const end = Time.add(start, stepSize);
       // The (async() => {})() queues all the 100 async promises in one batch.
       // Without that, we would wait for each step to be rendered before
