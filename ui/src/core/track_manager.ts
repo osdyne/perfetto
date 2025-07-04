@@ -169,6 +169,7 @@ class TrackFSM implements TrackRenderer {
         // AsyncLimiter to here, where we can swallow and capture the error.
         this.error = e;
       });
+
     this.track.render(ctx);
   }
 

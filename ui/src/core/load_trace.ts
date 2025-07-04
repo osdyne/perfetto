@@ -862,15 +862,6 @@ async function loadStreamIntoEngine(
   const trace = TraceImpl.createInstanceForCore(app, engine, traceDetails);
   app.setActiveTrace(trace);
 
-  const visibleTimeSpan = await computeVisibleTime(
-    traceDetails.start,
-    traceDetails.end,
-    trace.traceInfo.traceType === 'json',
-    engine,
-  );
-
-  trace.timeline.updateVisibleTime(visibleTimeSpan);
-
   // Make sure the helper views are available before we start adding tracks.
   await initialiseHelperViews(trace);
   await includeSummaryTables(trace);
