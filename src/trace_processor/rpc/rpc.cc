@@ -392,8 +392,14 @@ base::Status Rpc::Parse(const uint8_t* data, size_t len) {
 
 base::Status Rpc::Stream(const uint8_t* data, size_t len) {
   PERFETTO_TP_TRACE(
-      metatrace::Category::API_TIMELINE, "RPC_APPEND",
+      metatrace::Category::API_TIMELINE, "RPC_STREAM",
       [&](metatrace::Record* r) { r->AddArg("length", std::to_string(len)); });
+
+  if (eof_) {
+    // Reset the trace processor state if another trace has been previously
+    // loaded. Use the same TraceProcessor Config.
+    ResetTraceProcessorInternal(trace_processor_config_);
+  }
 
   bytes_parsed_ += len;
   MaybePrintProgress();
