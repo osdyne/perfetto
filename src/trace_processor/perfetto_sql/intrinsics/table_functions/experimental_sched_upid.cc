@@ -60,10 +60,10 @@ uint32_t ExperimentalSchedUpid::EstimateRowCount() {
 base::StatusOr<std::unique_ptr<Table>> ExperimentalSchedUpid::ComputeTable(
     const std::vector<SqlValue>& arguments) {
   PERFETTO_CHECK(arguments.empty());
-  if (!sched_upid_table_) {
+  // if (!sched_upid_table_) {
     sched_upid_table_ = tables::ExperimentalSchedUpidTable::ExtendParent(
         *sched_slice_table_, ComputeUpidColumn());
-  }
+  // }
   return std::make_unique<Table>(sched_upid_table_->Copy());
 }
 

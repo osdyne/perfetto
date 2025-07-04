@@ -177,7 +177,7 @@ base::Status TraceProcessorStorageImpl::Stream(TraceBlobView blob) {
   unrecoverable_parse_error_ |= !status.ok();
 
   // Process data
-  RETURN_IF_ERROR(parser_->NotifyEndOfFile());
+  // RETURN_IF_ERROR(parser_->NotifyEndOfFile());
   PERFETTO_CHECK(active_file_.has_value());
   active_file_->SetTraceType(parser_->trace_type());
 
