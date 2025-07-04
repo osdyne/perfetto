@@ -853,6 +853,7 @@ async function loadStreamIntoEngine(
     assertTrue(engine instanceof HttpRpcEngine);
     await engine.restoreInitialTables();
   }
+
   for (const p of app.extraSqlPackages) {
     await engine.registerSqlPackages(p);
   }
@@ -869,9 +870,6 @@ async function loadStreamIntoEngine(
   );
 
   trace.timeline.updateVisibleTime(visibleTimeSpan);
-
-  const cacheUuid = traceDetails.cached ? traceDetails.uuid : '';
-  Router.navigate(`#!/viewer?local_cache_key=${cacheUuid}`);
 
   // Make sure the helper views are available before we start adding tracks.
   await initialiseHelperViews(trace);
