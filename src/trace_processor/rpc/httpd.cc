@@ -257,11 +257,6 @@ void Httpd::OnHttpRequest(const base::HttpRequest& req) {
                              Vec2Sv(result.SerializeAsArray()));
   }
 
-  if (req.uri == "/notify_begin_of_stream") {
-    global_trace_processor_rpc_.NotifyBeginOfStream();
-    return conn.SendResponse("200 OK", default_headers);
-  }
-
   return conn.SendResponseAndClose("404 Not Found", default_headers);
 }
 

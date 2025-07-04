@@ -334,6 +334,7 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
       resp.Send(rpc_response_fn_);
       break;
     }
+
     // OTV Trace Stream Extension
     case RpcProto::TPM_STREAM_TRACE_DATA: {
       Response resp(tx_seq_id_++, req_type);
@@ -343,17 +344,11 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
       } else {
         protozero::ConstBytes byte_range = req.append_trace_data();
         base::Status res = Stream(byte_range.data, byte_range.size);
+
         if (!res.ok()) {
           result->set_error(res.message());
         }
       }
-      resp.Send(rpc_response_fn_);
-      break;
-    }
-
-    case RpcProto::TPM_BEGIN_TRACE_STREAM: {
-      Response resp(tx_seq_id_++, req_type);
-      NotifyBeginOfStream();
       resp.Send(rpc_response_fn_);
       break;
     }
@@ -420,14 +415,6 @@ base::Status Rpc::NotifyEndOfFile() {
 
   eof_ = true;
   RETURN_IF_ERROR(trace_processor_->NotifyEndOfFile());
-  MaybePrintProgress();
-  return base::OkStatus();
-}
-
-base::Status Rpc::NotifyBeginOfStream() {
-  PERFETTO_TP_TRACE(metatrace::Category::API_TIMELINE,
-                    "RPC_NOTIFY_BEGIN_OF_STREAM");
-  RETURN_IF_ERROR(trace_processor_->NotifyBeginOfStream());
   MaybePrintProgress();
   return base::OkStatus();
 }

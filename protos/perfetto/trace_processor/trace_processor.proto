@@ -106,7 +106,6 @@ message TraceProcessorRpc {
     TPM_RESET_TRACE_PROCESSOR = 11;
     TPM_REGISTER_SQL_PACKAGE = 13;
     TPM_STREAM_TRACE_DATA = 14;
-    TPM_BEGIN_TRACE_STREAM = 15;
   }
 
   oneof type {

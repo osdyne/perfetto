@@ -288,9 +288,6 @@ export abstract class EngineBase implements Engine, Disposable {
           }
         }
         break;
-      case TPM.TPM_BEGIN_TRACE_STREAM:
-        assertExists(this.pendingEOFs.shift()).resolve();
-        break;
       default:
         console.log(
           'Unexpected TraceProcessor response received: ',
@@ -345,15 +342,6 @@ export abstract class EngineBase implements Engine, Disposable {
     return asyncRes.then(() => {
       this.updateListeners.forEach((listener) => listener());
     });
-  }
-
-  notifyBeginOfStream(): Promise<void> {
-    const asyncRes = defer<void>();
-    this.pendingEOFs.push(asyncRes);
-    const rpc = TraceProcessorRpc.create();
-    rpc.request = TPM.TPM_BEGIN_TRACE_STREAM;
-    this.rpcSendRequest(rpc);
-    return asyncRes; // Linearize with the worker.
   }
 
   registerUpdateListener(listener: () => void) {

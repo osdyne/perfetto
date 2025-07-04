@@ -251,7 +251,7 @@ async function loadTraceIntoEngine(
   const cacheUuid = traceDetails.cached ? traceDetails.uuid : '';
   Router.navigate(`#!/viewer?local_cache_key=${cacheUuid}`);
 
-  // Make sure the helper views are available before we start adding tracks.
+  // Make sure the helper v\iews are available before we start adding tracks.
   await initialiseHelperViews(trace);
   await includeSummaryTables(trace);
 
@@ -848,9 +848,7 @@ async function loadStreamIntoEngine(
 ): Promise<TraceImpl> {
   const traceStream = await streamDataToEngine(engine, traceSource);
 
-  if (traceStream) {
-    await engine.notifyBeginOfStream();
-  } else {
+  if (!traceStream) {
     assertTrue(engine instanceof HttpRpcEngine);
     await engine.restoreInitialTables();
   }

@@ -556,32 +556,9 @@ base::Status TraceProcessorImpl::NotifyEndOfFile() {
 base::Status TraceProcessorImpl::Stream(TraceBlobView blob) {
   bytes_parsed_ += blob.size();
 
-  Flush();
-
   RETURN_IF_ERROR(TraceProcessorStorageImpl::Stream(std::move(blob)));
   context_.storage->ShrinkToFitTables();
 
-  BuildBoundsTable(engine_->sqlite_engine()->db(),
-                   GetTraceTimestampBoundsNs(*context_.storage));
-
-  return base::OkStatus();
-}
-
-
-base::Status TraceProcessorImpl::NotifyBeginOfStream() {
-  if (current_trace_name_.empty())
-    current_trace_name_ = "Unnamed trace";
-
-  // Last opportunity to flush all pending data.
-  Flush();
-
-  context_.storage->ShrinkToFitTables();
-
-  // Rebuild the bounds table once everything has been completed: we do this
-  // so that if any data was added to tables in
-  // TraceProcessorStorageImpl::NotifyEndOfFile, this will be counted in
-  // trace bounds: this is important for parsers like ninja which wait until
-  // the end to flush all their data.
   BuildBoundsTable(engine_->sqlite_engine()->db(),
                    GetTraceTimestampBoundsNs(*context_.storage));
 
