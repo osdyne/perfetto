@@ -42,7 +42,8 @@ const state: QueryPageState = {
 function runManualQuery(trace: Trace, query: string) {
   state.executedQuery = query;
   state.queryResult = undefined;
-  runQuery(undoCommonChatAppReplacements(query), trace.engine).then(
+
+  const run = () => runQuery(undoCommonChatAppReplacements(query), trace.engine).then(
     (resp: QueryResponse) => {
       addQueryResultsTab(
         trace,
@@ -61,6 +62,9 @@ function runManualQuery(trace: Trace, query: string) {
       raf.scheduleFullRedraw();
     },
   );
+
+  trace.engine.getProxy("manualQuery").onUpdate(run);
+
   raf.scheduleDelayedFullRedraw();
 }
 
@@ -106,6 +110,7 @@ class QueryInput implements m.ClassComponent<QueryInputAttrs> {
 
 export class QueryPage implements m.ClassComponent<PageWithTraceAttrs> {
   view({attrs}: m.CVnode<PageWithTraceAttrs>) {
+
     return m(
       '.query-page',
       m(Callout, 'Enter query and press Cmd/Ctrl + Enter'),
