@@ -251,7 +251,7 @@ async function loadTraceIntoEngine(
   const cacheUuid = traceDetails.cached ? traceDetails.uuid : '';
   Router.navigate(`#!/viewer?local_cache_key=${cacheUuid}`);
 
-  // Make sure the helper v\iews are available before we start adding tracks.
+  // Make sure the helper views are available before we start adding tracks.
   await initialiseHelperViews(trace);
   await includeSummaryTables(trace);
 
