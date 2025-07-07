@@ -58,8 +58,8 @@ class TraceContext implements Disposable {
   readonly searchMgr: SearchManagerImpl;
   readonly selectionMgr: SelectionManagerImpl;
   readonly tabMgr = new TabManagerImpl();
-  readonly timeline: TimelineImpl;
-  readonly traceInfo: TraceInfo;
+  timeline: TimelineImpl;
+  traceInfo: TraceInfo;
   readonly trackMgr = new TrackManagerImpl();
   readonly workspaceMgr = new WorkspaceManagerImpl();
   readonly noteMgr = new NoteManagerImpl();
@@ -116,6 +116,8 @@ class TraceContext implements Disposable {
       this.selectionMgr,
     );
 
+    this.flowMgr.queryFlowEvents
+
     this.searchMgr = new SearchManagerImpl({
       timeline: this.timeline,
       trackManager: this.trackMgr,
@@ -150,6 +152,15 @@ class TraceContext implements Disposable {
   [Symbol.dispose]() {
     this.trash.dispose();
   }
+
+  /**
+   * OTV Trace Streaming Extension
+   */
+  update(traceInfo: TraceInfo) {
+    this.traceInfo = traceInfo;
+    this.timeline = new TimelineImpl(traceInfo);
+    this.trackMgr.flushOldTracks();
+  }
 }
 
 /**
@@ -161,7 +172,7 @@ class TraceContext implements Disposable {
  */
 export class TraceImpl implements Trace {
   private appImpl: AppImpl;
-  private traceCtx: TraceContext;
+  public traceCtx: TraceContext;
 
   // This is not the original Engine base, rather an EngineProxy based on the
   // same engineBase.
@@ -270,6 +281,10 @@ export class TraceImpl implements Trace {
     return this.traceCtx.timeline;
   }
 
+  set timeline(timeline: TimelineImpl) {
+    this.traceCtx.timeline = timeline;
+  }
+
   get tracks() {
     return this.trackMgrProxy;
   }
@@ -296,6 +311,10 @@ export class TraceImpl implements Trace {
 
   get traceInfo(): TraceInfo {
     return this.traceCtx.traceInfo;
+  }
+
+  set traceInfo(info: TraceInfo) {
+    this.traceCtx.traceInfo = info;
   }
 
   get notes() {

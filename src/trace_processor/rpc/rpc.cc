@@ -334,6 +334,24 @@ void Rpc::ParseRpcRequest(const uint8_t* data, size_t len) {
       resp.Send(rpc_response_fn_);
       break;
     }
+
+    // OTV Trace Stream Extension
+    case RpcProto::TPM_STREAM_TRACE_DATA: {
+      Response resp(tx_seq_id_++, req_type);
+      auto* result = resp->set_append_result();
+      if (!req.has_append_trace_data()) {
+        result->set_error(kErrFieldNotSet);
+      } else {
+        protozero::ConstBytes byte_range = req.append_trace_data();
+        base::Status res = Stream(byte_range.data, byte_range.size);
+
+        if (!res.ok()) {
+          result->set_error(res.message());
+        }
+      }
+      resp.Send(rpc_response_fn_);
+      break;
+    }
     default: {
       // This can legitimately happen if the client is newer. We reply with a
       // generic "unkown request" response, so the client can do feature
@@ -352,6 +370,7 @@ base::Status Rpc::Parse(const uint8_t* data, size_t len) {
   PERFETTO_TP_TRACE(
       metatrace::Category::API_TIMELINE, "RPC_PARSE",
       [&](metatrace::Record* r) { r->AddArg("length", std::to_string(len)); });
+
   if (eof_) {
     // Reset the trace processor state if another trace has been previously
     // loaded. Use the same TraceProcessor Config.
@@ -369,6 +388,31 @@ base::Status Rpc::Parse(const uint8_t* data, size_t len) {
   std::unique_ptr<uint8_t[]> data_copy(new uint8_t[len]);
   memcpy(data_copy.get(), data, len);
   return trace_processor_->Parse(std::move(data_copy), len);
+}
+
+base::Status Rpc::Stream(const uint8_t* data, size_t len) {
+  PERFETTO_TP_TRACE(
+      metatrace::Category::API_TIMELINE, "RPC_STREAM",
+      [&](metatrace::Record* r) { r->AddArg("length", std::to_string(len)); });
+
+  if (eof_) {
+    // Reset the trace processor state if another trace has been previously
+    // loaded. Use the same TraceProcessor Config.
+    ResetTraceProcessorInternal(trace_processor_config_);
+  }
+
+  bytes_parsed_ += len;
+  MaybePrintProgress();
+
+  if (len == 0)
+    return base::OkStatus();
+
+  // TraceProcessor needs take ownership of the memory chunk.
+  std::unique_ptr<uint8_t[]> data_copy(new uint8_t[len]);
+  memcpy(data_copy.get(), data, len);
+  base::Status status = trace_processor_->Stream(std::move(data_copy), len);
+
+  return status;
 }
 
 base::Status Rpc::NotifyEndOfFile() {

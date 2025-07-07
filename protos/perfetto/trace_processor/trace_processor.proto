@@ -105,6 +105,7 @@ message TraceProcessorRpc {
     TPM_GET_STATUS = 10;
     TPM_RESET_TRACE_PROCESSOR = 11;
     TPM_REGISTER_SQL_PACKAGE = 13;
+    TPM_STREAM_TRACE_DATA = 14;
   }
 
   oneof type {
@@ -126,7 +127,7 @@ message TraceProcessorRpc {
   oneof args {
     // TraceProcessorMethod request args.
 
-    // For TPM_APPEND_TRACE_DATA.
+    // For TPM_APPEND_TRACE_DATA and TPM_STREAM_TRACE_DATA
     bytes append_trace_data = 101;
     // For TPM_QUERY_STREAMING.
     QueryArgs query_args = 103;

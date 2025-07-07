@@ -790,3 +790,122 @@ async function getTracingMetadataTimeBounds(engine: Engine): Promise<TimeSpan> {
 
   return new TimeSpan(startBound, endBound);
 }
+
+/**
+ * OTV Trace Streaming Extension
+ */
+async function streamDataToEngine(
+  engine: EngineBase,
+  traceSource: TraceSource,
+): Promise<TraceStream | undefined> {
+  let traceStream: TraceStream | undefined;
+  if (traceSource.type === 'FILE') {
+    traceStream = new TraceFileStream(traceSource.file);
+  } else if (traceSource.type === 'ARRAY_BUFFER') {
+    traceStream = new TraceBufferStream(traceSource.buffer);
+  } else if (traceSource.type === 'URL') {
+    traceStream = new TraceHttpStream(traceSource.url);
+  } else if (traceSource.type === 'HTTP_RPC') {
+    traceStream = undefined;
+  } else {
+    throw new Error(`Unknown source: ${JSON.stringify(traceSource)}`);
+  }
+
+  // |traceStream| can be undefined in the case when we are using the external
+  // HTTP+RPC endpoint and the trace processor instance has already loaded
+  // a trace (because it was passed as a cmdline argument to
+  // trace_processor_shell). In this case we don't want the UI to load any
+  // file/stream and we just want to jump to the loading phase.
+  if (traceStream !== undefined) {
+    for (;;) {
+      const res = await traceStream.readChunk();
+      await engine.stream(res.data);
+      if (res.eof) break;
+    }
+  }
+
+  return traceStream;
+}
+
+export async function streamTrace(trace: TraceImpl, traceUpdate: TraceSource) {
+  await streamDataToEngine(trace.traceCtx.engine, traceUpdate);
+  const traceInfo = await getTraceInfo(trace.engine, traceUpdate);
+  trace.traceCtx.update(traceInfo);
+  raf.scheduleRedraw();
+}
+
+export async function beginStream(app: AppImpl, traceSource: TraceSource) {
+  updateStatus(app, 'Opening stream');
+  const engineId = `${++lastEngineId}`;
+  const engine = await createEngine(app, engineId);
+  return await loadStreamIntoEngine(app, traceSource, engine);
+}
+
+async function loadStreamIntoEngine(
+  app: AppImpl,
+  traceSource: TraceSource,
+  engine: EngineBase,
+): Promise<TraceImpl> {
+  const traceStream = await streamDataToEngine(engine, traceSource);
+
+  if (!traceStream) {
+    assertTrue(engine instanceof HttpRpcEngine);
+    await engine.restoreInitialTables();
+  }
+  for (const p of app.extraSqlPackages) {
+    await engine.registerSqlPackages(p);
+  }
+
+  const traceDetails = await getTraceInfo(engine, traceSource);
+  const trace = TraceImpl.createInstanceForCore(app, engine, traceDetails);
+  app.setActiveTrace(trace);
+
+  const visibleTimeSpan = await computeVisibleTime(
+    traceDetails.start,
+    traceDetails.end,
+    trace.traceInfo.traceType === 'json',
+    engine,
+  );
+
+  trace.timeline.updateVisibleTime(visibleTimeSpan);
+
+  const cacheUuid = traceDetails.cached ? traceDetails.uuid : '';
+  Router.navigate(`#!/viewer?local_cache_key=${cacheUuid}`);
+
+  // Make sure the helper views are available before we start adding tracks.
+  await initialiseHelperViews(trace);
+  await includeSummaryTables(trace);
+
+  await defineMaxLayoutDepthSqlFunction(engine);
+
+  await app.plugins.onTraceLoad(trace, (id) => {
+    updateStatus(app, `Running plugin: ${id}`);
+  });
+
+  updateStatus(app, 'Loading tracks');
+  await decideTracks(trace);
+
+  decideTabs(trace);
+
+  await listThreads(trace);
+
+  // Trace Processor doesn't support the reliable range feature for JSON
+  // traces.
+  if (
+    trace.traceInfo.traceType !== 'json' &&
+    ENABLE_CHROME_RELIABLE_RANGE_ANNOTATION_FLAG.get()
+  ) {
+    const reliableRangeStart = await computeTraceReliableRangeStart(engine);
+    if (reliableRangeStart > 0) {
+      trace.notes.addNote({
+        timestamp: reliableRangeStart,
+        color: '#ff0000',
+        text: 'Reliable Range Start',
+      });
+    }
+  }
+
+  await trace.plugins.onTraceReady();
+
+  return trace;
+}

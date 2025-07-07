@@ -552,6 +552,19 @@ base::Status TraceProcessorImpl::NotifyEndOfFile() {
   return base::OkStatus();
 }
 
+// OTV Trace Streaming Extension
+base::Status TraceProcessorImpl::Stream(TraceBlobView blob) {
+  bytes_parsed_ += blob.size();
+
+  RETURN_IF_ERROR(TraceProcessorStorageImpl::Stream(std::move(blob)));
+  context_.storage->ShrinkToFitTables();
+
+  BuildBoundsTable(engine_->sqlite_engine()->db(),
+                   GetTraceTimestampBoundsNs(*context_.storage));
+
+  return base::OkStatus();
+}
+
 size_t TraceProcessorImpl::RestoreInitialTables() {
   // We should always have at least as many objects now as we did in the
   // constructor.

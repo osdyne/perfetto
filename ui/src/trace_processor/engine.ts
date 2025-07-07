@@ -132,6 +132,8 @@ export abstract class EngineBase implements Engine, Disposable {
   private _numRequestsPending = 0;
   private _failed: Optional<string> = undefined;
 
+  private updateListeners: (() => void)[] = [];
+
   // TraceController sets this to raf.scheduleFullRedraw().
   onResponseReceived?: () => void;
 
@@ -274,6 +276,18 @@ export abstract class EngineBase implements Engine, Disposable {
           res.resolve();
         }
         break;
+      // OTV Trace Streaming Extension
+      case TPM.TPM_STREAM_TRACE_DATA:
+        {
+          const appendResult = assertExists(rpc.appendResult);
+          const pendingPromise = assertExists(this.pendingParses.shift());
+          if (exists(appendResult.error) && appendResult.error.length > 0) {
+            pendingPromise.reject(appendResult.error);
+          } else {
+            pendingPromise.resolve();
+          }
+        }
+        break;
       default:
         console.log(
           'Unexpected TraceProcessor response received: ',
@@ -305,6 +319,7 @@ export abstract class EngineBase implements Engine, Disposable {
     return asyncRes; // Linearize with the worker.
   }
 
+
   // Notify the engine that we reached the end of the trace.
   // Called after the last parse() call.
   notifyEof(): Promise<void> {
@@ -314,6 +329,23 @@ export abstract class EngineBase implements Engine, Disposable {
     rpc.request = TPM.TPM_FINALIZE_TRACE_DATA;
     this.rpcSendRequest(rpc);
     return asyncRes; // Linearize with the worker.
+  }
+
+  // OTV Trace Streaming Extension
+  stream(data: Uint8Array): Promise<void> {
+    const asyncRes = defer<void>();
+    this.pendingParses.push(asyncRes);
+    const rpc = TraceProcessorRpc.create();
+    rpc.request = TPM.TPM_STREAM_TRACE_DATA;
+    rpc.appendTraceData = data;
+    this.rpcSendRequest(rpc);
+    return asyncRes.then(() => {
+      this.updateListeners.forEach((listener) => listener());
+    });
+  }
+
+  registerUpdateListener(listener: () => void) {
+    this.updateListeners.push(listener);
   }
 
   // Updates the TraceProcessor Config. This method creates a new

@@ -247,6 +247,18 @@ void Httpd::OnHttpRequest(const base::HttpRequest& req) {
     return conn.SendResponse("200 OK", default_headers, Vec2Sv(res));
   }
 
+  // OTV Trace Stream Extension
+  if (req.uri == "/stream") {
+    base::Status status = global_trace_processor_rpc_.Stream(
+        reinterpret_cast<const uint8_t*>(req.body.data()), req.body.size());
+    protozero::HeapBuffered<protos::pbzero::AppendTraceDataResult> result;
+    if (!status.ok()) {
+      result->set_error(status.c_message());
+    }
+    return conn.SendResponse("200 OK", default_headers,
+                             Vec2Sv(result.SerializeAsArray()));
+  }
+
   return conn.SendResponseAndClose("404 Not Found", default_headers);
 }
 

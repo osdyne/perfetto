@@ -25,7 +25,7 @@ import {RouteArgs} from '../public/route_schema';
 import {SqlPackage} from '../public/extra_sql_packages';
 import {SerializedAppState} from '../public/state_serialization_schema';
 import {PostedTrace, TraceSource} from '../public/trace_source';
-import {loadTrace} from './load_trace';
+import {beginStream, loadTrace, streamTrace} from './load_trace';
 import {CORE_PLUGIN_ID} from './plugin_manager';
 
 // The args that frontend/index.ts passes when calling AppImpl.initialize().
@@ -248,5 +248,19 @@ export class AppImpl implements App {
   // and app_impl.ts.
   get __appCtxForTraceImplCtor() {
     return this.appCtx;
+  }
+
+  /**
+   * OTV Trace Streaming Extension
+   */
+  async streamTraceFromBuffer(postMessageArgs: PostedTrace) {
+    if (!this.currentTrace) {
+      await beginStream(this, {type: 'ARRAY_BUFFER', ...postMessageArgs});
+    } else {
+      await streamTrace(this.currentTrace, {
+        type: 'ARRAY_BUFFER',
+        ...postMessageArgs,
+      });
+    }
   }
 }
