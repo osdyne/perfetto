@@ -642,9 +642,9 @@ export abstract class BaseSliceTrack<
   // the cached data and if so issues new queries (i.e. sorta subsumes the
   // onBoundsChange).
   private async maybeRequestData(rawSlicesKey: CacheKey) {
-    if (rawSlicesKey.isCoveredBy(this.slicesKey)) {
-      return; // We have the data already, no need to re-query
-    }
+    // if (rawSlicesKey.isCoveredBy(this.slicesKey)) {
+    //   return; // We have the data already, no need to re-query
+    // }
 
     // Determine the cache key:
     const slicesKey = rawSlicesKey.normalize();

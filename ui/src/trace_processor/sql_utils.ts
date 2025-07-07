@@ -180,7 +180,7 @@ export async function createPerfettoTable(
   tableName: string,
   expression: string,
 ): Promise<AsyncDisposable> {
-  await engine.query(`CREATE PERFETTO TABLE ${tableName} AS ${expression}`);
+  await engine.query(`CREATE VIEW ${tableName} AS ${expression}`);
   return {
     [Symbol.asyncDispose]: async () => {
       await engine.tryQuery(`DROP TABLE IF EXISTS ${tableName}`);
