@@ -32,9 +32,6 @@ import {Trace} from '../../../public/trace';
 interface QueryResultTabConfig {
   readonly query: string;
   readonly title: string;
-  // Optional data to display in this tab instead of fetching it again
-  // (e.g. when duplicating an existing tab which already has the data).
-  readonly prefetchedResponse?: QueryResponse;
 }
 
 // External interface for adding a new query results tab
@@ -62,6 +59,7 @@ export function addQueryResultsTab(
 
 export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
   static readonly kind = 'dev.perfetto.QueryResultTab';
+  uuid = uuidv4();
 
   queryResponse?: QueryResponse;
   sqlViewName?: string;
@@ -73,30 +71,17 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
   constructor(args: NewBottomTabArgs<QueryResultTabConfig>) {
     super(args);
 
-    this.initTrack(args);
+    this.fetchTrack()
+      .then(() => this.createViewForDebugTrack(this.uuid))
+      .then((viewName) => {
+        this.sqlViewName = viewName;
+      });
   }
 
-  async initTrack(args: NewBottomTabArgs<QueryResultTabConfig>) {
-    let uuid = '';
-    if (this.config.prefetchedResponse !== undefined) {
-      this.queryResponse = this.config.prefetchedResponse;
-      uuid = args.uuid;
-    } else {
-      const result = await runQuery(this.config.query, this.engine);
-      this.queryResponse = result;
-      if (result.error !== undefined) {
-        return;
-      }
-
-      uuid = uuidv4();
-    }
-
-    if (uuid !== '') {
-      this.sqlViewName = await this.createViewForDebugTrack(uuid);
-      if (this.sqlViewName) {
-        this.trace.scheduleRedraw();
-      }
-    }
+  async fetchTrack() {
+    const result = await runQuery(this.config.query, this.engine);
+    this.queryResponse = result;
+    this.trace.scheduleRedraw();
   }
 
   getTitle(): string {
@@ -107,6 +92,7 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
   }
 
   viewTab(): m.Child {
+    this.fetchTrack();
     return m(QueryTable, {
       query: this.config.query,
       resp: this.queryResponse,
@@ -149,6 +135,7 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
       const createViewResult = await this.engine.query(
         `create view ${viewId} as ${sqlQuery}`,
       );
+
       if (createViewResult.error()) {
         // If it failed, do nothing.
         return '';

@@ -49,7 +49,6 @@ function runManualQuery(trace: Trace, query: string) {
         {
           query: query,
           title: 'Standalone Query',
-          prefetchedResponse: resp,
         },
         'analyze_page_query',
       );
