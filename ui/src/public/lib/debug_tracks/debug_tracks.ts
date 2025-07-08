@@ -113,7 +113,6 @@ export async function addDebugSliceTrack(
   // - If we did it in the plugin's onTraceUnload function, we could risk
   //   dropping it n the middle of a track update cycle as track lifecycles are
   //   not synchronized with plugin lifecycles.
-
   await createPerfettoTable(
     trace.engine,
     tableName,
