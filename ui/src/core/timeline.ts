@@ -36,12 +36,14 @@ const MIN_DURATION = 10;
 export class TimelineImpl implements Timeline {
   private _visibleWindow: HighPrecisionTimeSpan;
   private _hoverCursorTimestamp?: time;
+  private traceInfo: TraceInfo;
 
   // This is used to calculate the tracks within a Y range for area selection.
   areaY: Range = {};
   private _selectedArea?: Area;
 
-  constructor(private readonly traceInfo: TraceInfo) {
+  constructor(traceInfo: TraceInfo) {
+    this.traceInfo = traceInfo;
     this._visibleWindow = HighPrecisionTimeSpan.fromTime(
       traceInfo.start,
       traceInfo.end,
@@ -97,6 +99,10 @@ export class TimelineImpl implements Timeline {
   }
 
   deselectArea() {
+    if (this.streaming) {
+      return;
+    }
+
     this._selectedArea = undefined;
     raf.scheduleRedraw();
   }
@@ -164,5 +170,20 @@ export class TimelineImpl implements Timeline {
   // Convert absolute time to domain time.
   toDomainTime(ts: time): time {
     return Time.sub(ts, this.timestampOffset());
+  }
+
+  // OTV streaming extension
+  private streaming = false;
+  stream(traceInfo: TraceInfo) {
+    this.streaming = true;
+    // only update the visible window if it wasn't changed by the user
+    if (!this._selectedArea) {
+      this._visibleWindow = HighPrecisionTimeSpan.fromTime(
+        traceInfo.start,
+        traceInfo.end,
+      );
+    }
+
+    this.traceInfo = traceInfo;
   }
 }

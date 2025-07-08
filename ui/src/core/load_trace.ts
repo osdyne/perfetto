@@ -860,18 +860,6 @@ async function loadStreamIntoEngine(
   const trace = TraceImpl.createInstanceForCore(app, engine, traceDetails);
   app.setActiveTrace(trace);
 
-  const visibleTimeSpan = await computeVisibleTime(
-    traceDetails.start,
-    traceDetails.end,
-    trace.traceInfo.traceType === 'json',
-    engine,
-  );
-
-  trace.timeline.updateVisibleTime(visibleTimeSpan);
-
-  const cacheUuid = traceDetails.cached ? traceDetails.uuid : '';
-  Router.navigate(`#!/viewer?local_cache_key=${cacheUuid}`);
-
   // Make sure the helper views are available before we start adding tracks.
   await initialiseHelperViews(trace);
   await includeSummaryTables(trace);
@@ -906,6 +894,6 @@ async function loadStreamIntoEngine(
   }
 
   await trace.plugins.onTraceReady();
-
+  app.omnibox.reset();
   return trace;
 }

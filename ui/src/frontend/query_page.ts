@@ -42,14 +42,14 @@ const state: QueryPageState = {
 function runManualQuery(trace: Trace, query: string) {
   state.executedQuery = query;
   state.queryResult = undefined;
-  runQuery(undoCommonChatAppReplacements(query), trace.engine).then(
+
+  const run = () => runQuery(undoCommonChatAppReplacements(query), trace.engine).then(
     (resp: QueryResponse) => {
       addQueryResultsTab(
         trace,
         {
           query: query,
           title: 'Standalone Query',
-          prefetchedResponse: resp,
         },
         'analyze_page_query',
       );
@@ -62,6 +62,9 @@ function runManualQuery(trace: Trace, query: string) {
       raf.scheduleFullRedraw();
     },
   );
+
+  trace.engine.getProxy("manualQuery").onUpdate(run);
+
   raf.scheduleDelayedFullRedraw();
 }
 

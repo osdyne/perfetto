@@ -158,7 +158,7 @@ class TraceContext implements Disposable {
    */
   update(traceInfo: TraceInfo) {
     this.traceInfo = traceInfo;
-    this.timeline = new TimelineImpl(traceInfo);
+    this.timeline.stream(traceInfo);
     this.trackMgr.flushOldTracks();
   }
 }

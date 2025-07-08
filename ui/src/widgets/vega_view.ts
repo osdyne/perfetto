@@ -125,6 +125,7 @@ class VegaWrapper {
   private _status: Status;
   private _error?: string;
   private _engine?: Engine;
+  private _updateUnsubscribe?: () => void;
 
   constructor(dom: Element) {
     this.dom = dom;
@@ -156,6 +157,7 @@ class VegaWrapper {
 
   set engine(engine: Engine | undefined) {
     this._engine = engine;
+    this._updateUnsubscribe = this._engine?.getProxy("VegaView").onUpdate(this.updateView.bind(this));
   }
 
   onResize() {
@@ -248,6 +250,7 @@ class VegaWrapper {
   [Symbol.dispose]() {
     this._data = undefined;
     this._spec = undefined;
+    this._updateUnsubscribe && this._updateUnsubscribe();
     this.updateView();
   }
 }
