@@ -35,7 +35,7 @@ export class VizPage implements m.ClassComponent<PageWithTraceAttrs> {
       '.viz-page',
       SPEC && m(VegaView, {
         spec: SPEC,
-        engine,
+        engine: engine,
         data: {},
       }),
       m(Editor, {
