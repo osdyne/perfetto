@@ -33,9 +33,9 @@ export class VizPage implements m.ClassComponent<PageWithTraceAttrs> {
     const engine = assertExists(this.engine);
     return m(
       '.viz-page',
-      m(VegaView, {
+      SPEC && m(VegaView, {
         spec: SPEC,
-        engine: engine,
+        engine,
         data: {},
       }),
       m(Editor, {

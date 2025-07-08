@@ -156,6 +156,7 @@ class VegaWrapper {
 
   set engine(engine: Engine | undefined) {
     this._engine = engine;
+    this._engine?.getProxy("VegaView").onUpdate(this.updateView.bind(this));
   }
 
   onResize() {
