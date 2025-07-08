@@ -94,7 +94,6 @@ export class TimelineImpl implements Timeline {
       end >= start,
       `Impossible select area: start [${start}] >= end [${end}]`,
     );
-    console.log(this._selectedArea);
     this._selectedArea = {start, end, trackUris: tracks};
     raf.scheduleFullRedraw();
   }
