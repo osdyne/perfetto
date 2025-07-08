@@ -348,6 +348,13 @@ export abstract class EngineBase implements Engine, Disposable {
     this.updateListeners.push(listener);
   }
 
+  removeUpdateListener(listener: () => void) {
+    const index = this.updateListeners.indexOf(listener);
+    if (index > -1) {
+      this.updateListeners.splice(index, 1);
+    }
+  }
+
   // Updates the TraceProcessor Config. This method creates a new
   // TraceProcessor instance, so it should be called before passing any trace
   // data.
@@ -643,6 +650,10 @@ export class EngineProxy implements Engine, Disposable {
   // OTV Trace Streaming Extension
   onUpdate(listener: () => void) {
     this.engine.registerUpdateListener(listener);
+
+    return () => {
+      this.engine.removeUpdateListener(listener);
+    }
   }
 }
 
