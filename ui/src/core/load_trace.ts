@@ -853,7 +853,6 @@ async function loadStreamIntoEngine(
     assertTrue(engine instanceof HttpRpcEngine);
     await engine.restoreInitialTables();
   }
-
   for (const p of app.extraSqlPackages) {
     await engine.registerSqlPackages(p);
   }
