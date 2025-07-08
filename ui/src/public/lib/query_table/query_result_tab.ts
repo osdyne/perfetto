@@ -59,7 +59,7 @@ export function addQueryResultsTab(
 
 export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
   static readonly kind = 'dev.perfetto.QueryResultTab';
-  uuid = uuidv4();
+ static readonly uuid = uuidv4();
 
   queryResponse?: QueryResponse;
   sqlViewName?: string;
