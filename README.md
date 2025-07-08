@@ -8,7 +8,8 @@ explore multi-GB traces.
 
 ## Setup
 - dependencies: Node 22, Python 3 (or use the shell.nix)
-- run: `npm install`
+- run: `npm install && npm run bootstrap`
+
 
 ## Development
 - run `npm start`

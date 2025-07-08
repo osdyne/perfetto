@@ -4,7 +4,7 @@
   "repository": "git@github.com:osdyne/perfetto.git",
   "files": ["dist"],
   "scripts": {
-    "postinstall": "tools/install-build-deps --ui",
+    "bootstrap": "tools/install-build-deps --ui",
     "start": "run-p start:*",
     "start:playground": "vite playground/",
     "start:perfetto": "ui/build --serve --watch --serve-port 10000",
