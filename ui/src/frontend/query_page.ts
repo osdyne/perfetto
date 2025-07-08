@@ -110,7 +110,6 @@ class QueryInput implements m.ClassComponent<QueryInputAttrs> {
 
 export class QueryPage implements m.ClassComponent<PageWithTraceAttrs> {
   view({attrs}: m.CVnode<PageWithTraceAttrs>) {
-
     return m(
       '.query-page',
       m(Callout, 'Enter query and press Cmd/Ctrl + Enter'),
