@@ -135,7 +135,6 @@ export class QueryResultTab extends BottomTab<QueryResultTabConfig> {
       const createViewResult = await this.engine.query(
         `create view ${viewId} as ${sqlQuery}`,
       );
-
       if (createViewResult.error()) {
         // If it failed, do nothing.
         return '';
