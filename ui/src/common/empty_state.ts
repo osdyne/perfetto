@@ -54,7 +54,7 @@ export function createEmptyState(): State {
     lastLoadedConfig: {type: 'NONE'},
 
     perfDebug: false,
-    sidebarVisible: true,
+    sidebarVisible: false,
     hoveredUtid: -1,
     hoveredPid: -1,
     hoveredNoteTimestamp: Time.INVALID,

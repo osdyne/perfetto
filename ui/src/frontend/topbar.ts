@@ -131,7 +131,7 @@ export class Topbar implements m.ClassComponent<TopbarAttrs> {
       omnibox,
       attrs.trace && m(Progress, {trace: attrs.trace}),
       m(HelpPanningNotification),
-      attrs.trace && m(TraceErrorIcon, {trace: attrs.trace}),
+      // attrs.trace && m(TraceErrorIcon, {trace: attrs.trace}),
     );
   }
 }
