@@ -12,15 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-import {assertExists, assertTrue} from '../base/logging';
+import {assertTrue} from '../base/logging';
 import {EngineBase} from '../trace_processor/engine';
 
-let bundlePath: string;
-let idleWasmWorker: Worker;
+// let bundlePath: string;
+let idleWasmWorker: Promise<Worker>;
 
 export function initWasm(root: string) {
-  bundlePath = root + 'engine_bundle.js';
-  idleWasmWorker = new Worker(bundlePath);
+  idleWasmWorker = fetch(root + 'engine_bundle.js')
+    .then((result) => result.blob())
+    .then((blob) => {
+      const blobUrl = URL.createObjectURL(blob);
+      return new Worker(blobUrl);
+    })
+    .then(async (worker) => {
+      const wasmBinary = await fetch(root + 'trace_processor.wasm').then(
+        (result) => result.arrayBuffer(),
+      );
+      worker.postMessage({wasmBinary});
+
+      return worker;
+    });
 }
 
 /**
@@ -30,28 +42,24 @@ export function initWasm(root: string) {
 export class WasmEngineProxy extends EngineBase implements Disposable {
   readonly mode = 'WASM';
   readonly id: string;
-  private port: MessagePort;
-  private worker: Worker;
+  private port: MessagePort | null = null;
+  private worker: Worker | null = null;
 
   constructor(id: string) {
     super();
     this.id = id;
+  }
 
-    const channel = new MessageChannel();
-    const port1 = channel.port1;
-    this.port = channel.port2;
+  async connect() {
+    await idleWasmWorker.then((worker) => {
+      const channel = new MessageChannel();
+      const port1 = channel.port1;
+      this.port = channel.port2;
 
-    // We keep an idle instance around to hide the latency of initializing the
-    // instance. Creating the worker (new Worker()) is ~instantaneous, but then
-    // the initialization in the worker thread (i.e. the call to
-    // `new WasmBridge()` that engine/index.ts makes) takes several seconds.
-    // Here we hide that initialization latency by always keeping an idle worker
-    // around. The latency is hidden by the fact that the user usually takes few
-    // seconds until they click on "open trace file" and pick a file.
-    this.worker = assertExists(idleWasmWorker);
-    idleWasmWorker = new Worker(bundlePath);
-    this.worker.postMessage(port1, [port1]);
-    this.port.onmessage = this.onMessage.bind(this);
+      this.worker = worker;
+      this.worker.postMessage(port1, [port1]);
+      this.port.onmessage = this.onMessage.bind(this);
+    });
   }
 
   onMessage(m: MessageEvent) {
@@ -63,10 +71,12 @@ export class WasmEngineProxy extends EngineBase implements Disposable {
     // We deliberately don't use a transfer list because protobufjs reuses the
     // same buffer when encoding messages (which is good, because creating a new
     // TypedArray for each decode operation would be too expensive).
-    this.port.postMessage(data);
+    if (this.port) {
+      this.port.postMessage(data);
+    }
   }
 
   [Symbol.dispose]() {
-    this.worker.terminate();
+    this.worker?.terminate();
   }
 }

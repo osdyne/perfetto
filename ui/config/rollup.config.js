@@ -58,6 +58,8 @@ function defBundle(tsRoot, bundle, distDir) {
 
       // Translate source maps to point back to the .ts sources.
       sourcemaps(),
+
+      // webWorkerLoader({ inline: true })
     ].concat(maybeUglify()),
     onwarn: function (warning, warn) {
       if (warning.code === 'CIRCULAR_DEPENDENCY') {

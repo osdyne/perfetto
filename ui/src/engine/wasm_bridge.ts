@@ -42,14 +42,15 @@ export class WasmBridge {
   private lastStderr: string[] = [];
   private messagePort?: MessagePort;
 
-  constructor() {
+  constructor(wasmBinary?: string) {
     this.aborted = false;
     const deferredRuntimeInitialized = defer<void>();
-    this.connection = initTraceProcessor({
+    this.connection = (initTraceProcessor as any)({
       locateFile: (s: string) => s,
       print: (line: string) => console.log(line),
       printErr: (line: string) => this.appendAndLogErr(line),
       onRuntimeInitialized: () => deferredRuntimeInitialized.resolve(),
+      wasmBinary
     });
     this.whenInitialized = deferredRuntimeInitialized.then(() => {
       const fn = this.connection.addFunction(this.onReply.bind(this), 'vii');

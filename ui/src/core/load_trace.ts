@@ -169,6 +169,7 @@ async function createEngine(
   } else {
     console.log('Opening trace using built-in WASM engine');
     engine = new WasmEngineProxy(engineId);
+    await engine.connect();
     engine.resetTraceProcessor({
       cropTrackEvents: CROP_TRACK_EVENTS_FLAG.get(),
       ingestFtraceInRawTable: INGEST_FTRACE_IN_RAW_TABLE_FLAG.get(),
@@ -248,8 +249,8 @@ async function loadTraceIntoEngine(
 
   trace.timeline.updateVisibleTime(visibleTimeSpan);
 
-  const cacheUuid = traceDetails.cached ? traceDetails.uuid : '';
-  Router.navigate(`#!/viewer?local_cache_key=${cacheUuid}`);
+  // const cacheUuid = traceDetails.cached ? traceDetails.uuid : '';
+  Router.navigate(`#!/viewer`);
 
   // Make sure the helper views are available before we start adding tracks.
   await initialiseHelperViews(trace);
@@ -859,6 +860,8 @@ async function loadStreamIntoEngine(
   const traceDetails = await getTraceInfo(engine, traceSource);
   const trace = TraceImpl.createInstanceForCore(app, engine, traceDetails);
   app.setActiveTrace(trace);
+
+  Router.navigate(`#!/viewer`);
 
   // Make sure the helper views are available before we start adding tracks.
   await initialiseHelperViews(trace);

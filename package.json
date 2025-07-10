@@ -2,7 +2,10 @@
   "name": "@osdyne/otv",
   "version": "0.0.0",
   "repository": "git@github.com:osdyne/perfetto.git",
-  "files": ["dist"],
+  "files": [
+    "dist",
+    "typings.d.ts"
+  ],
   "scripts": {
     "bootstrap": "tools/install-build-deps --ui",
     "start": "run-p start:*",
@@ -10,9 +13,7 @@
     "start:perfetto": "ui/build --serve --watch --serve-port 10000",
     "build": "ui/build",
     "clean": "rm -rf dist/* && mkdir -p dist",
-    "bundle:ui": "cp -R ./out/ui/ui/dist ./dist/ui && rm -rf ./dist/ui/dist ./dist/ui/out",
-    "bundle:wasm": "cp -R ./out/ui/wasm ./dist/wasm && rm -rf ./dist/wasm/gen ./dist/wasm/obj ./dist/wasm/toolchain.ninja",
-    "bundle": "npm run clean && npm run bundle:ui && npm run bundle:wasm"
+    "bundle": "npm run clean && cp -R ./ui/out/dist_version/ ./dist/"
   },
   "devDependencies": {
     "vite": "6.3.5",
