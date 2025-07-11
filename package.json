@@ -6,6 +6,7 @@
     "dist",
     "typings.d.ts"
   ],
+  "types": "typings.d.ts",
   "scripts": {
     "bootstrap": "tools/install-build-deps --ui",
     "start": "run-p start:*",
@@ -13,7 +14,7 @@
     "start:perfetto": "ui/build --serve --watch --serve-port 10000",
     "build": "ui/build",
     "clean": "rm -rf dist/* && mkdir -p dist",
-    "bundle": "npm run clean && cp -R ./ui/out/dist_version/ ./dist/"
+    "bundle": "npm run clean && cp -R ./ui/out/dist_version/* ./dist/"
   },
   "devDependencies": {
     "vite": "6.3.5",
