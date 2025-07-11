@@ -31,9 +31,9 @@ let bridge: WasmBridge | null = null;
 
 // Receives the boostrap message from the frontend with the MessagePort.
 selfWorker.onmessage = (msg: MessageEvent) => {
+  // wait for the wasmBinary from the Worker Host
   if (!bridge && msg.data?.wasmBinary) {
     bridge = new WasmBridge(msg.data.wasmBinary);
-
     return;
   }
 

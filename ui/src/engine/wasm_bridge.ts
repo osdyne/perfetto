@@ -45,6 +45,7 @@ export class WasmBridge {
   constructor(wasmBinary?: string) {
     this.aborted = false;
     const deferredRuntimeInitialized = defer<void>();
+    // initTraceProcessor added a property called `wasmBinary` but they did not update the typings -.-
     this.connection = (initTraceProcessor as any)({
       locateFile: (s: string) => s,
       print: (line: string) => console.log(line),
