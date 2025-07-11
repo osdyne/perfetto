@@ -153,20 +153,20 @@ export async function loadTrace(
 }
 
 async function createEngine(
-  app: AppImpl,
+  _app: AppImpl,
   engineId: string,
 ): Promise<EngineBase> {
   // Check if there is any instance of the trace_processor_shell running in
   // HTTP RPC mode (i.e. trace_processor_shell -D).
-  let useRpc = false;
-  if (app.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE') {
-    useRpc = (await HttpRpcEngine.checkConnection()).connected;
-  }
+  // let useRpc = false;
+  // if (app.newEngineMode === 'USE_HTTP_RPC_IF_AVAILABLE') {
+  //   useRpc = (await HttpRpcEngine.checkConnection()).connected;
+  // }
   let engine;
-  if (useRpc) {
-    console.log('Opening trace using native accelerator over HTTP+RPC');
-    engine = new HttpRpcEngine(engineId);
-  } else {
+  // if (useRpc) {
+  //   console.log('Opening trace using native accelerator over HTTP+RPC');
+  //   engine = new HttpRpcEngine(engineId);
+  // } else {
     console.log('Opening trace using built-in WASM engine');
     engine = new WasmEngineProxy(engineId);
     await engine.connect();
@@ -176,7 +176,7 @@ async function createEngine(
       analyzeTraceProtoContent: ANALYZE_TRACE_PROTO_CONTENT_FLAG.get(),
       ftraceDropUntilAllCpusValid: FTRACE_DROP_UNTIL_FLAG.get(),
     });
-  }
+  // }
   engine.onResponseReceived = () => raf.scheduleFullRedraw();
 
   if (isMetatracingEnabled()) {
