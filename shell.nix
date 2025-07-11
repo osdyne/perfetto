@@ -4,6 +4,7 @@ pkgs.mkShell {
   buildInputs = [
     pkgs.nodejs_22
     pkgs.python3
-    pkgs.pnpm
+    pkgs.pnpm_8
   ];
 }
+

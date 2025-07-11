@@ -45,7 +45,7 @@ export function getServingRoot() {
 
   if (script === null) {
     // Can be null in tests.
-    assertTrue(typeof jest !== 'undefined');
+    // assertTrue(typeof jest !== 'undefined');
     return '';
   }
 

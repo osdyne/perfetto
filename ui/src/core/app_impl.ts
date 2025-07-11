@@ -70,7 +70,7 @@ export class AppContext {
     // The rootUrl should point to 'https://ui.perfetto.dev/v1.2.3/'. It's
     // allowed to be empty only in unittests, because there there is no bundle
     // hence no concrete root.
-    assertTrue(this.initArgs.rootUrl !== '' || typeof jest !== 'undefined');
+    // assertTrue(this.initArgs.rootUrl !== '' || typeof jest !== 'undefined');
     this.pluginMgr = new PluginManager({
       forkForPlugin: (p) => AppImpl.instance.forkForPlugin(p),
       get trace() {

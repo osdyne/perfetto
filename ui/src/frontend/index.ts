@@ -101,65 +101,65 @@ function routeChange(route: Route) {
   }
 }
 
-function setupContentSecurityPolicy() {
-  // Note: self and sha-xxx must be quoted, urls data: and blob: must not.
+// function setupContentSecurityPolicy() {
+//   // Note: self and sha-xxx must be quoted, urls data: and blob: must not.
 
-  let rpcPolicy = [
-    'http://127.0.0.1:9001', // For trace_processor_shell --httpd.
-    'ws://127.0.0.1:9001', // Ditto, for the websocket RPC.
-  ];
-  if (CSP_WS_PERMISSIVE_PORT.get()) {
-    const route = Router.parseUrl(window.location.href);
-    if (/^\d+$/.exec(route.args.rpc_port ?? '')) {
-      rpcPolicy = [
-        `http://127.0.0.1:${route.args.rpc_port}`,
-        `ws://127.0.0.1:${route.args.rpc_port}`,
-      ];
-    }
-  }
-  const policy = {
-    'default-src': [
-      `'self'`,
-      // Google Tag Manager bootstrap.
-      `'sha256-LirUKeorCU4uRNtNzr8tlB11uy8rzrdmqHCX38JSwHY='`,
-    ],
-    'script-src': [
-      `'self'`,
-      // TODO(b/201596551): this is required for Wasm after crrev.com/c/3179051
-      // and should be replaced with 'wasm-unsafe-eval'.
-      `'unsafe-eval'`,
-      'https://*.google.com',
-      'https://*.googleusercontent.com',
-      'https://www.googletagmanager.com',
-    ],
-    'object-src': ['none'],
-    'connect-src': [
-      `'self'`,
-      'ws://127.0.0.1:8037', // For the adb websocket server.
-      'https://*.googleapis.com', // For Google Cloud Storage fetches.
-      'blob:',
-      'data:',
-      ``,
-    ].concat(rpcPolicy),
-    'img-src': [
-      `'self'`,
-      'data:',
-      'blob:',
-      'https://www.googletagmanager.com',
-      'https://*.googleapis.com',
-    ],
-    'style-src': [`'self'`, `'unsafe-inline'`],
-    'navigate-to': ['https://*.perfetto.dev', 'self'],
-  };
-  const meta = document.createElement('meta');
-  meta.httpEquiv = 'Content-Security-Policy';
-  let policyStr = '';
-  for (const [key, list] of Object.entries(policy)) {
-    policyStr += `${key} ${list.join(' ')}; `;
-  }
-  meta.content = policyStr;
-  document.head.appendChild(meta);
-}
+//   let rpcPolicy = [
+//     'http://127.0.0.1:9001', // For trace_processor_shell --httpd.
+//     'ws://127.0.0.1:9001', // Ditto, for the websocket RPC.
+//   ];
+//   if (CSP_WS_PERMISSIVE_PORT.get()) {
+//     const route = Router.parseUrl(window.location.href);
+//     if (/^\d+$/.exec(route.args.rpc_port ?? '')) {
+//       rpcPolicy = [
+//         `http://127.0.0.1:${route.args.rpc_port}`,
+//         `ws://127.0.0.1:${route.args.rpc_port}`,
+//       ];
+//     }
+//   }
+//   const policy = {
+//     'default-src': [
+//       `'self'`,
+//       // Google Tag Manager bootstrap.
+//       `'sha256-LirUKeorCU4uRNtNzr8tlB11uy8rzrdmqHCX38JSwHY='`,
+//     ],
+//     'script-src': [
+//       `'self'`,
+//       // TODO(b/201596551): this is required for Wasm after crrev.com/c/3179051
+//       // and should be replaced with 'wasm-unsafe-eval'.
+//       `'unsafe-eval'`,
+//       'https://*.google.com',
+//       'https://*.googleusercontent.com',
+//       'https://www.googletagmanager.com',
+//     ],
+//     'object-src': ['none'],
+//     'connect-src': [
+//       `'self'`,
+//       'ws://127.0.0.1:8037', // For the adb websocket server.
+//       'https://*.googleapis.com', // For Google Cloud Storage fetches.
+//       'blob:',
+//       'data:',
+//       ``,
+//     ].concat(rpcPolicy),
+//     'img-src': [
+//       `'self'`,
+//       'data:',
+//       'blob:',
+//       'https://www.googletagmanager.com',
+//       'https://*.googleapis.com',
+//     ],
+//     'style-src': [`'self'`, `'unsafe-inline'`],
+//     'navigate-to': ['https://*.perfetto.dev', 'self'],
+//   };
+//   const meta = document.createElement('meta');
+//   meta.httpEquiv = 'Content-Security-Policy';
+//   let policyStr = '';
+//   for (const [key, list] of Object.entries(policy)) {
+//     policyStr += `${key} ${list.join(' ')}; `;
+//   }
+//   meta.content = policyStr;
+//   document.head.appendChild(meta);
+// }
 
 function setupExtentionPort(extensionLocalChannel: MessageChannel) {
   // We proxy messages between the extension and the controller because the
@@ -202,12 +202,12 @@ function setupExtentionPort(extensionLocalChannel: MessageChannel) {
   };
 }
 
-function main() {
+async function main(root: string) {
   // Setup content security policy before anything else.
-  setupContentSecurityPolicy();
+  // setupContentSecurityPolicy();
 
   AppImpl.initialize({
-    rootUrl: getServingRoot(),
+    rootUrl: root,
     initialRouteArgs: Router.parseUrl(window.location.href).args,
     clearState: () => globals.dispatch(Actions.clearState({})),
   });
@@ -261,7 +261,7 @@ function main() {
 
   globals.initialize(stateActionDispatcher, initAnalytics);
 
-  globals.serviceWorkerController.install();
+  // globals.serviceWorkerController.install();
 
   globals.store.subscribe(scheduleRafAndRunControllersOnStateChange);
   globals.publishRedraw = () => raf.scheduleFullRedraw();
@@ -291,6 +291,7 @@ function main() {
   };
 
   dispatchEvent(new CustomEvent("perfetto_loaded", { detail: AppImpl.instance }));
+  return AppImpl.instance;
 }
 
 function onCssLoaded() {
@@ -446,4 +447,5 @@ function scheduleRafAndRunControllersOnStateChange(
   setTimeout(runControllers, 0);
 }
 
-main();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+(window as any).loadPerfetto = main

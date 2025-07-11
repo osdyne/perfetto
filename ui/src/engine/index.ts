@@ -15,7 +15,9 @@
 import {WasmBridge} from './wasm_bridge';
 
 const selfWorker = self as {} as Worker;
-const wasmBridge = new WasmBridge();
+
+let bridge: WasmBridge | null = null;
+// const wasmBridge = new WasmBridge();
 
 // There are two message handlers here:
 // 1. The Worker (self.onmessage) handler.
@@ -29,6 +31,16 @@ const wasmBridge = new WasmBridge();
 
 // Receives the boostrap message from the frontend with the MessagePort.
 selfWorker.onmessage = (msg: MessageEvent) => {
+  // wait for the wasmBinary from the Worker Host
+  if (!bridge && msg.data?.wasmBinary) {
+    bridge = new WasmBridge(msg.data.wasmBinary);
+    return;
+  }
+
+  if (!bridge) {
+    return;
+  }
+
   const port = msg.data as MessagePort;
-  wasmBridge.initialize(port);
+  bridge.initialize(port);
 };

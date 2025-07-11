@@ -8,11 +8,7 @@ const timeout = (seconds: number): Promise<void> =>
 const chunkPath = (counter: number) =>
   `assets/data/trace_part${counter.toString().padStart(3, '0')}.pb`;
 
-import { AppImpl } from '../../ui/src/core/app_impl';
-
-window.addEventListener('perfetto_loaded', async (event: Event) => {
-  const { detail: app } = event as CustomEvent<AppImpl>;
-
+(window as any).loadPerfetto('/perfetto/').then(async app => {
   for (let i = 0; i <= 16; i++) {
     const buffer = await loadFile(chunkPath(i));
     console.log(chunkPath(i), buffer);
