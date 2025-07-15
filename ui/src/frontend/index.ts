@@ -202,12 +202,12 @@ function setupExtentionPort(extensionLocalChannel: MessageChannel) {
   };
 }
 
-async function main(root: string) {
+async function main(rootUrl: string) {
   // Setup content security policy before anything else.
   // setupContentSecurityPolicy();
 
   AppImpl.initialize({
-    rootUrl: root,
+    rootUrl,
     initialRouteArgs: Router.parseUrl(window.location.href).args,
     clearState: () => globals.dispatch(Actions.clearState({})),
   });
@@ -298,7 +298,7 @@ function onCssLoaded() {
   initCssConstants();
   // Clear all the contents of the initial page (e.g. the <pre> error message)
   // And replace it with the root <main> element which will be used by mithril.
-  document.body.innerHTML = '';
+  // document.body.innerHTML = '';
 
   const router = new Router({
     '/': HomePage,
