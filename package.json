@@ -17,7 +17,8 @@
     "bundle": "npm run clean && cp -R ./ui/out/dist_version/* ./dist/"
   },
   "devDependencies": {
+    "npm-run-all": "4.1.5",
     "vite": "6.3.5",
-    "npm-run-all": "4.1.5"
+    "vite-plugin-static-copy": "^3.1.1"
   }
 }
