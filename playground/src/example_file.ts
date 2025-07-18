@@ -1,4 +1,6 @@
 const app = document.getElementById("app");
+
+window.addEventListener("load", () => {
 (window as any)
   .loadPerfetto(app, { rootUrl: '/perfetto/', initialState: { sidebarVisible: false, showFileHandling: false } })
   .then((app) => {
@@ -8,3 +10,4 @@ const app = document.getElementById("app");
         app.openTraceFromBuffer({ buffer, title: 'File' });
       });
   });
+});

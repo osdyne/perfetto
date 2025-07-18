@@ -8,14 +8,19 @@ const timeout = (seconds: number): Promise<void> =>
 const chunkPath = (counter: number) =>
   `assets/data/trace_part${counter.toString().padStart(3, '0')}.pb`;
 
-const container = document.getElementById("app");
-(window as any)
-  .loadPerfetto(container, { rootUrl: '/perfetto/', initialState: { sidebarVisible: false, showFileHandling: false } })
-  .then(async (app) => {
-    for (let i = 0; i <= 16; i++) {
-      const buffer = await loadFile(chunkPath(i));
-      console.log(chunkPath(i), buffer);
-      app.streamTraceFromBuffer({ buffer, title: 'Stream' });
-      await timeout(1);
-    }
-  });
+const container = document.getElementById('app');
+window.addEventListener('load', () => {
+  (window as any)
+    .loadPerfetto(container, {
+      rootUrl: '/perfetto/',
+      initialState: { sidebarVisible: false, showFileHandling: false }
+    })
+    .then(async (app) => {
+      for (let i = 0; i <= 16; i++) {
+        const buffer = await loadFile(chunkPath(i));
+        console.log(chunkPath(i), buffer);
+        app.streamTraceFromBuffer({ buffer, title: 'Stream' });
+        await timeout(1);
+      }
+    });
+});

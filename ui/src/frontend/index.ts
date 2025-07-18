@@ -203,7 +203,13 @@ function setupExtentionPort(extensionLocalChannel: MessageChannel) {
   };
 }
 
-async function main(container: HTMLElement, options: { rootUrl: string, initialState: {sidebarVisible: boolean; fileHandling: boolean};} ) {
+async function main(
+  container: HTMLElement,
+  options: {
+    rootUrl: string;
+    initialState: {sidebarVisible: boolean; showFileHandling: boolean};
+  },
+) {
   // Setup content security policy before anything else.
   // setupContentSecurityPolicy();
 
@@ -296,7 +302,11 @@ async function main(container: HTMLElement, options: { rootUrl: string, initialS
     globals.dispatch(
       Actions.setSidebar({visible: options.initialState.sidebarVisible}),
     );
-    globals.dispatch(Actions.setShowFileHandling({show: options.initialState.fileHandling}));
+    globals.dispatch(
+      Actions.setShowFileHandling({
+        show: options.initialState.showFileHandling,
+      }),
+    );
   }, 100);
 
   dispatchEvent(new CustomEvent('perfetto_loaded', {detail: AppImpl.instance}));
