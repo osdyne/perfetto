@@ -1,7 +1,7 @@
 import { defineConfig } from 'vite';
 import { execSync } from 'node:child_process';
-import { viteStaticCopy } from 'vite-plugin-static-copy';
 import { resolve, join } from 'node:path';
+import { viteStaticCopy } from 'vite-plugin-static-copy';
 
 const gitHash = execSync('git rev-parse --short=9 HEAD').toString().trim();
 

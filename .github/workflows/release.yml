@@ -41,13 +41,17 @@ jobs:
   publish-playground:
     runs-on: [self-hosted, docs-linux-docker]
     needs: [release]
+    container:
+      image: ubuntu:noble
+      volumes:
+        - otv-public-html:/otv-public-html
     steps:
-      - name: Ensure empty playground directory
-        run: rm -rf /otv-public-html && mkdir -p /otv-public-html
+      - name: Cleanup
+        run: rm -rf /otv-public-html/*
       - name: Download playground artifact
         uses: actions/download-artifact@v4
         with:
           name: playground
           path: /otv-public-html
-
+      - run: ls -la /otv-public-html
 
