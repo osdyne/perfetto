@@ -1,10 +1,10 @@
 name: Release
-on: [pull_request]
-# on:
-#   push:
-#     tags:
-#       - 'v*'
-#     branch: [otv]
+
+on:
+  push:
+    tags:
+      - 'v*'
+    branch: [otv]
 
 jobs:
   release:
@@ -21,13 +21,13 @@ jobs:
       - run: npm run bootstrap
       - run: npm run build
       - run: npm run bundle
-      # - id: version
-      #   uses: release-kit/semver@v2
-      # - run: npm pkg set version=${{ steps.version.outputs.full }}
-      # - uses: JS-DevTools/npm-publish@v3
-      #   with:
-      #     token: ${{ secrets.GITHUB_TOKEN }}
-      #     registry: "https://npm.pkg.github.com"
+      - id: version
+        uses: release-kit/semver@v2
+      - run: npm pkg set version=${{ steps.version.outputs.full }}
+      - uses: JS-DevTools/npm-publish@v3
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          registry: "https://npm.pkg.github.com"
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         id: artifact-upload
@@ -53,5 +53,4 @@ jobs:
         with:
           name: playground
           path: /otv-public-html
-      - run: ls -la /otv-public-html
 
