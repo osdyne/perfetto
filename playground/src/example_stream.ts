@@ -8,7 +8,9 @@ const timeout = (seconds: number): Promise<void> =>
 const chunkPath = (counter: number) =>
   `assets/data/trace_part${counter.toString().padStart(3, '0')}.pb`;
 
-(window as any).loadPerfetto('/perfetto/').then(async app => {
+const container = document.getElementById("app");
+
+(window as any).loadPerfetto(container, { rootUrl: '/perfetto/'}).then(async app => {
   for (let i = 0; i <= 16; i++) {
     const buffer = await loadFile(chunkPath(i));
     console.log(chunkPath(i), buffer);
