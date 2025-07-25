@@ -202,12 +202,12 @@ function setupExtentionPort(extensionLocalChannel: MessageChannel) {
   };
 }
 
-async function main(rootUrl: string) {
+async function main(container: HTMLElement, options: { rootUrl: string} ) {
   // Setup content security policy before anything else.
   // setupContentSecurityPolicy();
 
   AppImpl.initialize({
-    rootUrl,
+    rootUrl: options.rootUrl,
     initialRouteArgs: Router.parseUrl(window.location.href).args,
     clearState: () => globals.dispatch(Actions.clearState({})),
   });
@@ -280,7 +280,7 @@ async function main(rootUrl: string) {
     {passive: false},
   );
 
-  cssLoadPromise.then(() => onCssLoaded());
+  cssLoadPromise.then(() => onCssLoaded(container));
 
   if (globals.testing) {
     document.body.classList.add('testing');
@@ -294,7 +294,7 @@ async function main(rootUrl: string) {
   return AppImpl.instance;
 }
 
-function onCssLoaded() {
+function onCssLoaded(container: HTMLElement) {
   initCssConstants();
   // Clear all the contents of the initial page (e.g. the <pre> error message)
   // And replace it with the root <main> element which will be used by mithril.
@@ -316,7 +316,7 @@ function onCssLoaded() {
   router.onRouteChanged = routeChange;
 
   raf.domRedraw = () => {
-    m.render(document.body, m(UiMain, router.resolve()));
+    m.render(container, m(UiMain, router.resolve()));
   };
 
   if (
@@ -371,7 +371,7 @@ function onCssLoaded() {
   });
 
   // Force one initial render to get everything in place
-  m.render(document.body, m(UiMain, router.resolve()));
+  m.render(container, m(UiMain, router.resolve()));
 
   // TODO(primiano): this injection is to break a cirular dependency. See
   // comment in sql_table_tab_interface.ts. Remove once we add an extension
