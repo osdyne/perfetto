@@ -297,7 +297,7 @@ async function main(
     return new IdleDetector().waitForPerfettoIdle(ms);
   };
 
-  // Sidebar is still renders but there is no way to get a callback
+  // Sidebar is still rendered but there is no way to get a callback
   setTimeout(() => {
     globals.dispatch(
       Actions.setSidebar({visible: options.initialState.sidebarVisible}),
