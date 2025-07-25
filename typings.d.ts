@@ -20,6 +20,9 @@ export class AppImpl {
 
 declare global {
   interface Window {
-    loadPerfetto: (container: HTMLElement, options: { rootUrl: string }) => Promise<AppImpl>;
+    loadPerfetto: (
+      container: HTMLElement,
+      options: { rootUrl: string; initialState: { sidebarVisible: false; showFileHandling: false } }
+    ) => Promise<AppImpl>;
   }
 }

@@ -206,6 +206,9 @@ export interface State {
   // TODO(primiano): this is a hack to force-re-run controllers required for the
   // controller->managers migration. Remove once controllers are gone.
   forceRunControllers: number;
+
+  // Show the Open File Navigation
+  showFileHandling: boolean;
 }
 
 export declare type RecordMode =

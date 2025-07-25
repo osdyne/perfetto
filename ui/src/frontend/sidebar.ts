@@ -153,29 +153,33 @@ function insertSidebarMenuitems(
     });
 }
 
-function getSections(_trace?: Trace): Section[] {
+function getSections(trace?: Trace): Section[] {
   return [
-    // {
-    //   title: 'Navigation',
-    //   summary: 'Open or record a new trace',
-    //   expanded: true,
-    //   items: [
-    //     ...insertSidebarMenuitems('navigation'),
-    //     // {t: 'Record new trace', a: navigateRecord, i: 'fiber_smart_record'},
-    //     {
-    //       t: 'Widgets',
-    //       a: navigateWidgets,
-    //       i: 'widgets',
-    //       isVisible: () => WIDGETS_PAGE_IN_NAV_FLAG.get(),
-    //     },
-    //     {
-    //       t: 'Plugins',
-    //       a: navigatePlugins,
-    //       i: 'extension',
-    //       isVisible: () => PLUGINS_PAGE_IN_NAV_FLAG.get(),
-    //     },
-    //   ],
-    // },
+    ...(globals.state.showFileHandling
+      ? [
+          {
+            title: 'Navigation',
+            summary: 'Open or record a new trace',
+            expanded: true,
+            items: [
+              ...insertSidebarMenuitems('navigation'),
+              // {t: 'Record new trace', a: navigateRecord, i: 'fiber_smart_record'},
+              // {
+              //   t: 'Widgets',
+              //   a: navigateWidgets,
+              //   i: 'widgets',
+              //   isVisible: () => WIDGETS_PAGE_IN_NAV_FLAG.get(),
+              // },
+              // {
+              //   t: 'Plugins',
+              //   a: navigatePlugins,
+              //   i: 'extension',
+              //   isVisible: () => PLUGINS_PAGE_IN_NAV_FLAG.get(),
+              // },
+            ],
+          },
+        ]
+      : []),
 
     {
       title: 'Current Trace',
@@ -194,12 +198,16 @@ function getSections(_trace?: Trace): Section[] {
             globals.getConversionJobStatus('create_permalink') ===
             ConversionJobStatus.InProgress,
         },
-        // {
-        //   t: 'Download',
-        //   a: (e: Event) => trace && downloadTrace(e, trace),
-        //   i: 'file_download',
-        //   checkDownloadDisabled: true,
-        // },
+        ...(globals.state.showFileHandling
+          ? [
+              {
+                t: 'Download',
+                a: (e: Event) => trace && downloadTrace(e, trace),
+                i: 'file_download',
+                checkDownloadDisabled: true,
+              },
+            ]
+          : []),
         {t: 'Query (SQL)', a: navigateQuery, i: 'database'},
         {
           t: 'Insights',

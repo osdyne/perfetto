@@ -72,5 +72,7 @@ export function createEmptyState(): State {
 
     trackFilterTerm: undefined,
     forceRunControllers: 0,
+
+    showFileHandling: false
   };
 }

@@ -43,7 +43,7 @@ class Globals {
   private _initialFakeTrace?: TraceImpl;
   private _testing = false;
   private _dispatchMultiple?: DispatchMultiple = undefined;
-  private _store = createStore<State>(createEmptyState());
+  private _store: Store<State> = createStore<State>(createEmptyState());
   private _serviceWorkerController?: ServiceWorkerController = undefined;
   private _logging?: Analytics = undefined;
   private _isInternalUser: boolean | undefined = false;

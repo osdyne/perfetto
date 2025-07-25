@@ -155,6 +155,11 @@ export const StateActions = {
   runControllers(state: StateDraft, _args: {}) {
     state.forceRunControllers++;
   },
+
+  setShowFileHandling(state: StateDraft, args: {show: boolean}) {
+    state.showFileHandling = args.show;
+  }
+
 };
 
 // When we are on the frontend side, we don't really want to execute the

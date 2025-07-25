@@ -37,3 +37,4 @@ GTAGS
 node_modules
 perf.data*
 TAGS
+dist/

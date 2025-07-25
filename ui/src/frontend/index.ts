@@ -63,7 +63,8 @@ import {pageWithTrace} from './pages';
 import {AppImpl} from '../core/app_impl';
 import {setAddSqlTableTabImplFunction} from './sql_table_tab_interface';
 import {addSqlTableTabImpl} from './sql_table_tab';
-import {getServingRoot} from '../base/http_utils';
+import {createEmptyState} from 'src/common/empty_state';
+// import {getServingRoot} from '../base/http_utils';
 
 const EXTENSION_ID = 'lfmkphfpdbjijhpomgecfikhfohaoine';
 
@@ -202,7 +203,13 @@ function setupExtentionPort(extensionLocalChannel: MessageChannel) {
   };
 }
 
-async function main(container: HTMLElement, options: { rootUrl: string} ) {
+async function main(
+  container: HTMLElement,
+  options: {
+    rootUrl: string;
+    initialState: {sidebarVisible: boolean; showFileHandling: boolean};
+  },
+) {
   // Setup content security policy before anything else.
   // setupContentSecurityPolicy();
 
@@ -290,7 +297,19 @@ async function main(container: HTMLElement, options: { rootUrl: string} ) {
     return new IdleDetector().waitForPerfettoIdle(ms);
   };
 
-  dispatchEvent(new CustomEvent("perfetto_loaded", { detail: AppImpl.instance }));
+  // Sidebar is still rendered but there is no way to get a callback
+  setTimeout(() => {
+    globals.dispatch(
+      Actions.setSidebar({visible: options.initialState.sidebarVisible}),
+    );
+    globals.dispatch(
+      Actions.setShowFileHandling({
+        show: options.initialState.showFileHandling,
+      }),
+    );
+  }, 100);
+
+  dispatchEvent(new CustomEvent('perfetto_loaded', {detail: AppImpl.instance}));
   return AppImpl.instance;
 }
 
@@ -448,4 +467,4 @@ function scheduleRafAndRunControllersOnStateChange(
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-(window as any).loadPerfetto = main
+(window as any).loadPerfetto = main;

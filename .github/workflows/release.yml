@@ -1,3 +1,5 @@
+name: Release
+
 on:
   push:
     tags:
@@ -6,7 +8,7 @@ on:
 
 jobs:
   release:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, runner-linux-docker]
     permissions:
       contents: read
       packages: write
@@ -26,4 +28,29 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           registry: "https://npm.pkg.github.com"
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        id: artifact-upload
+        with:
+          name: playground
+          path: ./playground/dist
+          retention-days: 1
+          compression-level: 0
+
+
+  publish-playground:
+    runs-on: [self-hosted, docs-linux-docker]
+    needs: [release]
+    container:
+      image: ubuntu:noble
+      volumes:
+        - otv-public-html:/otv-public-html
+    steps:
+      - name: Cleanup
+        run: rm -rf /otv-public-html/*
+      - name: Download playground artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: playground
+          path: /otv-public-html
 
