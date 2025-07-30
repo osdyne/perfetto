@@ -168,7 +168,7 @@ function groupMiscNonAllowlistedTracks(trace: Trace, groupName: string): void {
     new RegExp('^Android logs$'),
   ];
 
-  const group = new TrackNode({title: groupName, isSummary: true});
+  const group = new TrackNode({title: groupName, isSummary: true, collapsed: false});
   for (const track of trace.workspace.children) {
     if (track.hasChildren) continue;
     let allowlisted = false;

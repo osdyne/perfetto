@@ -807,9 +807,9 @@ export abstract class BaseCounterTrack implements Track {
   }
 
   private async maybeRequestData(rawCountersKey: CacheKey) {
-    if (rawCountersKey.isCoveredBy(this.countersKey)) {
-      return; // We have the data already, no need to re-query.
-    }
+    // if (rawCountersKey.isCoveredBy(this.countersKey)) {
+    //   return; // We have the data already, no need to re-query.
+    // }
 
     const countersKey = rawCountersKey.normalize();
     if (!rawCountersKey.isCoveredBy(countersKey)) {
@@ -866,7 +866,7 @@ export abstract class BaseCounterTrack implements Track {
 
     this.countersKey = countersKey;
     this.counters = data;
-
+    console.log({ data })
     raf.scheduleRedraw();
   }
 
