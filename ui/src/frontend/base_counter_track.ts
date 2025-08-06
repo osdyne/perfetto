@@ -866,7 +866,7 @@ export abstract class BaseCounterTrack implements Track {
 
     this.countersKey = countersKey;
     this.counters = data;
-    console.log({ data })
+
     raf.scheduleRedraw();
   }
 
