@@ -84,7 +84,7 @@ export class Editor implements m.ClassComponent<EditorAttrs> {
       doc: attrs.initialText ?? '',
       extensions: [keymap.of(keymaps), oneDarkTheme, basicSetup],
       parent: dom,
-      dispatch,
+      dispatch
     });
 
     // Install the drag handler for the resize bar.
@@ -128,3 +128,60 @@ export class Editor implements m.ClassComponent<EditorAttrs> {
     return m('.pf-editor', m('.resize-handler'));
   }
 }
+
+/**
+ * Hacky fix for CodeMirror using legacy execCommand that broke in VSCode 1.94
+ * See: https://github.com/microsoft/vscode/issues/232692
+ * Copy from: https://github.com/stone-lyl/data-story/blob/61309fc1f088747d5f4f2076ea6d7fc72c77afe5/packages/ds-ext/src/app/fixCodeMirrorCopyPaste.ts
+ */
+function isInCodeMirrorEditor(el: Element | null) {
+  // check if the element is inside div.cm-editor
+  let depth = 0;
+  let maxDepth = 10;
+  while (el) {
+    if (el.classList.contains('cm-editor')) {
+      return true;
+    }
+    el = el.parentElement;
+    depth++;
+    if (depth > maxDepth) {
+      break;
+    }
+  }
+  return false;
+}
+
+function fixCopyPaste() {
+  // @ts-expect-error hacked is defined at runtime
+  if (document.execCommand.hacked) {
+    return;
+  }
+  const oldExecCmd = document.execCommand.bind(document);
+  const hackExecCommand: typeof document.execCommand = (cmd, ...args) => {
+    const el = document.activeElement;
+    if (el != null && isInCodeMirrorEditor(el)) {
+      if (cmd === 'paste') {
+        navigator.clipboard.readText().then(txt => {
+          const dt = new DataTransfer();
+          dt.setData('text/plain', txt);
+          el.dispatchEvent(new ClipboardEvent('paste', { clipboardData: dt }));
+        }).catch(console.error);
+
+        return true;
+      } else if (cmd === 'cut' || cmd === 'copy') {
+        const dt = new DataTransfer();
+        el.dispatchEvent(new ClipboardEvent(cmd, { clipboardData: dt }));
+        void navigator.clipboard.writeText(dt.getData('text/plain'));
+
+        return true;
+      }
+    }
+
+    return oldExecCmd(cmd, ...args);
+  };
+  // @ts-expect-error hacked is defined at runtime
+  hackExecCommand.hacked = true;
+  document.execCommand = hackExecCommand;
+}
+
+fixCopyPaste();
