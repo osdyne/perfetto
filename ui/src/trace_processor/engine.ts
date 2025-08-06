@@ -650,6 +650,7 @@ export class EngineProxy implements Engine, Disposable {
   // OTV Trace Streaming Extension
   onUpdate(listener: () => void) {
     this.engine.registerUpdateListener(listener);
+    listener();
 
     return () => {
       this.engine.removeUpdateListener(listener);
