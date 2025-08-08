@@ -56,7 +56,7 @@ function addDebugTrack(trace: Trace, trackName: string, uri: string): void {
   const title = trackName.trim() || `Debug Track ${debugTrackId}`;
   const track = new TrackNode({uri, title});
   trace.workspace.addChildFirst(track);
-  track.pin();
+  // track.pin();
 }
 
 export async function addPivotedTracks(
