@@ -3,7 +3,7 @@ on: [pull_request]
 
 jobs:
   review:
-    runs-on: [self-hosted, runner-linux-docker]
+    runs-on: [ubuntu-latest]
     permissions:
       pull-requests: write
       contents: read
