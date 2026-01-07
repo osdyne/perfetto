@@ -12,6 +12,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v3
@@ -33,7 +34,6 @@ jobs:
           path: ./playground/dist
           retention-days: 1
           compression-level: 0
-
 
   publish-playground:
     runs-on: [self-hosted, docs-linux-docker]
