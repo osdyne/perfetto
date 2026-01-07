@@ -24,10 +24,7 @@ jobs:
       - id: version
         uses: release-kit/semver@v2
       - run: npm pkg set version=${{ steps.version.outputs.full }}
-      - uses: JS-DevTools/npm-publish@v3
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          registry: "https://npm.pkg.github.com"
+      - run: npm publish
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         id: artifact-upload
