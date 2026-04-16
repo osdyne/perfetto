@@ -40,6 +40,7 @@ export interface TraceHttpRpcSource {
 
 export interface TraceArrayBufferSource extends PostedTrace {
   type: 'ARRAY_BUFFER';
+  buffer: ArrayBuffer;
   // See PostedTrace (which this interface extends).
 }
 

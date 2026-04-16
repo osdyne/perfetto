@@ -16,7 +16,7 @@ import m from 'mithril';
 import {assertExists, assertTrue} from '../base/logging';
 import {isString} from '../base/object_utils';
 import {getCurrentChannel} from '../common/channels';
-import {TRACE_SUFFIX} from '../common/constants';
+// import {TRACE_SUFFIX} from '../common/constants';
 import {ConversionJobStatus} from '../common/conversion_jobs';
 import {
   disableMetatracingAndGetTrace,
@@ -67,19 +67,19 @@ const HIRING_BANNER_FLAG = featureFlags.register({
   defaultValue: false,
 });
 
-const WIDGETS_PAGE_IN_NAV_FLAG = featureFlags.register({
-  id: 'showWidgetsPageInNav',
-  name: 'Show widgets page',
-  description: 'Show a link to the widgets page in the side bar.',
-  defaultValue: false,
-});
+// const WIDGETS_PAGE_IN_NAV_FLAG = featureFlags.register({
+//   id: 'showWidgetsPageInNav',
+//   name: 'Show widgets page',
+//   description: 'Show a link to the widgets page in the side bar.',
+//   defaultValue: false,
+// });
 
-const PLUGINS_PAGE_IN_NAV_FLAG = featureFlags.register({
-  id: 'showPluginsPageInNav',
-  name: 'Show plugins page',
-  description: 'Show a link to the plugins page in the side bar.',
-  defaultValue: false,
-});
+// const PLUGINS_PAGE_IN_NAV_FLAG = featureFlags.register({
+//   id: 'showPluginsPageInNav',
+//   name: 'Show plugins page',
+//   description: 'Show a link to the plugins page in the side bar.',
+//   defaultValue: false,
+// });
 
 const INSIGHTS_PAGE_IN_NAV_FLAG = featureFlags.register({
   id: 'showInsightsPageInNav',
@@ -198,10 +198,10 @@ function getSections(trace?: Trace): Section[] {
             globals.getConversionJobStatus('create_permalink') ===
             ConversionJobStatus.InProgress,
         },
-        ...(globals.state.showFileHandling
+        ...(trace
           ? [
               {
-                t: 'Download',
+                t: 'Save',
                 a: (e: Event) => trace && downloadTrace(e, trace),
                 i: 'file_download',
                 checkDownloadDisabled: true,
@@ -444,32 +444,22 @@ function downloadTrace(e: Event, trace: Trace) {
   e.preventDefault();
   if (!isDownloadable() || !isTraceLoaded()) return;
   globals.logging.logEvent('Trace Actions', 'Download trace');
-
   let url = '';
-  let fileName = `trace${TRACE_SUFFIX}`;
   const src = trace.traceInfo.source;
-  if (src.type === 'URL') {
-    url = src.url;
-    fileName = url.split('/').slice(-1)[0];
-  } else if (src.type === 'ARRAY_BUFFER') {
-    const blob = new Blob([src.buffer], {type: 'application/octet-stream'});
-    const inputFileName = window.prompt(
-      'Please enter a name for your file or leave blank',
-    );
-    if (inputFileName) {
-      fileName = `${inputFileName}.perfetto_trace.gz`;
-    } else if (src.fileName) {
-      fileName = src.fileName;
-    }
-    url = URL.createObjectURL(blob);
-  } else if (src.type === 'FILE') {
-    const file = src.file;
-    url = URL.createObjectURL(file);
-    fileName = file.name;
-  } else {
-    throw new Error(`Download from ${JSON.stringify(src)} is not supported`);
+
+  switch (src.type) {
+    case 'URL':
+      downloadUrl(url.split('/').slice(-1)[0], src.url);
+    break;
+    case 'ARRAY_BUFFER':
+      AppImpl.instance.handleDownload(src.buffer);
+    break;
+    case 'FILE':
+      downloadUrl(src.file.name, URL.createObjectURL(src.file));
+    break;
+    default:
+      throw new Error(`Download from ${JSON.stringify(src)} is not supported`);
   }
-  downloadUrl(fileName, url);
 }
 
 function highPrecisionTimersAvailable(): boolean {
@@ -709,6 +699,7 @@ export class Sidebar implements m.ClassComponent<OptionalTraceAttrs> {
   view({attrs}: m.CVnode<OptionalTraceAttrs>) {
     if (globals.hideSidebar) return null;
     const vdomSections = [];
+
     for (const section of getSections(attrs.trace)) {
       if (section.hideIfNoTraceLoaded && !isTraceLoaded()) continue;
       const vdomItems = [];

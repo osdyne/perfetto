@@ -16,6 +16,7 @@ export interface PostedTrace {
 export class AppImpl {
   openTraceFromBuffer(postMessageArgs: PostedTrace): void;
   streamTraceFromBuffer(postMessageArgs: PostedTrace): Promise<void>;
+  onDownload(cb: (data: ArrayBuffer) => void): void;
 }
 
 declare global {
