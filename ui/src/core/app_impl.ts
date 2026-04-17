@@ -257,10 +257,40 @@ export class AppImpl implements App {
     if (!this.currentTrace) {
       await beginStream(this, {type: 'ARRAY_BUFFER', ...postMessageArgs});
     } else {
+      let buffer: ArrayBuffer;
+      if ('buffer' in this.currentTrace.traceCtx.traceInfo.source) {
+        const combinedBuffer = new Uint8Array(
+          this.currentTrace.traceCtx.traceInfo.source.buffer.byteLength +
+            postMessageArgs.buffer.byteLength,
+        );
+        combinedBuffer.set(
+          new Uint8Array(this.currentTrace.traceCtx.traceInfo.source.buffer),
+          0,
+        );
+        combinedBuffer.set(
+          new Uint8Array(postMessageArgs.buffer),
+          this.currentTrace.traceCtx.traceInfo.source.buffer.byteLength,
+        );
+        buffer = combinedBuffer.buffer;
+      } else {
+        buffer = postMessageArgs.buffer;
+      }
+
       await streamTrace(this.currentTrace, {
         type: 'ARRAY_BUFFER',
-        ...postMessageArgs,
+        ...{
+          ...postMessageArgs,
+          buffer,
+        },
       });
     }
+  }
+
+  handleDownload: (data: ArrayBuffer) => void = (_data) => {
+    console.info('handleDownload is not implemented');
+  };
+
+  onDownload(cb: (data: ArrayBuffer) => void) {
+    this.handleDownload = cb;
   }
 }

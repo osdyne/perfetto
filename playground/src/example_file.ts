@@ -1,3 +1,5 @@
+import { downloadTrace } from "./utils";
+
 window.addEventListener('load', () => {
   const app = document.getElementById('app');
   (window as any)
@@ -11,5 +13,7 @@ window.addEventListener('load', () => {
         .then((buffer) => {
           app.openTraceFromBuffer({ buffer, title: 'File' });
         });
+
+        app.onDownload(downloadTrace);
     });
 });
