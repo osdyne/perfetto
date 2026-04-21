@@ -258,7 +258,7 @@ async function main(
 
   const extensionLocalChannel = new MessageChannel();
 
-  initWasm(globals.root);
+  await initWasm(globals.root);
   initController(extensionLocalChannel.port1);
 
   // These need to be set before globals.initialize.

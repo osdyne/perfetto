@@ -64,5 +64,10 @@ declare namespace Wasm {
     printErr(s: string): void;
     onRuntimeInitialized(): void;
     onAbort?(): void;
+    // https://emscripten.org/docs/api_reference/module.html#Module.instantiateWasm
+    instantiateWasm?(
+      imports: WebAssembly.Imports,
+      successCallback: (instance: WebAssembly.Instance) => void,
+    ): WebAssembly.Exports;
   }
 }

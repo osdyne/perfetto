@@ -169,7 +169,6 @@ async function createEngine(
   // } else {
     console.log('Opening trace using built-in WASM engine');
     engine = new WasmEngineProxy(engineId);
-    await engine.connect();
     engine.resetTraceProcessor({
       cropTrackEvents: CROP_TRACK_EVENTS_FLAG.get(),
       ingestFtraceInRawTable: INGEST_FTRACE_IN_RAW_TABLE_FLAG.get(),
