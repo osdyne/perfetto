@@ -42,16 +42,21 @@ export class WasmBridge {
   private lastStderr: string[] = [];
   private messagePort?: MessagePort;
 
-  constructor(wasmBinary?: string) {
+  constructor(wasmModule: WebAssembly.Module) {
     this.aborted = false;
     const deferredRuntimeInitialized = defer<void>();
-    // initTraceProcessor added a property called `wasmBinary` but they did not update the typings -.-
-    this.connection = (initTraceProcessor as any)({
+    this.connection = initTraceProcessor({
       locateFile: (s: string) => s,
       print: (line: string) => console.log(line),
       printErr: (line: string) => this.appendAndLogErr(line),
       onRuntimeInitialized: () => deferredRuntimeInitialized.resolve(),
-      wasmBinary
+      instantiateWasm: (imports, successCallback) => {
+        const instance = new WebAssembly.Instance(wasmModule, imports);
+        
+        successCallback(instance);
+
+        return instance.exports;
+      },
     });
     this.whenInitialized = deferredRuntimeInitialized.then(() => {
       const fn = this.connection.addFunction(this.onReply.bind(this), 'vii');

@@ -23,24 +23,25 @@ let bridge: WasmBridge | null = null;
 // 1. The Worker (self.onmessage) handler.
 // 2. The MessagePort handler.
 // The sequence of actions is the following:
-// 1. The frontend does one postMessage({port: MessagePort}) on the Worker
-//    scope. This message transfers the MessagePort.
-//    This is the only postMessage we'll ever receive here.
-// 2. All the other messages (i.e. the TraceProcessor RPC binary pipe) will be
+// 1. The frontend posts {wasmModule} to the worker.
+// 2. The worker instantiates the bridge and posts {ready} back.
+// 3. The frontend posts a MessagePort to the worker (only after receiving {ready}).
+// 4. All the other messages (i.e. the TraceProcessor RPC binary pipe) will be
 //    received on the MessagePort.
 
-// Receives the boostrap message from the frontend with the MessagePort.
-selfWorker.onmessage = (msg: MessageEvent) => {
-  // wait for the wasmBinary from the Worker Host
-  if (!bridge && msg.data?.wasmBinary) {
-    bridge = new WasmBridge(msg.data.wasmBinary);
+// Receives the bootstrap message from the frontend with the MessagePort.
+selfWorker.onmessage = async (msg: MessageEvent) => {
+  if (!bridge && msg.data?.wasmModule) {
+    try {
+      bridge = new WasmBridge(msg.data.wasmModule as WebAssembly.Module);
+      await bridge.whenInitialized;
+      selfWorker.postMessage({ready: true});
+    } catch (e: unknown) {
+      selfWorker.postMessage({error: String(e)});
+    }
+
     return;
   }
 
-  if (!bridge) {
-    return;
-  }
-
-  const port = msg.data as MessagePort;
-  bridge.initialize(port);
+  bridge?.initialize(msg.data as MessagePort);
 };

@@ -16,23 +16,42 @@ import {assertTrue} from '../base/logging';
 import {EngineBase} from '../trace_processor/engine';
 
 // let bundlePath: string;
-let idleWasmWorker: Promise<Worker>;
+let idleWasmWorker: Worker | null;
 
-export function initWasm(root: string) {
-  idleWasmWorker = fetch(root + 'engine_bundle.js')
-    .then((result) => result.blob())
-    .then((blob) => {
-      const blobUrl = URL.createObjectURL(blob);
-      return new Worker(blobUrl);
-    })
-    .then(async (worker) => {
-      const wasmBinary = await fetch(root + 'trace_processor.wasm').then(
-        (result) => result.arrayBuffer(),
-      );
-      worker.postMessage({wasmBinary});
+export async function initWasm(root: string): Promise<void> {
+  const bundleResult = await fetch(root + 'engine_bundle.js');
 
-      return worker;
+  if (!bundleResult.ok) {
+    throw new Error(`Failed to fetch engine_bundle.js: ${bundleResult.status} ${bundleResult.statusText}`);
+  }
+  
+  const worker = new Worker(URL.createObjectURL(await bundleResult.blob()));
+
+  try {
+    // Compile on the main thread while the worker is starting up.
+    const wasmModule = await WebAssembly.compileStreaming(
+      fetch(root + 'trace_processor.wasm')
+    );
+
+    worker.postMessage({wasmModule});
+
+    // Wait for the worker to signal WASM bridge initialization
+    await new Promise<void>((resolve, reject) => {
+      worker.addEventListener('message', (msg: MessageEvent) => {
+        if (msg.data?.ready) { 
+          resolve();
+        } else if (msg.data?.error) {
+          reject(new Error(msg.data.error));
+        }
+      }, {once: true});
     });
+
+    idleWasmWorker = worker;
+  } catch (err: unknown) {
+    worker.terminate();
+  
+    console.error('Failed to initialize WASM bridge:', err);
+  }
 }
 
 /**
@@ -48,18 +67,16 @@ export class WasmEngineProxy extends EngineBase implements Disposable {
   constructor(id: string) {
     super();
     this.id = id;
-  }
 
-  async connect() {
-    await idleWasmWorker.then((worker) => {
-      const channel = new MessageChannel();
-      const port1 = channel.port1;
-      this.port = channel.port2;
+    if (!idleWasmWorker) throw new Error('Worker failed to initialize. Check previous errors.');
+    
+    const channel = new MessageChannel();
+    const port1 = channel.port1;
+    this.port = channel.port2;
 
-      this.worker = worker;
-      this.worker.postMessage(port1, [port1]);
-      this.port.onmessage = this.onMessage.bind(this);
-    });
+    this.worker = idleWasmWorker;
+    this.worker.postMessage(port1, [port1]);
+    this.port.onmessage = this.onMessage.bind(this);
   }
 
   onMessage(m: MessageEvent) {
